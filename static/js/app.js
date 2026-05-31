@@ -1,3 +1,9 @@
+// Sidebar collapse — persisted across pages via <html> class set early in <head>
+function toggleSidebar() {
+  const collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+  localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+}
+
 function refreshPrices(btn) {
   const original = btn.textContent;
   btn.textContent = '↻ Refreshing…';

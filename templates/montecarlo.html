@@ -1,0 +1,137 @@
+{% extends 'base.html' %}
+{% block title %}Monte Carlo — Portfolio Tracker{% endblock %}
+{% block page_title %}Monte Carlo{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">Simulation Parameters</div>
+  <form method="GET" action="{{ url_for('montecarlo') }}">
+    <div class="sim-form">
+      <div class="form-group">
+        <label>Starting Value (CAD)</label>
+        <input class="form-input mono" value="{{ '%.0f' % current_value }}" readonly style="color:var(--text-dim);cursor:default">
+      </div>
+      <div class="form-group">
+        <label>Monthly Contribution</label>
+        <input class="form-input mono" name="monthly_contrib" type="number" step="50" value="{{ monthly_contrib | int }}">
+      </div>
+      <div class="form-group">
+        <label>Time Horizon (years)</label>
+        <input class="form-input mono" name="years" type="number" min="1" max="50" value="{{ years }}">
+      </div>
+      <div class="form-group">
+        <label>Mean Annual Return %</label>
+        <input class="form-input mono" name="mean_return" type="number" step="0.5" min="-10" max="30" value="{{ mean_return }}">
+      </div>
+      <div class="form-group">
+        <label>Std Deviation % / year</label>
+        <input class="form-input mono" name="std_dev" type="number" step="0.5" min="1" max="60" value="{{ std_dev }}">
+      </div>
+      <div style="align-self:flex-end">
+        <button type="submit" class="btn btn-primary">Run ({{ mc.n_sims }} sims)</button>
+      </div>
+    </div>
+  </form>
+  <div style="padding:0 20px 12px;font-size:.72rem;color:var(--text-muted)">
+    Each run uses {{ mc.n_sims }} independent simulations with monthly lognormal returns. Results vary on each run — this is expected.
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Simulation Fan Chart — {{ years }}-Year Outlook</div>
+  <div class="chart-wrap" style="max-height:340px;padding:20px 24px">
+    <canvas id="mcChart"></canvas>
+  </div>
+</div>
+
+<div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+  <div class="stat-card">
+    <div class="stat-label">10th Percentile</div>
+    <div class="stat-value text-red">{{ mc.final_p10 | cad }}</div>
+    <div class="stat-sub text-dim">pessimistic outcome</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Median (50th)</div>
+    <div class="stat-value" style="color:var(--accent)">{{ mc.final_p50 | cad }}</div>
+    <div class="stat-sub text-dim">most likely outcome</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">90th Percentile</div>
+    <div class="stat-value text-green">{{ mc.final_p90 | cad }}</div>
+    <div class="stat-sub text-dim">optimistic outcome</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const labels = {{ mc.labels | tojson }};
+const p10 = {{ mc.p10 | tojson }};
+const p50 = {{ mc.p50 | tojson }};
+const p90 = {{ mc.p90 | tojson }};
+
+new Chart(document.getElementById('mcChart'), {
+  type: 'line',
+  data: {
+    labels,
+    datasets: [
+      {
+        label: '90th Percentile',
+        data: p90,
+        borderColor: 'rgba(0,230,118,0.5)',
+        backgroundColor: 'rgba(0,230,118,0.08)',
+        fill: { target: 1 },
+        borderWidth: 1.5,
+        borderDash: [5, 3],
+        pointRadius: 0,
+        tension: 0.1,
+      },
+      {
+        label: '10th Percentile',
+        data: p10,
+        borderColor: 'rgba(255,77,77,0.5)',
+        fill: false,
+        borderWidth: 1.5,
+        borderDash: [5, 3],
+        pointRadius: 0,
+        tension: 0.1,
+      },
+      {
+        label: 'Median (50th)',
+        data: p50,
+        borderColor: '#00c8f0',
+        fill: false,
+        borderWidth: 2.5,
+        pointRadius: 0,
+        tension: 0.1,
+      },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#c8d8e8', font: { size: 11 } } },
+      tooltip: {
+        mode: 'index', intersect: false,
+        callbacks: { label: ctx => ` ${ctx.dataset.label}: $${ctx.raw.toLocaleString()}` }
+      }
+    },
+    scales: {
+      x: {
+        grid: { color: '#1a3050' },
+        ticks: {
+          color: '#5a7a96',
+          callback: (val, idx) => labels[idx] || '',
+          maxTicksLimit: 15,
+          maxRotation: 0,
+        }
+      },
+      y: {
+        grid: { color: '#1a3050' },
+        ticks: { color: '#5a7a96', callback: v => '$' + (v >= 1e6 ? (v/1e6).toFixed(1)+'M' : (v/1000).toFixed(0)+'k') }
+      }
+    }
+  }
+});
+</script>
+{% endblock %}

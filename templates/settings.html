@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% block title %}Settings — Portfolio Tracker{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+<form method="POST" action="{{ url_for('settings') }}">
+  <div class="card" style="margin-bottom:20px">
+
+    <div class="settings-section">
+      <div class="settings-section-title">FX Rate (USD/CAD)</div>
+      <div class="form-row" style="padding:0;margin-bottom:14px">
+        <div class="form-group">
+          <label>Live Rate (from yfinance)</label>
+          <input class="form-input mono" value="{{ fx_rate }}" readonly style="color:var(--text-dim);cursor:default">
+        </div>
+        <div class="form-group">
+          <label>Manual Override</label>
+          <select class="form-input" name="fx_manual" id="fxManualToggle" onchange="toggleManual()">
+            <option value="0" {% if fx_manual != '1' %}selected{% endif %}>Use live rate</option>
+            <option value="1" {% if fx_manual == '1' %}selected{% endif %}>Use manual rate</option>
+          </select>
+        </div>
+        <div class="form-group" id="manualRateField" style="{% if fx_manual != '1' %}display:none{% endif %}">
+          <label>Manual Rate</label>
+          <input class="form-input mono" name="fx_manual_rate" type="number" step="0.0001" placeholder="1.3650" value="{{ fx_manual_rate }}">
+        </div>
+      </div>
+      <p style="font-size:.75rem;color:var(--text-muted)">Manual override stops the background thread from updating the FX rate. Use if yfinance data is stale or you need a specific rate for calculations.</p>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Contribution Room</div>
+      <div class="form-row" style="padding:0">
+        <div class="form-group">
+          <label>TFSA Room ($)</label>
+          <input class="form-input mono" name="room_tfsa" type="number" step="0.01" placeholder="0.00" value="{{ room_tfsa }}">
+        </div>
+        <div class="form-group">
+          <label>RRSP Deduction Limit ($)</label>
+          <input class="form-input mono" name="room_rrsp" type="number" step="0.01" placeholder="0.00" value="{{ room_rrsp }}">
+        </div>
+        <div class="form-group">
+          <label>FHSA Room ($)</label>
+          <input class="form-input mono" name="room_fhsa" type="number" step="0.01" placeholder="0.00" value="{{ room_fhsa }}">
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Target Allocations — Rebalancer</div>
+      <p style="font-size:.75rem;color:var(--text-muted);margin-bottom:14px">Set the % of your total portfolio you want in each account. These power the Rebalancer. They should sum to 100%.</p>
+      <div class="form-row" style="padding:0">
+        {% set alloc_map = [
+          ('target_alloc_tfsa', 'TFSA %', target_alloc_tfsa),
+          ('target_alloc_rrsp', 'RRSP %', target_alloc_rrsp),
+          ('target_alloc_fhsa', 'FHSA %', target_alloc_fhsa),
+          ('target_alloc_non_reg', 'Non-Reg %', target_alloc_non_reg),
+        ] %}
+        {% for key, label, val in alloc_map %}
+        <div class="form-group" style="min-width:110px">
+          <label>{{ label }}</label>
+          <input class="form-input mono" name="{{ key }}" type="number" step="0.1" min="0" max="100" placeholder="0" value="{{ val }}">
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-section-title">Auto-Import</div>
+      <p style="font-size:.75rem;color:var(--text-muted);margin-bottom:14px">Point to a folder and any new TD/CIBC CSV files dropped in will be imported automatically every 5 minutes.</p>
+      <div class="form-row" style="padding:0">
+        <div class="form-group" style="min-width:360px">
+          <label>Watch Folder (full path)</label>
+          <input class="form-input mono" name="auto_import_folder" placeholder="C:\Users\you\Downloads\broker-exports" value="{{ auto_import_folder }}" style="font-size:.75rem">
+        </div>
+      </div>
+    </div>
+
+    <div style="padding:16px 20px">
+      <button type="submit" class="btn btn-primary">Save Settings</button>
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleManual() {
+  const manual = document.getElementById('fxManualToggle').value === '1';
+  document.getElementById('manualRateField').style.display = manual ? 'block' : 'none';
+}
+</script>
+{% endblock %}

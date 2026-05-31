@@ -49,9 +49,9 @@ class GIC(db.Model):
     __tablename__ = 'gics'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100))
+    institution = db.Column(db.String(100))
     account = db.Column(db.String(50))
     principal = db.Column(db.Float, default=0)
-    term_months = db.Column(db.Integer, default=12)
     rate = db.Column(db.Float, default=0)
     start_date = db.Column(db.Date)
     maturity_date = db.Column(db.Date)
@@ -66,4 +66,16 @@ class WatchlistItem(db.Model):
     sector = db.Column(db.String(50))
     currency = db.Column(db.String(5), default='CAD')
     target_price = db.Column(db.Float)
+    added_price = db.Column(db.Float)
+    added_date = db.Column(db.Date)
     notes = db.Column(db.String(300))
+
+
+class PortfolioSnapshot(db.Model):
+    __tablename__ = 'portfolio_snapshots'
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False, unique=True)
+    total_book = db.Column(db.Float, default=0)
+    total_market = db.Column(db.Float, default=0)
+    total_cash = db.Column(db.Float, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

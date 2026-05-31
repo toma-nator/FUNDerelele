@@ -6,8 +6,17 @@ from datetime import datetime
 import yfinance as yf
 
 
-def get_fx_rate(app_context=None):
+def get_fx_rate():
     from models import Setting
+    # Manual override takes priority
+    manual = Setting.query.get('fx_manual')
+    if manual and manual.value == '1':
+        manual_rate = Setting.query.get('fx_manual_rate')
+        if manual_rate and manual_rate.value:
+            try:
+                return float(manual_rate.value)
+            except Exception:
+                pass
     setting = Setting.query.get('fx_usd_cad')
     if setting:
         try:
@@ -71,12 +80,15 @@ def refresh_prices(tickers):
             ))
 
     if 'USDCAD=X' in price_data:
-        fx = price_data['USDCAD=X']['price']
-        setting = Setting.query.get('fx_usd_cad')
-        if setting:
-            setting.value = str(fx)
-        else:
-            db.session.add(Setting(key='fx_usd_cad', value=str(fx)))
+        # Only update stored FX if not using manual override
+        manual = Setting.query.get('fx_manual')
+        if not (manual and manual.value == '1'):
+            fx = price_data['USDCAD=X']['price']
+            setting = Setting.query.get('fx_usd_cad')
+            if setting:
+                setting.value = str(fx)
+            else:
+                db.session.add(Setting(key='fx_usd_cad', value=str(fx)))
 
     db.session.commit()
 
@@ -86,26 +98,67 @@ def get_cached_price(ticker):
     return PriceCache.query.get(ticker)
 
 
+def _check_auto_import(app):
+    import json
+    from models import Setting, db
+    try:
+        folder_setting = Setting.query.get('auto_import_folder')
+        if not folder_setting or not folder_setting.value:
+            return
+        folder = folder_setting.value.strip()
+        if not os.path.isdir(folder):
+            return
+
+        processed_setting = Setting.query.get('auto_import_processed')
+        processed = set(json.loads(processed_setting.value)) if processed_setting and processed_setting.value else set()
+
+        new_files = sorted(
+            f for f in os.listdir(folder)
+            if f.lower().endswith('.csv') and f not in processed
+        )
+
+        if not new_files:
+            return
+
+        from importers import parse_file_path
+        for fname in new_files:
+            fpath = os.path.join(folder, fname)
+            try:
+                count = parse_file_path(fpath)
+                processed.add(fname)
+                print(f'[auto-import] {fname}: {count} transactions imported')
+            except Exception as e:
+                print(f'[auto-import] {fname}: {e}')
+
+        ps = Setting.query.get('auto_import_processed')
+        if ps:
+            ps.value = json.dumps(list(processed))
+        else:
+            db.session.add(Setting(key='auto_import_processed', value=json.dumps(list(processed))))
+        db.session.commit()
+    except Exception as e:
+        print(f'[auto-import check] {e}')
+
+
 def start_price_refresh(app):
-    # In debug+reloader mode, only run in the reloader child process
     if app.debug and os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
         return
 
     def refresh_loop():
-        time.sleep(5)  # Short initial delay so DB is ready
+        time.sleep(5)
         while True:
             try:
                 with app.app_context():
-                    from models import Transaction
-                    tickers = [
-                        row[0]
-                        for row in Transaction.query.with_entities(Transaction.ticker).distinct()
-                    ]
-                    if tickers:
-                        refresh_prices(tickers)
+                    from models import Transaction, WatchlistItem
+                    txn_tickers = [r[0] for r in Transaction.query.with_entities(Transaction.ticker).distinct()]
+                    watch_tickers = [r[0] for r in WatchlistItem.query.with_entities(WatchlistItem.ticker).distinct() if r[0]]
+                    all_tickers = list(set(txn_tickers + watch_tickers))
+                    if all_tickers:
+                        refresh_prices(all_tickers)
+                    _check_auto_import(app)
             except Exception as e:
                 print(f'[price refresh] {e}')
-            time.sleep(300)  # 5 minutes
+            time.sleep(300)
 
     thread = threading.Thread(target=refresh_loop, daemon=True)
     thread.start()

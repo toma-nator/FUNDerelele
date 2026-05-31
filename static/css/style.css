@@ -55,7 +55,18 @@ body {
   top: 0; left: 0; bottom: 0;
   overflow-y: auto;
   z-index: 100;
+  transition: transform .22s ease;
 }
+
+.sidebar-collapsed .sidebar {
+  transform: translateX(-100%);
+}
+
+.sidebar-collapsed .main {
+  margin-left: 0;
+}
+
+.main { transition: margin-left .22s ease; }
 
 .sidebar-brand {
   display: flex;
@@ -169,10 +180,39 @@ body {
   color: var(--text);
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+/* Sidebar toggle button */
+.btn-sidebar-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  cursor: pointer;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  font-size: .95rem;
+  flex-shrink: 0;
+  transition: color .15s, border-color .15s, background .15s;
+}
+
+.btn-sidebar-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: rgba(0,200,240,.06);
 }
 
 .updated-at {
@@ -606,3 +646,99 @@ body {
 ::-webkit-scrollbar-track { background: var(--bg-base); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
+
+/* ── Progress bar (GICs) ── */
+.progress-bar {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  min-width: 80px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width .3s;
+}
+
+.progress-fill.matured { background: var(--green); }
+
+/* ── Settings sections ── */
+.settings-section {
+  padding: 20px;
+  border-bottom: 1px solid var(--border-sub);
+}
+
+.settings-section:last-child { border-bottom: none; }
+
+.settings-section-title {
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 14px;
+}
+
+/* ── Rebalancer drift badges ── */
+.drift-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: .7rem;
+  font-weight: 600;
+  font-family: var(--mono);
+}
+
+.drift-over  { background: var(--red-bg);               color: var(--red);    }
+.drift-under { background: var(--green-bg);              color: var(--green);  }
+.drift-ok    { background: rgba(0,200,240,.1);           color: var(--accent); }
+
+/* ── Simulation input form (Projections / Monte Carlo) ── */
+.sim-form {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-sub);
+  align-items: flex-end;
+}
+
+.sim-form .form-group { min-width: 150px; }
+
+/* ── Holdings: table scrolls inside viewport, page itself doesn't ── */
+.holdings-layout {
+  overflow: hidden;
+}
+
+.holdings-layout .main {
+  height: 100vh;
+  overflow: hidden;
+  min-height: unset;
+}
+
+.holdings-layout .content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 16px;
+}
+
+.holdings-layout .card {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+
+.holdings-layout .table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}

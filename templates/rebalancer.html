@@ -1,0 +1,106 @@
+{% extends 'base.html' %}
+{% block title %}Rebalancer — Portfolio Tracker{% endblock %}
+{% block page_title %}Rebalancer{% endblock %}
+
+{% block content %}
+{% if not data.targets_set %}
+<div class="flash flash-info" style="margin-bottom:20px">
+  No target allocations set. Go to <a href="{{ url_for('settings') }}" style="color:var(--accent)">Settings</a> to configure your target % per account, then return here.
+</div>
+{% endif %}
+
+<div class="stat-grid" style="grid-template-columns:repeat(2,1fr)">
+  <div class="stat-card">
+    <div class="stat-label">Total Portfolio</div>
+    <div class="stat-value">{{ data.total_portfolio | cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Accounts</div>
+    <div class="stat-value">{{ data.rows | length }}</div>
+  </div>
+</div>
+
+<div class="two-col">
+  <div class="card">
+    <div class="card-header">Current Allocation</div>
+    <div class="chart-wrap" style="max-height:260px">
+      <canvas id="currentChart"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Target Allocation</div>
+    <div class="chart-wrap" style="max-height:260px">
+      <canvas id="targetChart"></canvas>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Drift Analysis</div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Account</th>
+          <th class="r">Current $</th>
+          <th class="r">Current %</th>
+          <th class="r">Target %</th>
+          <th class="r">Target $</th>
+          <th class="r">Drift $</th>
+          <th class="r">Drift %</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in data.rows %}
+        {% set drift_class = 'drift-ok' if row.drift_pct | abs < 1 else ('drift-over' if row.drift_pct > 0 else 'drift-under') %}
+        <tr>
+          <td><span class="acct-badge acct-{{ row.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ row.account }}</span></td>
+          <td class="r mono">{{ row.current_value | cad }}</td>
+          <td class="r mono">{{ '%.1f' % row.current_pct }}%</td>
+          <td class="r mono text-dim">{{ '%.1f' % row.target_pct }}%</td>
+          <td class="r mono text-dim">{{ row.target_value | cad }}</td>
+          <td class="r mono {{ row.drift | gl_class }}">{{ row.drift | signed_cad }}</td>
+          <td class="r"><span class="drift-badge {{ drift_class }}">{{ '+' if row.drift_pct > 0 else '' }}{{ '%.1f' % row.drift_pct }}%</span></td>
+          <td style="font-size:.75rem;color:var(--text-dim)">
+            {% if row.target_pct > 0 %}
+              {% if row.drift_pct > 1 %}Over — consider rebalancing out{% elif row.drift_pct < -1 %}Under — consider adding {{ (row.target_value - row.current_value) | cad }}{% else %}On target{% endif %}
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const COLORS = ['#00c8f0','#9b72f5','#00e676','#ff8c42','#ffd740','#ff4d4d'];
+const labels = {{ data.chart_labels | tojson }};
+const current = {{ data.chart_current | tojson }};
+const target = {{ data.chart_target | tojson }};
+
+function makeDonut(id, data) {
+  new Chart(document.getElementById(id), {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{ data, backgroundColor: COLORS.slice(0, labels.length), borderColor: '#0c1929', borderWidth: 2 }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { color: '#c8d8e8', font: { size: 11 }, padding: 12 } },
+        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw.toFixed(1)}%` } }
+      },
+      cutout: '60%',
+    }
+  });
+}
+
+makeDonut('currentChart', current);
+makeDonut('targetChart', target);
+</script>
+{% endblock %}

@@ -1,0 +1,127 @@
+{% extends 'base.html' %}
+{% block title %}Performance — Portfolio Tracker{% endblock %}
+{% block page_title %}Performance{% endblock %}
+
+{% block content %}
+{% if not perf.snapshots %}
+<div class="card">
+  <div style="padding:40px;text-align:center">
+    <div style="font-size:2rem;margin-bottom:16px;color:var(--text-muted)">◈</div>
+    <div style="font-size:.9rem;color:var(--text-dim);margin-bottom:20px">No performance history yet. Take your first snapshot to start tracking your portfolio over time.</div>
+    <form method="POST" action="{{ url_for('performance_snapshot') }}">
+      <button type="submit" class="btn btn-primary">+ Take First Snapshot</button>
+    </form>
+  </div>
+</div>
+{% else %}
+
+<div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+  <div class="stat-card">
+    <div class="stat-label">Current Value</div>
+    <div class="stat-value">{{ perf.last_value | cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Return</div>
+    <div class="stat-value {{ perf.total_return | gl_class }}">{{ perf.total_return | pct }}</div>
+    <div class="stat-sub text-dim">since {{ perf.first_date }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">CAGR</div>
+    <div class="stat-value {{ perf.cagr | gl_class }}">
+      {% if perf.cagr is not none %}{{ perf.cagr | pct }}{% else %}<span class="text-dim">—</span>{% endif %}
+    </div>
+    <div class="stat-sub text-dim">annualized</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Snapshots</div>
+    <div class="stat-value">{{ perf.snapshots | length }}</div>
+    <div class="stat-sub">
+      <form method="POST" action="{{ url_for('performance_snapshot') }}" style="display:inline">
+        <button type="submit" class="btn btn-sm" style="margin-top:6px">+ Snapshot Now</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Portfolio Value Over Time</div>
+  <div class="chart-wrap" style="max-height:300px;padding:20px 24px">
+    <canvas id="perfChart"></canvas>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Recent Monthly Snapshots</div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Period</th>
+          <th class="r">Market Value</th>
+          <th class="r">Monthly Return</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in perf.monthly_returns %}
+        <tr>
+          <td class="mono text-dim">{{ row.label }}</td>
+          <td class="r mono">{{ row.value | cad }}</td>
+          <td class="r mono {{ row.return_pct | gl_class }}">{{ row.return_pct | pct }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if perf.snapshots %}
+<script>
+const labels = {{ perf.labels | tojson }};
+const values = {{ perf.values | tojson }};
+const bookVals = {{ perf.book_values | tojson }};
+
+new Chart(document.getElementById('perfChart'), {
+  type: 'line',
+  data: {
+    labels,
+    datasets: [
+      {
+        label: 'Market Value',
+        data: values,
+        borderColor: '#00c8f0',
+        backgroundColor: 'rgba(0,200,240,.08)',
+        fill: true,
+        tension: 0.2,
+        pointRadius: labels.length > 20 ? 0 : 3,
+        borderWidth: 2,
+      },
+      {
+        label: 'Book Value',
+        data: bookVals,
+        borderColor: '#5a7a96',
+        fill: false,
+        tension: 0.2,
+        pointRadius: 0,
+        borderWidth: 1.5,
+        borderDash: [4, 4],
+      }
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#c8d8e8', font: { size: 11 } } },
+      tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: $${ctx.raw.toLocaleString()}` } }
+    },
+    scales: {
+      x: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', maxRotation: 0 } },
+      y: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: v => '$' + (v/1000).toFixed(0) + 'k' } }
+    }
+  }
+});
+</script>
+{% endif %}
+{% endblock %}

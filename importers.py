@@ -8,6 +8,22 @@ from datetime import datetime
 from models import db, Transaction, Account
 
 
+def parse_file_path(filepath, broker='auto'):
+    with open(filepath, 'r', encoding='utf-8-sig', errors='replace') as f:
+        content = f.read()
+    rows = list(csv.DictReader(io.StringIO(content)))
+    if not rows:
+        raise ValueError('File is empty or not a valid CSV.')
+    if broker == 'auto':
+        broker = _detect_broker(rows[0])
+    if broker == 'td':
+        return _import_td(rows)
+    elif broker == 'cibc':
+        return _import_cibc(rows)
+    else:
+        raise ValueError(f'Unknown broker format: {broker}')
+
+
 def parse_upload(file_storage, broker='auto'):
     content = file_storage.read().decode('utf-8-sig', errors='replace')
     rows = list(csv.DictReader(io.StringIO(content)))

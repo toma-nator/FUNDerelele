@@ -1,0 +1,149 @@
+{% extends 'base.html' %}
+{% block title %}GICs — Portfolio Tracker{% endblock %}
+{% block page_title %}GICs{% endblock %}
+
+{% block content %}
+<div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+  <div class="stat-card">
+    <div class="stat-label">Total Principal</div>
+    <div class="stat-value">{{ data.total_principal | cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Interest Accrued</div>
+    <div class="stat-value text-green">{{ data.total_interest | cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total at Maturity</div>
+    <div class="stat-value">{{ data.total_at_maturity | cad }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header toggle-header" onclick="togglePanel('addForm','addArrow')">
+    Add GIC
+    <span class="toggle-arrow" id="addArrow">▼</span>
+  </div>
+  <div id="addForm" style="display:none">
+    <form method="POST" action="{{ url_for('gics_add') }}">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Label</label>
+          <input class="form-input" name="name" placeholder="e.g. TD 1-Year GIC">
+        </div>
+        <div class="form-group">
+          <label>Institution</label>
+          <input class="form-input" name="institution" placeholder="TD Bank">
+        </div>
+        <div class="form-group">
+          <label>Account</label>
+          <select class="form-input" name="account">
+            {% for acct in data.accounts %}
+            <option>{{ acct }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Principal *</label>
+          <input class="form-input mono" name="principal" type="number" step="0.01" required placeholder="5000.00">
+        </div>
+        <div class="form-group">
+          <label>Rate % *</label>
+          <input class="form-input mono" name="rate" type="number" step="0.001" required placeholder="4.500">
+        </div>
+        <div class="form-group">
+          <label>Compounding</label>
+          <select class="form-input" name="compounding">
+            <option>Annual</option>
+            <option>Semi-Annual</option>
+            <option>Quarterly</option>
+            <option>Monthly</option>
+            <option>Simple</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Start Date *</label>
+          <input class="form-input mono" name="start_date" type="date" required>
+        </div>
+        <div class="form-group">
+          <label>Maturity Date *</label>
+          <input class="form-input mono" name="maturity_date" type="date" required>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">+ Add GIC</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">All GICs</div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Label</th>
+          <th>Institution</th>
+          <th>Account</th>
+          <th class="r">Rate</th>
+          <th>Compounding</th>
+          <th class="r">Principal</th>
+          <th class="r">Current Value</th>
+          <th class="r">Interest</th>
+          <th class="r">At Maturity</th>
+          <th>Maturity</th>
+          <th>Progress</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for g in data.gics %}
+        <tr class="{% if g.is_matured %}text-dim{% endif %}">
+          <td style="font-size:.82rem">{{ g.name or '—' }}</td>
+          <td class="text-dim" style="font-size:.78rem">{{ g.institution or '—' }}</td>
+          <td><span class="acct-badge acct-{{ g.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ g.account }}</span></td>
+          <td class="r mono text-green">{{ '%.3f' % g.rate }}%</td>
+          <td class="text-dim" style="font-size:.78rem">{{ g.compounding }}</td>
+          <td class="r mono">{{ g.principal | cad }}</td>
+          <td class="r mono">{{ g.current_value | cad }}</td>
+          <td class="r mono text-green">{{ g.interest_accrued | cad }}</td>
+          <td class="r mono">{{ g.value_at_maturity | cad }}</td>
+          <td class="mono" style="font-size:.78rem;white-space:nowrap">
+            {{ g.maturity_date }}
+            {% if g.is_matured %}
+              <span class="text-green" style="font-size:.65rem">MATURED</span>
+            {% else %}
+              <div class="text-dim" style="font-size:.65rem">{{ g.days_remaining }}d left</div>
+            {% endif %}
+          </td>
+          <td style="min-width:90px">
+            <div class="progress-bar">
+              <div class="progress-fill {% if g.is_matured %}matured{% endif %}" style="width:{{ '%.1f' % g.pct_elapsed }}%"></div>
+            </div>
+          </td>
+          <td>
+            <form method="POST" action="{{ url_for('gics_delete', id=g.id) }}" onsubmit="return confirm('Delete this GIC?')">
+              <button type="submit" class="btn-delete">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="12" class="empty-row">No GICs added yet. Add a GIC above.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function togglePanel(id, arrowId) {
+  const el = document.getElementById(id);
+  const arrow = document.getElementById(arrowId);
+  const open = el.style.display === 'none';
+  el.style.display = open ? 'block' : 'none';
+  arrow.textContent = open ? '▲' : '▼';
+}
+</script>
+{% endblock %}

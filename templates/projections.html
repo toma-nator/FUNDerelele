@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+{% block title %}Projections — Portfolio Tracker{% endblock %}
+{% block page_title %}Projections{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">Parameters</div>
+  <form method="GET" action="{{ url_for('projections') }}">
+    <div class="sim-form">
+      <div class="form-group">
+        <label>Starting Value (CAD)</label>
+        <input class="form-input mono" value="{{ '%.0f' % current_value }}" readonly style="color:var(--text-dim);cursor:default">
+      </div>
+      <div class="form-group">
+        <label>Monthly Contribution</label>
+        <input class="form-input mono" name="monthly_contrib" type="number" step="50" value="{{ monthly_contrib | int }}">
+      </div>
+      <div class="form-group">
+        <label>Time Horizon (years)</label>
+        <input class="form-input mono" name="years" type="number" min="1" max="50" value="{{ years }}">
+      </div>
+      <div style="align-self:flex-end">
+        <button type="submit" class="btn btn-primary">Run</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-header">Portfolio Growth Scenarios</div>
+  <div class="chart-wrap" style="max-height:340px;padding:20px 24px">
+    <canvas id="projChart"></canvas>
+  </div>
+</div>
+
+<div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
+  {% for s in proj.scenarios %}
+  <div class="stat-card">
+    <div class="stat-label">{{ s.label }}</div>
+    <div class="stat-value" style="color:{{ s.color }}">{{ s.final | cad }}</div>
+    <div class="stat-sub text-dim">in {{ years }} years</div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const labels = {{ proj.labels | tojson }};
+const scenarios = {{ proj.scenarios | tojson }};
+
+new Chart(document.getElementById('projChart'), {
+  type: 'line',
+  data: {
+    labels,
+    datasets: scenarios.map(s => ({
+      label: s.label,
+      data: s.data,
+      borderColor: s.color,
+      backgroundColor: s.color + '15',
+      fill: false,
+      tension: 0.1,
+      pointRadius: 0,
+      borderWidth: 2,
+    }))
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#c8d8e8', font: { size: 11 } } },
+      tooltip: {
+        mode: 'index', intersect: false,
+        callbacks: { label: ctx => ` ${ctx.dataset.label}: $${ctx.raw.toLocaleString()}` }
+      }
+    },
+    scales: {
+      x: {
+        grid: { color: '#1a3050' },
+        ticks: {
+          color: '#5a7a96',
+          callback: (val, idx) => labels[idx] || '',
+          maxTicksLimit: 15,
+          maxRotation: 0,
+        }
+      },
+      y: {
+        grid: { color: '#1a3050' },
+        ticks: { color: '#5a7a96', callback: v => '$' + (v >= 1e6 ? (v/1e6).toFixed(1)+'M' : (v/1000).toFixed(0)+'k') }
+      }
+    }
+  }
+});
+</script>
+{% endblock %}

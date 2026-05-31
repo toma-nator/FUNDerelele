@@ -1,0 +1,112 @@
+{% extends 'base.html' %}
+{% block title %}Watchlist — Portfolio Tracker{% endblock %}
+{% block page_title %}Watchlist{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header toggle-header" onclick="togglePanel('addForm','addArrow')">
+    Add to Watchlist
+    <span class="toggle-arrow" id="addArrow">▼</span>
+  </div>
+  <div id="addForm" style="display:none">
+    <form method="POST" action="{{ url_for('watchlist_add') }}">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Ticker *</label>
+          <input class="form-input mono" name="ticker" required placeholder="AAPL" style="text-transform:uppercase">
+        </div>
+        <div class="form-group">
+          <label>Company</label>
+          <input class="form-input" name="company" placeholder="Apple Inc.">
+        </div>
+        <div class="form-group">
+          <label>Currency</label>
+          <select class="form-input" name="currency">
+            <option value="CAD">CAD</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Sector</label>
+          <input class="form-input" name="sector" placeholder="Technology">
+        </div>
+        <div class="form-group">
+          <label>Target Price</label>
+          <input class="form-input mono" name="target_price" type="number" step="0.01" placeholder="150.00">
+        </div>
+        <div class="form-group" style="min-width:200px">
+          <label>Notes</label>
+          <input class="form-input" name="notes" placeholder="Optional notes">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">+ Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">Watchlist</div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Ticker</th>
+          <th>Company</th>
+          <th>CCY</th>
+          <th class="r">Live Price</th>
+          <th class="r">Target</th>
+          <th class="r">% to Target</th>
+          <th class="r">Since Added</th>
+          <th>Sector</th>
+          <th>Notes</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td class="mono ticker">{{ item.ticker }}</td>
+          <td class="text-dim" style="font-size:.78rem">{{ item.company or '—' }}</td>
+          <td class="mono text-dim">{{ item.currency }}</td>
+          <td class="r mono">
+            {% if item.live_price %}${{ '%.2f' % item.live_price }}{% else %}<span class="text-dim">—</span>{% endif %}
+          </td>
+          <td class="r mono text-dim">
+            {% if item.target_price %}${{ '%.2f' % item.target_price }}{% else %}—{% endif %}
+          </td>
+          <td class="r mono {{ item.pct_to_target | gl_class }}">
+            {% if item.pct_to_target is not none %}{{ item.pct_to_target | pct }}{% else %}—{% endif %}
+          </td>
+          <td class="r mono {{ item.pct_since_added | gl_class }}">
+            {% if item.pct_since_added is not none %}{{ item.pct_since_added | pct }}{% else %}—{% endif %}
+          </td>
+          <td class="text-dim" style="font-size:.78rem">{{ item.sector or '—' }}</td>
+          <td class="text-dim" style="font-size:.78rem;max-width:180px;white-space:normal">{{ item.notes or '' }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('watchlist_delete', id=item.id) }}" onsubmit="return confirm('Remove {{ item.ticker }} from watchlist?')">
+              <button type="submit" class="btn-delete">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty-row">Watchlist is empty. Add tickers above to track stocks you're monitoring.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function togglePanel(id, arrowId) {
+  const el = document.getElementById(id);
+  const arrow = document.getElementById(arrowId);
+  const open = el.style.display === 'none';
+  el.style.display = open ? 'block' : 'none';
+  arrow.textContent = open ? '▲' : '▼';
+}
+</script>
+{% endblock %}

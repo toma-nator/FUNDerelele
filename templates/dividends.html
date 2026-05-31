@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+{% block title %}Dividends — Portfolio Tracker{% endblock %}
+{% block page_title %}Dividends{% endblock %}
+
+{% block content %}
+<div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+  <div class="stat-card">
+    <div class="stat-label">All-Time</div>
+    <div class="stat-value text-green">{{ stats.all_time | cad }}</div>
+    <div class="stat-sub text-dim">{{ stats.count }} payments</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">YTD</div>
+    <div class="stat-value">{{ stats.ytd | cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">TTM</div>
+    <div class="stat-value">{{ stats.ttm | cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Monthly Avg (TTM)</div>
+    <div class="stat-value">{{ stats.ttm_monthly_avg | cad }}</div>
+  </div>
+</div>
+
+{% if stats.month_chart %}
+<div class="two-col">
+  <div class="card">
+    <div class="card-header">Monthly Income — Last 12 Months</div>
+    <div class="chart-wrap" style="max-height:220px;padding:16px 20px">
+      <canvas id="monthChart"></canvas>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Annual Summary</div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr><th>Year</th><th class="r">Total</th></tr>
+        </thead>
+        <tbody>
+          {% for year, total in stats.by_year.items() | reverse %}
+          <tr>
+            <td class="mono text-dim">{{ year }}</td>
+            <td class="r mono text-green">{{ total | cad }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2" class="empty-row">No data</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="card-header">By Ticker</div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Ticker</th>
+          <th class="r">All-Time</th>
+          <th class="r">YTD</th>
+          <th class="r">TTM</th>
+          <th class="r">Yield on Cost</th>
+          <th class="r">Payments</th>
+          <th class="r">Last Payment</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in stats.by_ticker %}
+        <tr>
+          <td class="mono ticker">{{ row.ticker }}</td>
+          <td class="r mono text-green">{{ row.total | cad }}</td>
+          <td class="r mono">{{ row.ytd | cad }}</td>
+          <td class="r mono">{{ row.ttm | cad }}</td>
+          <td class="r mono">
+            {% if row.yield_on_cost %}{{ '%.2f' % row.yield_on_cost }}%{% else %}—{% endif %}
+          </td>
+          <td class="r mono text-dim">{{ row.count }}</td>
+          <td class="r mono text-dim">{{ row.last_date or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty-row">No dividend transactions yet. Add dividends via the Transactions page.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if stats.month_chart %}
+<script>
+const mc = {{ stats.month_chart | tojson }};
+new Chart(document.getElementById('monthChart'), {
+  type: 'bar',
+  data: {
+    labels: mc.map(d => d.label),
+    datasets: [{
+      data: mc.map(d => d.value),
+      backgroundColor: 'rgba(0,200,240,.2)',
+      borderColor: '#00c8f0',
+      borderWidth: 1,
+      borderRadius: 3,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', font: { size: 10 } } },
+      y: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: v => '$' + v.toLocaleString() } }
+    }
+  }
+});
+</script>
+{% endif %}
+{% endblock %}

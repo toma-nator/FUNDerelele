@@ -1,0 +1,82 @@
+{% extends 'base.html' %}
+{% block title %}Tax & ACB — Portfolio Tracker{% endblock %}
+{% block page_title %}Tax &amp; ACB{% endblock %}
+
+{% block content %}
+<div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
+  <span style="font-size:.75rem;color:var(--text-dim);font-weight:600;letter-spacing:.08em;text-transform:uppercase">Tax Year</span>
+  {% for y in available_years %}
+  <a href="{{ url_for('tax', year=y) }}"
+     class="btn btn-sm {% if y == year %}btn-primary{% endif %}"
+     style="font-family:var(--mono)">{{ y }}</a>
+  {% endfor %}
+  {% if not available_years %}
+  <span class="text-dim" style="font-size:.82rem">No sell transactions recorded yet.</span>
+  {% endif %}
+</div>
+
+<div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+  <div class="stat-card">
+    <div class="stat-label">Net G/L {{ year }}</div>
+    <div class="stat-value {{ total_gl | gl_class }}">{{ total_gl | signed_cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Gains</div>
+    <div class="stat-value text-green">{{ total_gains | cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total Losses</div>
+    <div class="stat-value text-red">{{ total_losses | signed_cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Taxable Capital Gain</div>
+    <div class="stat-value">{{ taxable_gain | cad }}</div>
+    <div class="stat-sub text-dim">50% inclusion rate</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    Realized Gains &amp; Losses — {{ year }}
+    <span class="card-sub">Non-registered accounts only; consult a tax professional</span>
+  </div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Ticker</th>
+          <th>Account</th>
+          <th class="r">Qty</th>
+          <th class="r">Proceeds (CAD)</th>
+          <th class="r">ACB (CAD)</th>
+          <th class="r">Capital G/L</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td class="mono text-dim">{{ row.date }}</td>
+          <td class="mono ticker">{{ row.ticker }}</td>
+          <td><span class="acct-badge acct-{{ row.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ row.account }}</span></td>
+          <td class="r mono">{{ row.qty | num(4) }}</td>
+          <td class="r mono">{{ row.proceeds_cad | cad }}</td>
+          <td class="r mono text-dim">{{ row.acb | cad }}</td>
+          <td class="r mono {{ row.gl | gl_class }}">{{ row.gl | signed_cad }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty-row">No sell transactions in {{ year }}.</td></tr>
+        {% endfor %}
+      </tbody>
+      {% if rows %}
+      <tfoot>
+        <tr style="border-top:2px solid var(--border)">
+          <td colspan="6" style="padding:9px 14px;font-size:.72rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim)">Net Capital G/L</td>
+          <td class="r mono {{ total_gl | gl_class }}" style="padding:9px 14px;font-weight:600">{{ total_gl | signed_cad }}</td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
+</div>
+{% endblock %}
