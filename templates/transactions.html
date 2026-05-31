@@ -1,0 +1,147 @@
+{% extends 'base.html' %}
+{% block title %}Transactions — Portfolio Tracker{% endblock %}
+{% block page_title %}Transactions{% endblock %}
+
+{% block content %}
+<!-- Add Transaction Panel -->
+<div class="card add-panel">
+  <div class="card-header toggle-header" onclick="toggleAddForm()">
+    <span>+ Add Transaction</span>
+    <span class="toggle-arrow" id="addArrow">▼</span>
+  </div>
+  <div id="addForm" class="add-form-body" style="display:none">
+    <form method="POST" action="{{ url_for('add_transaction') }}" class="txn-form">
+      <div class="form-row">
+        <div class="form-group">
+          <label>Date</label>
+          <input type="date" name="date" required class="form-input" value="{{ today }}" />
+        </div>
+        <div class="form-group">
+          <label>Ticker</label>
+          <input type="text" name="ticker" required class="form-input mono" placeholder="e.g. VFV.TO" />
+        </div>
+        <div class="form-group">
+          <label>Account</label>
+          <select name="account" required class="form-input">
+            {% for acc in accounts %}
+            <option value="{{ acc.name }}">{{ acc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Type</label>
+          <select name="type" required class="form-input">
+            <option value="Buy">Buy</option>
+            <option value="Sell">Sell</option>
+            <option value="Dividend">Dividend</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Quantity</label>
+          <input type="number" name="qty" required class="form-input mono" placeholder="0" step="any" min="0" />
+        </div>
+        <div class="form-group">
+          <label>Price per Share</label>
+          <input type="number" name="price" required class="form-input mono" placeholder="0.00" step="any" min="0" />
+        </div>
+        <div class="form-group">
+          <label>Currency</label>
+          <select name="currency" class="form-input mono">
+            <option value="CAD">CAD</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Fees (CAD)</label>
+          <input type="number" name="fees" class="form-input mono" placeholder="4.95" step="any" min="0" />
+        </div>
+        <div class="form-group">
+          <label>Notes</label>
+          <input type="text" name="notes" class="form-input" placeholder="optional" />
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Add Transaction</button>
+        <button type="button" class="btn" onclick="toggleAddForm()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Transaction Log -->
+<div class="card">
+  <div class="card-header">
+    Transaction Log
+    <span class="card-sub">{{ transactions | length }} total</span>
+  </div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Date</th>
+          <th>Ticker</th>
+          <th>Account</th>
+          <th>Type</th>
+          <th class="r">Qty</th>
+          <th class="r">Price</th>
+          <th>CCY</th>
+          <th class="r">Amount (CAD)</th>
+          <th class="r">Fees</th>
+          <th class="r">Net (CAD)</th>
+          <th>Notes</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in transactions %}
+        <tr>
+          <td class="text-dim mono">{{ t.id }}</td>
+          <td class="mono">{{ t.date.strftime('%Y-%m-%d') }}</td>
+          <td class="mono ticker">{{ t.ticker }}</td>
+          <td><span class="acct-badge acct-{{ t.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ t.account }}</span></td>
+          <td><span class="type-badge type-{{ t.type | lower }}">{{ t.type }}</span></td>
+          <td class="r mono">{{ t.qty | num(4) }}</td>
+          <td class="r mono">${{ '%.4f' % t.price }}</td>
+          <td class="mono">{{ t.currency }}</td>
+          <td class="r mono">{{ t.amount_cad | cad }}</td>
+          <td class="r mono text-dim">{% if t.fees_cad %}{{ t.fees_cad | cad }}{% else %}—{% endif %}</td>
+          <td class="r mono {{ t.net_cad | gl_class }}">{{ t.net_cad | signed_cad }}</td>
+          <td class="text-dim">{{ t.notes or '' }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('delete_transaction', id=t.id) }}"
+                  onsubmit="return confirm('Delete this transaction?')">
+              <button type="submit" class="btn-delete">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="13" class="empty-row">No transactions yet. Add your first one above.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Pre-fill today's date
+document.addEventListener('DOMContentLoaded', () => {
+  const d = document.querySelector('input[name="date"]');
+  if (d && !d.value) {
+    d.value = new Date().toISOString().split('T')[0];
+  }
+});
+
+function toggleAddForm() {
+  const form = document.getElementById('addForm');
+  const arrow = document.getElementById('addArrow');
+  const open = form.style.display === 'none';
+  form.style.display = open ? 'block' : 'none';
+  arrow.textContent = open ? '▲' : '▼';
+}
+</script>
+{% endblock %}

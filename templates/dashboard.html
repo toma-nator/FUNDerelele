@@ -1,0 +1,113 @@
+{% extends 'base.html' %}
+{% block title %}Dashboard — Portfolio Tracker{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-label">TOTAL PORTFOLIO</div>
+    <div class="stat-value mono">{{ stats.total_portfolio | cad }}</div>
+    <div class="stat-sub text-dim">{{ stats.num_holdings }} holdings · {{ stats.total_cash | cad }} cash</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">UNREALIZED G/L</div>
+    <div class="stat-value mono {{ stats.total_unrealized | gl_class }}">{{ stats.total_unrealized | signed_cad }}</div>
+    <div class="stat-sub {{ stats.total_unrealized_pct | gl_class }}">{{ stats.total_unrealized_pct | pct }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">TODAY'S CHANGE</div>
+    <div class="stat-value mono {{ stats.total_day_change | gl_class }}">{{ stats.total_day_change | signed_cad }}</div>
+    <div class="stat-sub text-dim">market hours only</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">DIVIDENDS RECEIVED</div>
+    <div class="stat-value mono text-green">{{ stats.total_dividends | cad }}</div>
+    <div class="stat-sub text-dim">all-time</div>
+  </div>
+</div>
+
+<div class="two-col">
+  <!-- Allocation chart -->
+  <div class="card">
+    <div class="card-header">Account Allocation</div>
+    <div class="chart-wrap">
+      <canvas id="allocationChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Top holdings -->
+  <div class="card">
+    <div class="card-header">Top Holdings</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Ticker</th>
+          <th>Account</th>
+          <th class="r">Mkt Value</th>
+          <th class="r">G/L</th>
+          <th class="r">% Port</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in holdings %}
+        <tr>
+          <td class="mono ticker">{{ h.ticker }}</td>
+          <td><span class="acct-badge acct-{{ h.account | lower | replace(' ', '-') | replace('(', '') | replace(')', '') }}">{{ h.account }}</span></td>
+          <td class="r mono">{{ h.market_value_cad | cad }}</td>
+          <td class="r mono {{ h.unrealized_gl | gl_class }}">{{ h.unrealized_gl | signed_cad }}</td>
+          <td class="r mono">{{ '%.1f' % h.port_pct }}%</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty-row">No holdings yet — add transactions to get started.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if holdings %}
+    <div class="card-footer">
+      <a href="{{ url_for('holdings') }}" class="link-muted">View all holdings →</a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const breakdown = {{ stats.account_breakdown | tojson }};
+const labels = Object.keys(breakdown);
+const values = Object.values(breakdown);
+const COLORS = ['#06b6d4','#8b5cf6','#10b981','#f59e0b','#ef4444','#ec4899'];
+
+if (labels.length) {
+  new Chart(document.getElementById('allocationChart'), {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: COLORS.slice(0, labels.length),
+        borderColor: '#0c1929',
+        borderWidth: 3,
+        hoverOffset: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      cutout: '65%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: '#8ba3bc', font: { family: 'Inter', size: 12 }, padding: 16 }
+        },
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.label}: $${ctx.raw.toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2})}`
+          }
+        }
+      }
+    }
+  });
+}
+</script>
+{% endblock %}

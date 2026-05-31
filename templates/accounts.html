@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% block title %}Accounts — Portfolio Tracker{% endblock %}
+{% block page_title %}Accounts{% endblock %}
+
+{% block content %}
+<div class="accounts-grid">
+  {% for acc in accounts %}
+  <div class="card account-card">
+    <div class="account-header">
+      <span class="account-name">{{ acc.name }}</span>
+      <span class="account-type-badge">{{ acc.type }}</span>
+    </div>
+
+    <div class="account-stats">
+      <div class="account-stat">
+        <div class="stat-label">Total Value</div>
+        <div class="stat-value mono">{{ acc.total_value | cad }}</div>
+      </div>
+      <div class="account-stat">
+        <div class="stat-label">Holdings</div>
+        <div class="stat-value mono">{{ acc.holdings_mv | cad }}</div>
+      </div>
+      <div class="account-stat">
+        <div class="stat-label">Cash</div>
+        <div class="stat-value mono">{{ acc.cash_balance | cad }}</div>
+      </div>
+      <div class="account-stat">
+        <div class="stat-label">Unrealized G/L</div>
+        <div class="stat-value mono {{ acc.unrealized_gl | gl_class }}">{{ acc.unrealized_gl | signed_cad }}</div>
+      </div>
+      <div class="account-stat">
+        <div class="stat-label">Return %</div>
+        <div class="stat-value mono {{ acc.unrealized_gl_pct | gl_class }}">{{ acc.unrealized_gl_pct | pct }}</div>
+      </div>
+      <div class="account-stat">
+        <div class="stat-label">Day Change</div>
+        <div class="stat-value mono {{ acc.day_change | gl_class }}">{{ acc.day_change | signed_cad }}</div>
+      </div>
+    </div>
+
+    {% if acc.holdings %}
+    <div class="account-holdings">
+      <div class="account-holdings-label">{{ acc.num_holdings }} position{% if acc.num_holdings != 1 %}s{% endif %}</div>
+      <table class="data-table mini">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th class="r">Qty</th>
+            <th class="r">Mkt Val</th>
+            <th class="r">G/L</th>
+            <th class="r">G/L %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in acc.holdings %}
+          <tr>
+            <td class="mono ticker">{{ h.ticker }}</td>
+            <td class="r mono">{{ h.qty | num(2) }}</td>
+            <td class="r mono">{{ h.market_value_cad | cad }}</td>
+            <td class="r mono {{ h.unrealized_gl | gl_class }}">{{ h.unrealized_gl | signed_cad }}</td>
+            <td class="r mono {{ h.unrealized_gl_pct | gl_class }}">{{ h.unrealized_gl_pct | pct }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <!-- Edit cash balance -->
+    <details class="cash-edit">
+      <summary class="cash-edit-toggle">Edit cash balance</summary>
+      <form method="POST" action="{{ url_for('update_cash', name=acc.name) }}" class="cash-form">
+        <input type="number" name="cash_balance" value="{{ acc.cash_balance }}"
+               step="0.01" class="form-input mono cash-input" />
+        <button type="submit" class="btn btn-sm">Save</button>
+      </form>
+    </details>
+  </div>
+  {% else %}
+  <div class="card"><div class="empty-row">No accounts configured.</div></div>
+  {% endfor %}
+</div>
+{% endblock %}

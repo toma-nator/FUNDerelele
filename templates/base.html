@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Portfolio Tracker{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <nav class="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-glyph">◈</span>
+      <span class="brand-name">Portfolio</span>
+    </div>
+
+    <div class="nav-section">
+      <span class="nav-label">MAIN</span>
+      <a href="{{ url_for('dashboard') }}"    class="nav-item {% if active=='dashboard'    %}active{% endif %}"><span class="nav-icon">⬡</span> Dashboard</a>
+      <a href="{{ url_for('holdings') }}"     class="nav-item {% if active=='holdings'     %}active{% endif %}"><span class="nav-icon">◧</span> Holdings</a>
+      <a href="{{ url_for('transactions') }}" class="nav-item {% if active=='transactions' %}active{% endif %}"><span class="nav-icon">⇄</span> Transactions</a>
+      <a href="{{ url_for('accounts') }}"     class="nav-item {% if active=='accounts'     %}active{% endif %}"><span class="nav-icon">▣</span> Accounts</a>
+    </div>
+
+    <div class="nav-section">
+      <span class="nav-label">ANALYTICS</span>
+      <a href="#" class="nav-item soon">Performance <span class="badge">soon</span></a>
+      <a href="#" class="nav-item soon">Dividends <span class="badge">soon</span></a>
+      <a href="#" class="nav-item soon">GICs <span class="badge">soon</span></a>
+      <a href="#" class="nav-item soon">Rebalancer <span class="badge">soon</span></a>
+      <a href="#" class="nav-item soon">Watchlist <span class="badge">soon</span></a>
+    </div>
+
+    <div class="nav-section">
+      <span class="nav-label">ADVANCED</span>
+      <a href="#" class="nav-item soon">Monte Carlo <span class="badge">soon</span></a>
+      <a href="#" class="nav-item soon">Projections <span class="badge">soon</span></a>
+      <a href="#" class="nav-item soon">Tax &amp; ACB <span class="badge">soon</span></a>
+    </div>
+
+    <div class="nav-section">
+      <span class="nav-label">TOOLS</span>
+      <a href="{{ url_for('import_page') }}" class="nav-item {% if active=='import' %}active{% endif %}"><span class="nav-icon">↑</span> Import</a>
+      <a href="#" class="nav-item soon">Settings <span class="badge">soon</span></a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <header class="topbar">
+      <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
+      <div class="topbar-right">
+        {% if last_updated %}
+          <span class="updated-at">prices updated {{ last_updated.last_updated.strftime('%H:%M') if last_updated.last_updated else '—' }}</span>
+        {% endif %}
+        <button class="btn btn-sm" onclick="refreshPrices(this)">↻ Refresh Prices</button>
+      </div>
+    </header>
+
+    <div class="flash-area">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endwith %}
+    </div>
+
+    <div class="content">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

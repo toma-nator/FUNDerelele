@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}Holdings — Portfolio Tracker{% endblock %}
+{% block page_title %}Holdings{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-header">
+    All Positions
+    {% if last_updated and last_updated.last_updated %}
+      <span class="card-sub">prices as of {{ last_updated.last_updated.strftime('%Y-%m-%d %H:%M') }}</span>
+    {% endif %}
+  </div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Ticker</th>
+          <th>Account</th>
+          <th>CCY</th>
+          <th class="r">Qty</th>
+          <th class="r">Avg Cost</th>
+          <th class="r">Live Price</th>
+          <th class="r">Book Val</th>
+          <th class="r">Mkt Val</th>
+          <th class="r">Unreal G/L $</th>
+          <th class="r">Unreal G/L %</th>
+          <th class="r">Day Chg $</th>
+          <th class="r">Day Chg %</th>
+          <th class="r">% Port</th>
+          <th class="r">Dividends</th>
+          <th class="r">Realized G/L</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in holdings %}
+        <tr>
+          <td class="text-dim mono">{{ loop.index }}</td>
+          <td class="mono ticker">{{ h.ticker }}</td>
+          <td><span class="acct-badge acct-{{ h.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ h.account }}</span></td>
+          <td class="mono">{{ h.currency }}</td>
+          <td class="r mono">{{ h.qty | num(4) }}</td>
+          <td class="r mono">{{ h.avg_cost_cad | cad }}</td>
+          <td class="r mono {% if h.live_price %}{% else %}text-dim{% endif %}">
+            {% if h.live_price %}${{ '%.2f' % h.live_price }}{% else %}—{% endif %}
+          </td>
+          <td class="r mono">{{ h.book_value_cad | cad }}</td>
+          <td class="r mono">{{ h.market_value_cad | cad }}</td>
+          <td class="r mono {{ h.unrealized_gl | gl_class }}">{{ h.unrealized_gl | signed_cad }}</td>
+          <td class="r mono {{ h.unrealized_gl_pct | gl_class }}">{{ h.unrealized_gl_pct | pct }}</td>
+          <td class="r mono {{ h.day_change | gl_class }}">{{ h.day_change | signed_cad }}</td>
+          <td class="r mono {{ h.day_change_pct | gl_class }}">{{ h.day_change_pct | pct }}</td>
+          <td class="r mono">{{ '%.1f' % h.port_pct }}%</td>
+          <td class="r mono text-green">{{ h.dividends_cad | cad }}</td>
+          <td class="r mono {{ h.realized_gl_cad | gl_class }}">{{ h.realized_gl_cad | signed_cad }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="16" class="empty-row">No holdings yet. Add transactions to see your portfolio here.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
