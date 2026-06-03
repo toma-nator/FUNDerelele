@@ -40,6 +40,7 @@ with app.app_context():
     _add_col('watchlist', 'added_price', 'FLOAT')
     _add_col('gics', 'institution', 'VARCHAR(100)')
     _add_col('transactions', 'subtype', 'VARCHAR(50) DEFAULT ""')
+    _add_col('accounts', 'cash_balance', 'FLOAT DEFAULT 0')
 
 from price_service import start_price_refresh
 start_price_refresh(app)
@@ -456,6 +457,20 @@ def performance_snapshot():
     from calculations import take_portfolio_snapshot
     taken = take_portfolio_snapshot()
     flash('Portfolio snapshot saved.' if taken else 'Snapshot already taken today.', 'success' if taken else 'info')
+    return redirect(url_for('performance'))
+
+
+@app.route('/performance/backfill', methods=['POST'])
+def performance_backfill():
+    from calculations import backfill_performance_history
+    try:
+        count = backfill_performance_history()
+        if count:
+            flash(f'Backfilled {count} monthly snapshot(s).', 'success')
+        else:
+            flash('No new snapshots to add — all months already covered, or no transactions found.', 'info')
+    except Exception as e:
+        flash(f'Backfill failed: {e}', 'error')
     return redirect(url_for('performance'))
 
 

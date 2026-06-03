@@ -125,7 +125,7 @@ def get_dashboard_stats(holdings):
     total_dividends = sum(h['dividends_cad'] for h in holdings)
 
     accounts = Account.query.all()
-    total_cash = sum(a.cash_balance for a in accounts)
+    total_cash = sum(a.cash_balance or 0 for a in accounts)
 
     account_breakdown = {}
     for h in holdings:
@@ -520,6 +520,131 @@ def get_rebalancer_data():
 
 # ── Performance History ───────────────────────────────────────────────────────
 
+def _holdings_acb(txns, fx_rate):
+    """ACB computation over a filtered transaction list (mirrors get_holdings core logic)."""
+    positions = {}
+    for t in txns:
+        if t.type not in ('Buy', 'Sell'):
+            continue
+        key = (t.ticker, t.account)
+        if key not in positions:
+            positions[key] = {
+                'ticker': t.ticker, 'currency': t.currency,
+                'qty': 0.0, 'total_cost_cad': 0.0, 'avg_cost_cad': 0.0,
+            }
+        pos = positions[key]
+        if t.type == 'Buy':
+            rate = fx_rate if t.currency == 'USD' else 1.0
+            cost = t.qty * t.price * rate + (t.fees_cad or 0)
+            new_qty = pos['qty'] + t.qty
+            new_cost = pos['total_cost_cad'] + cost
+            pos['avg_cost_cad'] = new_cost / new_qty if new_qty else 0
+            pos['total_cost_cad'] = new_cost
+            pos['qty'] = new_qty
+            pos['currency'] = t.currency
+        elif t.type == 'Sell':
+            pos['qty'] = max(pos['qty'] - t.qty, 0)
+            pos['total_cost_cad'] = pos['avg_cost_cad'] * pos['qty']
+    return [
+        {'ticker': pos['ticker'], 'currency': pos['currency'],
+         'qty': pos['qty'], 'book_value_cad': pos['total_cost_cad']}
+        for pos in positions.values() if pos['qty'] > 0.0001
+    ]
+
+
+def backfill_performance_history():
+    """
+    Generates one PortfolioSnapshot per past month-end using transaction history
+    and historical prices fetched from yfinance. Skips months already snapshotted.
+    Returns the number of new snapshots created.
+    """
+    from models import PortfolioSnapshot, db
+    import yfinance as yf
+    import pandas as pd
+    from datetime import date, timedelta
+
+    transactions = (Transaction.query
+                    .order_by(Transaction.date.asc(), Transaction.id.asc()).all())
+    buy_sell = [t for t in transactions if t.type in ('Buy', 'Sell')]
+    if not buy_sell:
+        return 0
+
+    first_date = buy_sell[0].date
+    today = date.today()
+
+    # Build list of month-ends from the first transaction month up to last complete month
+    months = []
+    y, m = first_date.year, first_date.month
+    while (y, m) < (today.year, today.month):
+        if m == 12:
+            months.append(date(y + 1, 1, 1) - timedelta(days=1))
+            y += 1
+            m = 1
+        else:
+            months.append(date(y, m + 1, 1) - timedelta(days=1))
+            m += 1
+
+    if not months:
+        return 0
+
+    existing_dates = {s.date for s in PortfolioSnapshot.query.all()}
+    months_to_fill = [d for d in months if d not in existing_dates]
+    if not months_to_fill:
+        return 0
+
+    # Tickers to price — skip unmapped descriptions (contain spaces) and CASH
+    tickers = sorted({
+        t.ticker for t in buy_sell
+        if ' ' not in t.ticker and t.ticker != 'CASH'
+    })
+    if not tickers:
+        return 0
+
+    all_symbols = tickers + ['USDCAD=X']
+    start_str = first_date.strftime('%Y-%m-%d')
+    end_str = (today + timedelta(days=1)).strftime('%Y-%m-%d')
+
+    raw = yf.download(all_symbols, start=start_str, end=end_str,
+                      auto_adjust=True, progress=False)
+    if raw.empty:
+        return 0
+
+    close_df = raw['Close'] if isinstance(raw.columns, pd.MultiIndex) else raw[['Close']].rename(columns={'Close': all_symbols[0]})
+    close_df.index = pd.to_datetime(close_df.index).normalize()
+
+    def price_on(ticker, as_of):
+        if ticker not in close_df.columns:
+            return None
+        col = close_df[ticker].dropna()
+        before = col[col.index <= pd.Timestamp(as_of)]
+        return float(before.iloc[-1]) if not before.empty else None
+
+    count = 0
+    for month_end in months_to_fill:
+        txns_to_date = [t for t in transactions if t.date <= month_end]
+        fx = price_on('USDCAD=X', month_end) or 1.365
+        holdings = _holdings_acb(txns_to_date, fx)
+
+        total_book = sum(h['book_value_cad'] for h in holdings)
+        total_mv = 0.0
+        for h in holdings:
+            p = price_on(h['ticker'], month_end)
+            if p:
+                rate = fx if h['currency'] == 'USD' else 1.0
+                total_mv += h['qty'] * p * rate
+
+        db.session.add(PortfolioSnapshot(
+            date=month_end,
+            total_book=round(total_book, 2),
+            total_market=round(total_mv, 2),
+            total_cash=0,
+        ))
+        count += 1
+
+    db.session.commit()
+    return count
+
+
 def take_portfolio_snapshot():
     from models import PortfolioSnapshot, db
     from datetime import date
@@ -532,7 +657,7 @@ def take_portfolio_snapshot():
     accounts = Account.query.all()
     total_mv = sum(h['market_value_cad'] or 0 for h in holdings)
     total_book = sum(h['book_value_cad'] for h in holdings)
-    total_cash = sum(a.cash_balance for a in accounts)
+    total_cash = sum(a.cash_balance or 0 for a in accounts)
 
     db.session.add(PortfolioSnapshot(
         date=today,
@@ -556,8 +681,8 @@ def get_performance_data():
         }
 
     labels = [s.date.strftime('%b %Y') for s in snaps]
-    values = [round(s.total_market + s.total_cash, 2) for s in snaps]
-    book_values = [round(s.total_book, 2) for s in snaps]
+    values = [round((s.total_market or 0) + (s.total_cash or 0), 2) for s in snaps]
+    book_values = [round(s.total_book or 0, 2) for s in snaps]
 
     first_val = values[0] if values[0] > 0 else 1
     last_val = values[-1]

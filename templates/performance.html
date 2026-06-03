@@ -74,13 +74,29 @@
   </div>
 </div>
 {% endif %}
+
+<div class="card" style="margin-top:1.5rem">
+  <div class="card-header">Backfill History</div>
+  <div style="padding:1rem 1.25rem">
+    <p class="text-dim" style="font-size:.85rem;margin:0 0 1rem">
+      Reconstructs one month-end snapshot per past month from your existing transactions
+      and historical prices from Yahoo Finance. Run once after all transactions are imported.
+      Tickers that are still unmapped (no real symbol) will be excluded from market value.
+      May take up to 30 seconds.
+    </p>
+    <form method="POST" action="{{ url_for('performance_backfill') }}"
+          onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Fetching prices…'">
+      <button type="submit" class="btn">↺ Backfill Monthly History</button>
+    </form>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 {% if perf.snapshots %}
 <script>
 const labels = {{ perf.labels | tojson }};
-const values = {{ perf.values | tojson }};
+const values = {{ perf['values'] | tojson }};
 const bookVals = {{ perf.book_values | tojson }};
 
 new Chart(document.getElementById('perfChart'), {
