@@ -7,7 +7,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///finance.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = 'midnight-terminal-2024'
 
-from models import db, Transaction, PriceCache, Account, Setting, GIC, WatchlistItem, PortfolioSnapshot
+from models import db, Transaction, PriceCache, Account, Setting, GIC, WatchlistItem, PortfolioSnapshot, TickerMap
 db.init_app(app)
 
 with app.app_context():
@@ -39,6 +39,7 @@ with app.app_context():
     _add_col('watchlist', 'added_date', 'DATE')
     _add_col('watchlist', 'added_price', 'FLOAT')
     _add_col('gics', 'institution', 'VARCHAR(100)')
+    _add_col('transactions', 'subtype', 'VARCHAR(50) DEFAULT ""')
 
 from price_service import start_price_refresh
 start_price_refresh(app)
@@ -178,7 +179,59 @@ def update_cash(name):
 @app.route('/import')
 def import_page():
     log = Transaction.query.order_by(Transaction.created_at.desc(), Transaction.id.desc()).all()
-    return render_template('import.html', active='import', log=log)
+    mappings = TickerMap.query.order_by(TickerMap.description).all()
+    # Tickers with spaces are unresolved broker descriptions, not real ticker symbols
+    unmapped = (
+        db.session.query(Transaction.ticker)
+        .filter(Transaction.ticker.like('% %'))
+        .distinct()
+        .order_by(Transaction.ticker)
+        .all()
+    )
+    unmapped = [row[0] for row in unmapped]
+    return render_template('import.html', active='import', log=log,
+                           mappings=mappings, unmapped=unmapped)
+
+
+@app.route('/import/ticker-map/add', methods=['POST'])
+def ticker_map_add():
+    from price_service import refresh_prices
+    description = request.form.get('description', '').strip()
+    ticker = request.form.get('ticker', '').strip().upper()
+    if not description or not ticker:
+        flash('Both description and ticker are required.', 'error')
+        return redirect(url_for('import_page'))
+
+    existing = TickerMap.query.get(description)
+    old_ticker = existing.ticker if existing else None
+
+    if existing:
+        existing.ticker = ticker
+    else:
+        db.session.add(TickerMap(description=description, ticker=ticker))
+
+    # Update transactions still carrying the raw description as their ticker (first-time map)
+    updated = Transaction.query.filter_by(ticker=description).update({'ticker': ticker})
+    # Also update transactions already carrying the old real ticker (re-map / correction)
+    if old_ticker and old_ticker != ticker:
+        updated += Transaction.query.filter_by(ticker=old_ticker).update({'ticker': ticker})
+    db.session.commit()
+
+    refresh_prices([ticker])
+    flash(f'Mapped "{description}" → {ticker}'
+          + (f' and updated {updated} transaction(s).' if updated else '.'), 'success')
+    return redirect(url_for('import_page'))
+
+
+@app.route('/import/ticker-map/delete', methods=['POST'])
+def ticker_map_delete():
+    description = request.form.get('description', '').strip()
+    mapping = TickerMap.query.get(description)
+    if mapping:
+        db.session.delete(mapping)
+        db.session.commit()
+        flash(f'Removed mapping for "{description}".', 'info')
+    return redirect(url_for('import_page'))
 
 
 @app.route('/import/upload', methods=['POST'])
@@ -195,6 +248,20 @@ def import_upload():
     except Exception as e:
         flash(f'Import error: {e}', 'error')
     return redirect(url_for('import_page'))
+
+
+# ── Cash Flows ────────────────────────────────────────────────────────────────
+
+@app.route('/cashflows')
+def cashflows():
+    from calculations import get_cashflow_stats
+    account_filter = request.args.get('account', '').strip()
+    subtype_filter = request.args.get('subtype', '').strip()
+    data = get_cashflow_stats(
+        account_filter=account_filter or None,
+        subtype_filter=subtype_filter or None,
+    )
+    return render_template('cashflows.html', data=data, active='cashflows')
 
 
 # ── Dividends ─────────────────────────────────────────────────────────────────

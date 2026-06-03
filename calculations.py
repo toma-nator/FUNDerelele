@@ -176,6 +176,80 @@ def get_account_summary():
     return result
 
 
+# ── Cash Flows ────────────────────────────────────────────────────────────────
+
+def get_cashflow_stats(account_filter=None, subtype_filter=None):
+    from datetime import date
+
+    today = date.today()
+    ytd_start = date(today.year, 1, 1)
+
+    query = Transaction.query.filter_by(type='Deposit')
+    if account_filter:
+        query = query.filter_by(account=account_filter)
+    if subtype_filter:
+        query = query.filter_by(subtype=subtype_filter)
+
+    deposits = query.order_by(Transaction.date.desc()).all()
+
+    all_time = sum(d.net_cad for d in deposits)
+    ytd      = sum(d.net_cad for d in deposits if d.date >= ytd_start)
+
+    known_subtypes = ['Contribution', 'RDSP Grant', 'RDSP Bond']
+    by_subtype = {}
+    for st in known_subtypes:
+        rows = [d for d in deposits if d.subtype == st]
+        by_subtype[st] = {
+            'total': sum(d.net_cad for d in rows),
+            'ytd':   sum(d.net_cad for d in rows if d.date >= ytd_start),
+            'count': len(rows),
+        }
+
+    # Per-account totals broken down by subtype
+    account_totals = {}
+    for d in deposits:
+        acc = d.account
+        if acc not in account_totals:
+            account_totals[acc] = {'total': 0.0, 'by_subtype': {st: 0.0 for st in known_subtypes}}
+        account_totals[acc]['total'] += d.net_cad
+        st = d.subtype if d.subtype in known_subtypes else 'Other'
+        account_totals[acc]['by_subtype'][st] = account_totals[acc]['by_subtype'].get(st, 0.0) + d.net_cad
+
+    by_year = {}
+    for d in deposits:
+        by_year[d.date.year] = by_year.get(d.date.year, 0.0) + d.net_cad
+
+    # Annual chart stacked by subtype
+    years = sorted(by_year.keys())
+    chart_by_subtype = {}
+    for st in known_subtypes:
+        yearly = []
+        for yr in years:
+            yearly.append(round(sum(
+                d.net_cad for d in deposits
+                if d.date.year == yr and d.subtype == st
+            ), 2))
+        chart_by_subtype[st] = yearly
+
+    accounts = [a.name for a in Account.query.order_by(Account.name).all()]
+
+    return {
+        'deposits': deposits,
+        'all_time': all_time,
+        'ytd': ytd,
+        'count': len(deposits),
+        'by_subtype': by_subtype,
+        'by_year': dict(sorted(by_year.items())),
+        'account_totals': dict(sorted(account_totals.items())),
+        'known_subtypes': known_subtypes,
+        'chart_years': years,
+        'chart_by_subtype': chart_by_subtype,
+        'accounts': accounts,
+        'active_account': account_filter or '',
+        'active_subtype': subtype_filter or '',
+    }
+
+
 # ── Dividends ─────────────────────────────────────────────────────────────────
 
 def get_dividend_stats():

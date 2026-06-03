@@ -94,4 +94,85 @@
     {% endif %}
   </div>
 </div>
+
+<!-- Ticker Mappings -->
+<div class="card" style="margin-top:1.5rem">
+  <div class="card-header">
+    Ticker Mappings
+    <span class="card-sub">maps broker descriptions to real ticker symbols — set once, applied to all future imports</span>
+  </div>
+
+  {% if unmapped %}
+  <div style="padding:1rem 1.25rem 0">
+    <div class="help-title" style="color:var(--yellow);margin-bottom:.75rem">
+      ⚠ {{ unmapped | length }} unmapped ticker{{ 's' if unmapped | length != 1 }} — prices won't load until mapped
+    </div>
+    <table class="data-table" style="margin-bottom:1rem">
+      <thead>
+        <tr>
+          <th>Broker Description</th>
+          <th>Real Ticker</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for desc in unmapped %}
+        <tr>
+          <td class="mono">{{ desc }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('ticker_map_add') }}" class="inline-map-form">
+              <input type="hidden" name="description" value="{{ desc }}" />
+              <input type="text" name="ticker" required class="form-input mono"
+                     placeholder="e.g. AAPL.NE" style="width:130px;display:inline" />
+              <button type="submit" class="btn btn-primary" style="padding:.25rem .75rem">Map</button>
+            </form>
+          </td>
+          <td></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if mappings %}
+  <div style="padding:{% if unmapped %}0{% else %}1rem{% endif %} 1.25rem 1rem">
+    {% if unmapped %}<div style="border-top:1px solid var(--border);margin-bottom:1rem"></div>{% endif %}
+    <div class="text-dim" style="font-size:.8rem;margin-bottom:.5rem">SAVED MAPPINGS</div>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Broker Description</th>
+          <th>Ticker</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in mappings %}
+        <tr>
+          <td class="mono text-dim">{{ m.description }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('ticker_map_add') }}" class="inline-map-form">
+              <input type="hidden" name="description" value="{{ m.description }}" />
+              <input type="text" name="ticker" value="{{ m.ticker }}" required
+                     class="form-input mono" style="width:130px;display:inline" />
+              <button type="submit" class="btn" style="padding:.25rem .75rem">Update</button>
+            </form>
+          </td>
+          <td>
+            <form method="POST" action="{{ url_for('ticker_map_delete') }}"
+                  onsubmit="return confirm('Remove this mapping?')">
+              <input type="hidden" name="description" value="{{ m.description }}" />
+              <button type="submit" class="btn-delete" title="Remove">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif not unmapped %}
+  <div class="empty-row">No mappings yet. Import a file to get started.</div>
+  {% endif %}
+</div>
 {% endblock %}

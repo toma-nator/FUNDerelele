@@ -1,0 +1,214 @@
+{% extends 'base.html' %}
+{% block title %}Cash Flows — Portfolio Tracker{% endblock %}
+{% block page_title %}Cash Flows{% endblock %}
+
+{% block content %}
+
+{# ── Filter bar ── #}
+<form method="GET" action="{{ url_for('cashflows') }}" class="filter-bar" style="margin-bottom:1.25rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
+  <select name="account" class="form-input" style="width:auto" onchange="this.form.submit()">
+    <option value="">All Accounts</option>
+    {% for acc in data.accounts %}
+    <option value="{{ acc }}" {% if data.active_account == acc %}selected{% endif %}>{{ acc }}</option>
+    {% endfor %}
+  </select>
+  <select name="subtype" class="form-input" style="width:auto" onchange="this.form.submit()">
+    <option value="">All Types</option>
+    {% for st in data.known_subtypes %}
+    <option value="{{ st }}" {% if data.active_subtype == st %}selected{% endif %}>{{ st }}</option>
+    {% endfor %}
+  </select>
+  {% if data.active_account or data.active_subtype %}
+  <a href="{{ url_for('cashflows') }}" class="btn">✕ Clear</a>
+  {% endif %}
+</form>
+
+{# ── Stat cards ── #}
+<div class="stat-grid" style="grid-template-columns:repeat(5,1fr)">
+  <div class="stat-card">
+    <div class="stat-label">All-Time</div>
+    <div class="stat-value text-green">{{ data.all_time | cad }}</div>
+    <div class="stat-sub text-dim">{{ data.count }} deposit{{ 's' if data.count != 1 }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">YTD</div>
+    <div class="stat-value">{{ data.ytd | cad }}</div>
+  </div>
+  {% for st in data.known_subtypes %}
+  {% set s = data.by_subtype[st] %}
+  <div class="stat-card">
+    <div class="stat-label">{{ st }}</div>
+    <div class="stat-value">{{ s.total | cad }}</div>
+    <div class="stat-sub text-dim">{{ s.ytd | cad }} YTD · {{ s.count }} deposits</div>
+  </div>
+  {% endfor %}
+</div>
+
+{# ── Chart ── #}
+<div class="card">
+  <div class="card-header">Annual Cash Flows</div>
+  <div class="chart-wrap" style="max-height:220px;padding:16px 20px">
+    <canvas id="annualChart"></canvas>
+  </div>
+</div>
+
+{# ── By Account ── #}
+<div class="card">
+  <div class="card-header">By Account</div>
+  {% if data.account_totals %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Account</th>
+        {% for st in data.known_subtypes %}
+        <th class="r">{{ st }}</th>
+        {% endfor %}
+        <th class="r">Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for acc, totals in data.account_totals.items() %}
+      <tr>
+        <td><span class="acct-badge acct-{{ acc | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ acc }}</span></td>
+        {% for st in data.known_subtypes %}
+        <td class="r mono {% if not totals.by_subtype[st] %}text-dim{% endif %}">
+          {% if totals.by_subtype[st] %}{{ totals.by_subtype[st] | cad }}{% else %}—{% endif %}
+        </td>
+        {% endfor %}
+        <td class="r mono text-green">{{ totals.total | cad }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr style="border-top:1px solid var(--border)">
+        <td class="text-dim">Total</td>
+        {% for st in data.known_subtypes %}
+        <td class="r mono">{{ data.by_subtype[st].total | cad }}</td>
+        {% endfor %}
+        <td class="r mono text-green">{{ data.all_time | cad }}</td>
+      </tr>
+    </tfoot>
+  </table>
+  {% else %}
+  <div class="empty-row">No data. Import a CSV file to see cash flows.</div>
+  {% endif %}
+</div>
+
+{# ── Annual summary ── #}
+{% if data.by_year %}
+<div class="card">
+  <div class="card-header">By Year</div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Year</th>
+          {% for st in data.known_subtypes %}
+          <th class="r">{{ st }}</th>
+          {% endfor %}
+          <th class="r">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for yr, total in data.by_year.items() | reverse %}
+        <tr>
+          <td class="mono text-dim">{{ yr }}</td>
+          {% set yr_idx = data.chart_years.index(yr) %}
+          {% for st in data.known_subtypes %}
+          {% set val = data.chart_by_subtype[st][yr_idx] %}
+          <td class="r mono">{% if val %}{{ val | cad }}{% else %}—{% endif %}</td>
+          {% endfor %}
+          <td class="r mono text-green">{{ total | cad }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ── Transaction log ── #}
+<div class="card">
+  <div class="card-header">
+    Transaction Log
+    <span class="card-sub">{{ data.count }} record{{ 's' if data.count != 1 }}</span>
+  </div>
+  {% if data.deposits %}
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Account</th>
+          <th>Type</th>
+          <th class="r">Amount (CAD)</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in data.deposits %}
+        <tr>
+          <td class="mono">{{ d.date.strftime('%Y-%m-%d') }}</td>
+          <td><span class="acct-badge acct-{{ d.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ d.account }}</span></td>
+          <td>
+            <span class="type-badge" style="
+              {% if d.subtype == 'Contribution' %}background:rgba(0,200,240,.1);color:var(--accent)
+              {% elif d.subtype == 'RDSP Grant' %}background:rgba(0,230,118,.1);color:var(--green)
+              {% elif d.subtype == 'RDSP Bond'  %}background:rgba(155,114,245,.1);color:var(--purple)
+              {% else %}background:rgba(90,120,150,.1);color:var(--text-dim){% endif %}
+            ">{{ d.subtype or 'Deposit' }}</span>
+          </td>
+          <td class="r mono text-green">{{ d.net_cad | cad }}</td>
+          <td class="text-dim" style="font-size:.82rem">{{ d.notes or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-row">No cash flow records match the current filter.</div>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+{% if data.chart_years %}
+<script>
+const years   = {{ data.chart_years | tojson }};
+const subtypes = {{ data.known_subtypes | tojson }};
+const chartData = {{ data.chart_by_subtype | tojson }};
+const colors = [
+  { bg: 'rgba(0,200,240,.25)',   border: '#00c8f0' },
+  { bg: 'rgba(0,230,118,.25)',   border: '#00e676' },
+  { bg: 'rgba(155,114,245,.25)', border: '#9b72f5' },
+];
+new Chart(document.getElementById('annualChart'), {
+  type: 'bar',
+  data: {
+    labels: years,
+    datasets: subtypes.map((st, i) => ({
+      label: st,
+      data: chartData[st],
+      backgroundColor: colors[i].bg,
+      borderColor: colors[i].border,
+      borderWidth: 1,
+      borderRadius: 3,
+    }))
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#5a7a96', font: { size: 11 } } },
+      tooltip: { callbacks: { label: ctx => ' $' + ctx.parsed.y.toLocaleString('en-CA', {minimumFractionDigits:2}) } }
+    },
+    scales: {
+      x: { stacked: true, grid: { color: '#1a3050' }, ticks: { color: '#5a7a96' } },
+      y: { stacked: true, grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: v => '$' + v.toLocaleString() } }
+    }
+  }
+});
+</script>
+{% endif %}
+{% endblock %}

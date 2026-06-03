@@ -19,6 +19,7 @@ class Transaction(db.Model):
     fees_cad = db.Column(db.Float, default=0)
     net_cad = db.Column(db.Float, default=0)
     notes = db.Column(db.String(300), default='')
+    subtype = db.Column(db.String(50), default='')   # e.g. Contribution, RDSP Grant, RDSP Bond
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
@@ -79,3 +80,9 @@ class PortfolioSnapshot(db.Model):
     total_market = db.Column(db.Float, default=0)
     total_cash = db.Column(db.Float, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class TickerMap(db.Model):
+    __tablename__ = 'ticker_map'
+    description = db.Column(db.String(100), primary_key=True)  # cleaned broker description
+    ticker = db.Column(db.String(20), nullable=False)           # real yfinance ticker symbol
