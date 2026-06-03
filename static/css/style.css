@@ -424,9 +424,40 @@ body {
   text-transform: uppercase;
 }
 
-.type-buy      { background: var(--green-bg); color: var(--green); }
-.type-sell     { background: var(--red-bg);   color: var(--red);   }
-.type-dividend { background: rgba(255,215,64,.10); color: var(--yellow); }
+.type-buy             { background: var(--green-bg);          color: var(--green);  }
+.type-sell            { background: var(--red-bg);            color: var(--red);    }
+.type-dividend        { background: rgba(255,215,64,.10);     color: var(--yellow); }
+.type-split           { background: rgba(155,114,245,.12);    color: var(--purple); }
+.type-withholdingtax  { background: rgba(255,140,66,.12);     color: var(--orange); }
+.type-deposit         { background: rgba(0,200,240,.08);      color: var(--accent); }
+
+/* ── Filter bar ── */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border-sub);
+  flex-wrap: wrap;
+}
+
+.filter-input {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: .78rem;
+  padding: 5px 10px;
+  outline: none;
+  transition: border-color .15s;
+}
+
+.filter-input:focus { border-color: var(--accent-dim); }
+
+.filter-input::placeholder { color: var(--text-muted); }
+
+.filter-sep { color: var(--text-muted); font-size: .75rem; }
 
 /* ── Buttons ── */
 .btn {
@@ -457,6 +488,9 @@ body {
 .btn-primary:hover { background: var(--accent-dim); border-color: var(--accent-dim); }
 
 .btn-sm { padding: 5px 10px; font-size: .72rem; }
+
+.btn-danger { color: var(--red); border-color: rgba(255,77,77,.25); }
+.btn-danger:hover { background: var(--red-bg); border-color: var(--red); color: var(--red); }
 
 .btn-delete {
   background: none;

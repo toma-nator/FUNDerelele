@@ -66,15 +66,9 @@
     </div>
     {% endif %}
 
-    <!-- Edit cash balance -->
-    <details class="cash-edit">
-      <summary class="cash-edit-toggle">Edit cash balance</summary>
-      <form method="POST" action="{{ url_for('update_cash', name=acc.name) }}" class="cash-form">
-        <input type="number" name="cash_balance" value="{{ acc.cash_balance }}"
-               step="0.01" class="form-input mono cash-input" />
-        <button type="submit" class="btn btn-sm">Save</button>
-      </form>
-    </details>
+    <div style="padding:8px 20px 12px;font-size:.7rem;color:var(--text-muted)">
+      Cash = deposits − buys + sells + dividends
+    </div>
   </div>
   {% else %}
   <div class="card"><div class="empty-row">No accounts configured.</div></div>

@@ -52,6 +52,16 @@ def get_holdings():
             pos['total_cost_cad'] = pos['avg_cost_cad'] * pos['qty']
             pos['total_fees_cad'] += t.fees_cad or 0
 
+        elif t.type == 'Split':
+            if t.qty > 0:
+                # TD records the post-split total (e.g. 32 pre-split × 4:1 = 128).
+                # SET qty to this total; ACB is unchanged, avg cost per share falls.
+                pos['qty'] = t.qty
+            else:
+                # CXLSPL: arithmetic reversal used to zero out a temp-ticker entry.
+                pos['qty'] = max(0.0, pos['qty'] + t.qty)
+            pos['avg_cost_cad'] = pos['total_cost_cad'] / pos['qty'] if pos['qty'] > 0 else 0.0
+
         elif t.type == 'Dividend':
             pos['dividends_cad'] += t.amount_cad or (t.qty * t.price)
 
@@ -116,6 +126,20 @@ def get_holdings():
     return result
 
 
+def get_cash_by_account():
+    """Net liquid cash per account: sum of net_cad across all transactions.
+    Deposits (+), buys (−), sells/dividends (+). Reflects actual uninvested cash."""
+    rows = (
+        Transaction.query
+        .with_entities(Transaction.account, Transaction.net_cad)
+        .all()
+    )
+    result = {}
+    for acc, net in rows:
+        result[acc] = result.get(acc, 0.0) + (net or 0.0)
+    return result
+
+
 def get_dashboard_stats(holdings):
     total_mv = sum(h['market_value_cad'] or 0 for h in holdings)
     total_book = sum(h['book_value_cad'] for h in holdings)
@@ -124,8 +148,8 @@ def get_dashboard_stats(holdings):
     total_day_change = sum(h['day_change'] or 0 for h in holdings)
     total_dividends = sum(h['dividends_cad'] for h in holdings)
 
-    accounts = Account.query.all()
-    total_cash = sum(a.cash_balance or 0 for a in accounts)
+    cash_by_account = get_cash_by_account()
+    total_cash = sum(cash_by_account.values())
 
     account_breakdown = {}
     for h in holdings:
@@ -149,6 +173,7 @@ def get_dashboard_stats(holdings):
 def get_account_summary():
     all_holdings = get_holdings()
     accounts = Account.query.all()
+    cash_by_account = get_cash_by_account()
 
     result = []
     for account in accounts:
@@ -157,6 +182,7 @@ def get_account_summary():
         holdings_book = sum(h['book_value_cad'] for h in acct_holdings)
         unrealized = holdings_mv - holdings_book
         day_change = sum(h['day_change'] or 0 for h in acct_holdings)
+        cash = cash_by_account.get(account.name, 0.0)
 
         result.append({
             'name': account.name,
@@ -164,8 +190,8 @@ def get_account_summary():
             'id': account.id,
             'holdings_mv': holdings_mv,
             'holdings_book': holdings_book,
-            'cash_balance': account.cash_balance,
-            'total_value': holdings_mv + account.cash_balance,
+            'cash_balance': cash,
+            'total_value': holdings_mv + cash,
             'unrealized_gl': unrealized,
             'unrealized_gl_pct': (unrealized / holdings_book * 100) if holdings_book else 0,
             'day_change': day_change,
@@ -417,6 +443,13 @@ def get_tax_summary(year=None):
             pos['total_cost_cad'] = new_cost
             pos['qty'] = new_qty
 
+        elif t.type == 'Split':
+            if t.qty > 0:
+                pos['qty'] = t.qty
+            else:
+                pos['qty'] = max(0.0, pos['qty'] + t.qty)
+            pos['avg_cost_cad'] = pos['total_cost_cad'] / pos['qty'] if pos['qty'] > 0 else 0.0
+
         elif t.type == 'Sell':
             rate = fx_rate if t.currency == 'USD' else 1.0
             proceeds_cad = t.qty * t.price * rate - (t.fees_cad or 0)
@@ -473,7 +506,8 @@ def get_rebalancer_data():
             return float(default)
 
     total_mv = sum(h['market_value_cad'] or 0 for h in holdings)
-    total_cash = sum(a.cash_balance for a in accounts_db)
+    cash_by_account = get_cash_by_account()
+    total_cash = sum(cash_by_account.values())
     total_portfolio = total_mv + total_cash
 
     account_current = {}
@@ -481,7 +515,7 @@ def get_rebalancer_data():
         acc = h['account']
         account_current[acc] = account_current.get(acc, 0) + (h['market_value_cad'] or 0)
     for a in accounts_db:
-        account_current[a.name] = account_current.get(a.name, 0) + a.cash_balance
+        account_current[a.name] = account_current.get(a.name, 0) + cash_by_account.get(a.name, 0.0)
 
     rows = []
     for a in accounts_db:
@@ -524,7 +558,7 @@ def _holdings_acb(txns, fx_rate):
     """ACB computation over a filtered transaction list (mirrors get_holdings core logic)."""
     positions = {}
     for t in txns:
-        if t.type not in ('Buy', 'Sell'):
+        if t.type not in ('Buy', 'Sell', 'Split'):
             continue
         key = (t.ticker, t.account)
         if key not in positions:
@@ -545,6 +579,12 @@ def _holdings_acb(txns, fx_rate):
         elif t.type == 'Sell':
             pos['qty'] = max(pos['qty'] - t.qty, 0)
             pos['total_cost_cad'] = pos['avg_cost_cad'] * pos['qty']
+        elif t.type == 'Split':
+            if t.qty > 0:
+                pos['qty'] = t.qty
+            else:
+                pos['qty'] = max(0.0, pos['qty'] + t.qty)
+            pos['avg_cost_cad'] = pos['total_cost_cad'] / pos['qty'] if pos['qty'] > 0 else 0.0
     return [
         {'ticker': pos['ticker'], 'currency': pos['currency'],
          'qty': pos['qty'], 'book_value_cad': pos['total_cost_cad']}
@@ -565,7 +605,7 @@ def backfill_performance_history():
 
     transactions = (Transaction.query
                     .order_by(Transaction.date.asc(), Transaction.id.asc()).all())
-    buy_sell = [t for t in transactions if t.type in ('Buy', 'Sell')]
+    buy_sell = [t for t in transactions if t.type in ('Buy', 'Sell', 'Split')]
     if not buy_sell:
         return 0
 
@@ -654,10 +694,9 @@ def take_portfolio_snapshot():
         return False
 
     holdings = get_holdings()
-    accounts = Account.query.all()
     total_mv = sum(h['market_value_cad'] or 0 for h in holdings)
     total_book = sum(h['book_value_cad'] for h in holdings)
-    total_cash = sum(a.cash_balance or 0 for a in accounts)
+    total_cash = sum(get_cash_by_account().values())
 
     db.session.add(PortfolioSnapshot(
         date=today,

@@ -158,6 +158,26 @@ def delete_transaction(id):
     return redirect(url_for(next_page))
 
 
+@app.route('/transactions/delete-bulk', methods=['POST'])
+def delete_bulk_transactions():
+    ids_raw = request.form.get('ids', '')
+    ids = [int(i) for i in ids_raw.split(',') if i.strip().isdigit()]
+    if ids:
+        Transaction.query.filter(Transaction.id.in_(ids)).delete(synchronize_session=False)
+        db.session.commit()
+        flash(f'Deleted {len(ids)} transaction(s).', 'info')
+    return redirect(url_for('transactions'))
+
+
+@app.route('/transactions/delete-all', methods=['POST'])
+def delete_all_transactions():
+    count = Transaction.query.count()
+    Transaction.query.delete()
+    db.session.commit()
+    flash(f'Deleted all {count} transactions.', 'info')
+    return redirect(url_for('transactions'))
+
+
 @app.route('/accounts')
 def accounts():
     from calculations import get_account_summary

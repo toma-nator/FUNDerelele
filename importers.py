@@ -112,22 +112,23 @@ def _import_td(rows, account_name=None):
     count = 0
     date_fmts = ['%Y-%m-%d', '%m/%d/%Y', '%d-%b-%Y', '%d-%b-%y']
 
-    # Case-insensitive action lookup
     action_map = {
         'buy': 'Buy',
         'sell': 'Sell',
         'div': 'Dividend',
         'dividend': 'Dividend',
+        'split': 'Split',    # SPLIT adds shares at $0; CXLSPL cancels a split with negative qty
+        'cxlspl': 'Split',
+        'whtx02': 'WithholdingTax',
     }
-    # Cash/grant actions — recorded as Deposit with ticker CASH
     cash_subtypes = {
         'cont': 'Contribution',
         'cdsg': 'RDSP Grant',
         'cdsb': 'RDSP Bond',
     }
     cash_actions = set(cash_subtypes)
-    # Admin-only actions with no financial value to track
-    skip_actions = {'whtx02', 'split', 'cxlspl', 'tfr', 'tfri', 'tfro'}
+    # Account transfers require source/dest mapping not available in TD CSV
+    skip_actions = {'tfr', 'tfri', 'tfro'}
 
     default_account = account_name or 'TD Direct Investing'
     _ensure_account(default_account)
@@ -172,8 +173,8 @@ def _import_td(rows, account_name=None):
 
         desc = row.get('Description', '') or ''
 
-        # Skip cancellation reversal rows — they zero out a prior entry
-        if re.search(r'CANCELLATION OF', desc, re.IGNORECASE):
+        # Skip Buy/Sell cancellation reversal rows — they zero out a prior entry
+        if txn_type in ('Buy', 'Sell') and re.search(r'CANCELLATION OF', desc, re.IGNORECASE):
             continue
 
         # Ticker: use Symbol column if present, otherwise extract from Description
@@ -186,35 +187,90 @@ def _import_td(rows, account_name=None):
         try:
             date_str = (row.get('Trade Date', '') or row.get('Settle Date', '') or '').strip()
             txn_date = _parse_date(date_str, date_fmts)
-
-            qty_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
-            qty = abs(float(qty_raw)) if qty_raw else 0.0
-
-            price_raw = (row.get('Price', '') or '0').replace(',', '').strip()
-            price = abs(float(price_raw)) if price_raw else 0.0
-
             currency = (row.get('Currency', 'CAD') or 'CAD').strip().upper() or 'CAD'
 
-            comm_raw = (row.get('Commission', '') or '0').replace(',', '').strip()
-            fees = abs(float(comm_raw)) if comm_raw else 0.0
+            if txn_type == 'Split':
+                # Preserve sign: CXLSPL rows have negative qty (reversal of a prior split)
+                qty_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
+                qty = float(qty_raw) if qty_raw else 0.0
+                if qty == 0:
+                    continue
+                existing = Transaction.query.filter_by(
+                    date=txn_date, ticker=ticker, type='Split', qty=qty, price=0
+                ).first()
+                if existing:
+                    continue
+                db.session.add(Transaction(
+                    date=txn_date, ticker=ticker, account=default_account,
+                    type='Split', qty=qty, price=0, currency=currency,
+                    amount_native=0, amount_cad=0, fees_cad=0, net_cad=0,
+                ))
+                count += 1
 
-            amount_native = qty * price
-            amount_cad = amount_native
-            net_cad = (amount_cad - fees) if txn_type in ('Sell', 'Dividend') else -(amount_cad + fees)
+            elif txn_type == 'Dividend':
+                # TD doesn't provide per-share price; the total amount is in Net Amount
+                net_raw = (row.get('Net Amount', '') or '0').replace(',', '').strip()
+                amount = abs(float(net_raw)) if net_raw else 0.0
+                if amount == 0:
+                    continue
+                qty_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
+                qty = abs(float(qty_raw)) if qty_raw else 0.0
+                existing = Transaction.query.filter_by(
+                    date=txn_date, ticker=ticker, type='Dividend', qty=qty, price=0
+                ).first()
+                if existing:
+                    continue
+                db.session.add(Transaction(
+                    date=txn_date, ticker=ticker, account=default_account,
+                    type='Dividend', qty=qty, price=0, currency=currency,
+                    amount_native=amount, amount_cad=amount, fees_cad=0, net_cad=amount,
+                ))
+                count += 1
 
-            existing = Transaction.query.filter_by(
-                date=txn_date, ticker=ticker, type=txn_type, qty=qty, price=price
-            ).first()
-            if existing:
-                continue
+            elif txn_type == 'WithholdingTax':
+                net_raw = (row.get('Net Amount', '') or '0').replace(',', '').strip()
+                amount = abs(float(net_raw)) if net_raw else 0.0
+                if amount == 0:
+                    continue
+                qty_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
+                qty = abs(float(qty_raw)) if qty_raw else 0.0
+                existing = Transaction.query.filter_by(
+                    date=txn_date, ticker=ticker, type='WithholdingTax', qty=qty, price=0
+                ).first()
+                if existing:
+                    continue
+                db.session.add(Transaction(
+                    date=txn_date, ticker=ticker, account=default_account,
+                    type='WithholdingTax', qty=qty, price=0, currency=currency,
+                    amount_native=amount, amount_cad=amount, fees_cad=0, net_cad=-amount,
+                ))
+                count += 1
 
-            db.session.add(Transaction(
-                date=txn_date, ticker=ticker, account=default_account,
-                type=txn_type, qty=qty, price=price, currency=currency,
-                amount_native=amount_native, amount_cad=amount_cad,
-                fees_cad=fees, net_cad=net_cad,
-            ))
-            count += 1
+            else:  # Buy, Sell
+                qty_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
+                qty = abs(float(qty_raw)) if qty_raw else 0.0
+                price_raw = (row.get('Price', '') or '0').replace(',', '').strip()
+                price = abs(float(price_raw)) if price_raw else 0.0
+                comm_raw = (row.get('Commission', '') or '0').replace(',', '').strip()
+                fees = abs(float(comm_raw)) if comm_raw else 0.0
+                amount_native = qty * price
+                amount_cad = amount_native
+                net_cad = (amount_cad - fees) if txn_type == 'Sell' else -(amount_cad + fees)
+
+                existing = Transaction.query.filter_by(
+                    date=txn_date, ticker=ticker, type=txn_type, qty=qty, price=price
+                ).first()
+                if existing:
+                    continue
+
+                db.session.add(Transaction(
+                    date=txn_date, ticker=ticker, account=default_account,
+                    type=txn_type, qty=qty, price=price, currency=currency,
+                    amount_native=amount_native, amount_cad=amount_cad,
+                    fees_cad=fees, net_cad=net_cad,
+                ))
+                count += 1
+
         except Exception:
             continue
 

@@ -74,12 +74,52 @@
 <div class="card">
   <div class="card-header">
     Transaction Log
-    <span class="card-sub">{{ transactions | length }} total</span>
+    <span class="card-sub" id="rowCount">{{ transactions | length }} total</span>
+    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <button type="button" id="deleteSelectedBtn" class="btn btn-danger btn-sm"
+              style="display:none" onclick="submitBulkDelete()">
+        Delete Selected (<span id="selCount">0</span>)
+      </button>
+      <form method="POST" action="{{ url_for('delete_all_transactions') }}"
+            onsubmit="return confirm('Delete ALL {{ transactions | length }} transactions? This cannot be undone.')">
+        <button type="submit" class="btn btn-danger btn-sm">Delete All</button>
+      </form>
+    </div>
   </div>
+
+  <!-- Filter Bar -->
+  <div class="filter-bar">
+    <input type="text" id="filterTicker" class="filter-input mono" placeholder="Ticker…"
+           style="width:110px" oninput="applyFilters()" />
+    <select id="filterAccount" class="filter-input" onchange="applyFilters()">
+      <option value="">All Accounts</option>
+      {% for acc in accounts %}
+      <option value="{{ acc.name }}">{{ acc.name }}</option>
+      {% endfor %}
+    </select>
+    <select id="filterType" class="filter-input" onchange="applyFilters()">
+      <option value="">All Types</option>
+      <option>Buy</option>
+      <option>Sell</option>
+      <option>Dividend</option>
+      <option>Split</option>
+      <option>WithholdingTax</option>
+      <option>Deposit</option>
+    </select>
+    <input type="date" id="filterFrom" class="filter-input" onchange="applyFilters()" title="From date" />
+    <span class="filter-sep">→</span>
+    <input type="date" id="filterTo" class="filter-input" onchange="applyFilters()" title="To date" />
+    <button class="btn btn-sm" onclick="clearFilters()">Clear</button>
+  </div>
+
   <div class="table-scroll">
     <table class="data-table">
       <thead>
         <tr>
+          <th style="width:32px;padding-left:16px">
+            <input type="checkbox" id="selectAll" onchange="toggleAll(this)"
+                   style="cursor:pointer;accent-color:var(--accent)" />
+          </th>
           <th>#</th>
           <th>Date</th>
           <th>Ticker</th>
@@ -95,9 +135,17 @@
           <th></th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="txnBody">
         {% for t in transactions %}
-        <tr>
+        <tr data-ticker="{{ t.ticker | upper }}"
+            data-account="{{ t.account }}"
+            data-type="{{ t.type }}"
+            data-date="{{ t.date.strftime('%Y-%m-%d') }}">
+          <td style="padding-left:16px">
+            <input type="checkbox" class="row-check" value="{{ t.id }}"
+                   onchange="updateSelection()"
+                   style="cursor:pointer;accent-color:var(--accent)" />
+          </td>
           <td class="text-dim mono">{{ t.id }}</td>
           <td class="mono">{{ t.date.strftime('%Y-%m-%d') }}</td>
           <td class="mono ticker">{{ t.ticker }}</td>
@@ -118,22 +166,26 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="13" class="empty-row">No transactions yet. Add your first one above.</td></tr>
+        <tr><td colspan="14" class="empty-row">No transactions yet. Add your first one above.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+
+<!-- Hidden form used by bulk delete -->
+<form id="bulkDeleteForm" method="POST" action="{{ url_for('delete_bulk_transactions') }}" style="display:none">
+  <input type="hidden" name="ids" id="bulkIds" />
+</form>
 {% endblock %}
 
 {% block scripts %}
 <script>
-// Pre-fill today's date
+const TOTAL = {{ transactions | length }};
+
 document.addEventListener('DOMContentLoaded', () => {
   const d = document.querySelector('input[name="date"]');
-  if (d && !d.value) {
-    d.value = new Date().toISOString().split('T')[0];
-  }
+  if (d && !d.value) d.value = new Date().toISOString().split('T')[0];
 });
 
 function toggleAddForm() {
@@ -142,6 +194,81 @@ function toggleAddForm() {
   const open = form.style.display === 'none';
   form.style.display = open ? 'block' : 'none';
   arrow.textContent = open ? '▲' : '▼';
+}
+
+// ── Filters ──────────────────────────────────────────────────────────────────
+function applyFilters() {
+  const ticker  = document.getElementById('filterTicker').value.trim().toUpperCase();
+  const account = document.getElementById('filterAccount').value;
+  const type    = document.getElementById('filterType').value;
+  const from    = document.getElementById('filterFrom').value;
+  const to      = document.getElementById('filterTo').value;
+  const active  = ticker || account || type || from || to;
+
+  let shown = 0;
+  document.querySelectorAll('#txnBody tr[data-ticker]').forEach(row => {
+    const match =
+      (!ticker  || row.dataset.ticker.includes(ticker)) &&
+      (!account || row.dataset.account === account) &&
+      (!type    || row.dataset.type === type) &&
+      (!from    || row.dataset.date >= from) &&
+      (!to      || row.dataset.date <= to);
+
+    row.style.display = match ? '' : 'none';
+    if (match) shown++;
+
+    // Deselect hidden rows so they're excluded from bulk actions
+    if (!match) {
+      const cb = row.querySelector('.row-check');
+      if (cb) cb.checked = false;
+    }
+  });
+
+  document.getElementById('rowCount').textContent =
+    active ? `${shown} shown / ${TOTAL} total` : `${TOTAL} total`;
+
+  updateSelection();
+}
+
+function clearFilters() {
+  ['filterTicker','filterAccount','filterType','filterFrom','filterTo']
+    .forEach(id => { document.getElementById(id).value = ''; });
+  applyFilters();
+}
+
+// ── Multi-select ──────────────────────────────────────────────────────────────
+function toggleAll(master) {
+  document.querySelectorAll('#txnBody tr[data-ticker]').forEach(row => {
+    if (row.style.display !== 'none') {
+      const cb = row.querySelector('.row-check');
+      if (cb) cb.checked = master.checked;
+    }
+  });
+  updateSelection();
+}
+
+function updateSelection() {
+  const checked = [...document.querySelectorAll('.row-check:checked')];
+  const btn = document.getElementById('deleteSelectedBtn');
+  document.getElementById('selCount').textContent = checked.length;
+  btn.style.display = checked.length > 0 ? 'inline-flex' : 'none';
+
+  const visibleBoxes = [...document.querySelectorAll(
+    '#txnBody tr[data-ticker]:not([style*="none"]) .row-check'
+  )];
+  const allChecked  = visibleBoxes.length > 0 && visibleBoxes.every(cb => cb.checked);
+  const someChecked = visibleBoxes.some(cb => cb.checked);
+  const master = document.getElementById('selectAll');
+  master.checked       = allChecked;
+  master.indeterminate = someChecked && !allChecked;
+}
+
+function submitBulkDelete() {
+  const checked = [...document.querySelectorAll('.row-check:checked')];
+  if (checked.length === 0) return;
+  if (!confirm(`Delete ${checked.length} selected transaction(s)?`)) return;
+  document.getElementById('bulkIds').value = checked.map(cb => cb.value).join(',');
+  document.getElementById('bulkDeleteForm').submit();
 }
 </script>
 {% endblock %}
