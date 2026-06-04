@@ -120,9 +120,12 @@ def _import_td(rows, account_name=None):
         'sell': 'Sell',
         'div': 'Dividend',
         'dividend': 'Dividend',
-        'split': 'Split',    # SPLIT adds shares at $0; CXLSPL cancels a split with negative qty
+        'split': 'Split',    # SPLIT adds new shares; CXLSPL subtracts (temp-ticker reversal)
         'cxlspl': 'Split',
         'whtx02': 'WithholdingTax',
+        # Corporate removals: only negative-qty rows (share removal side) become Sell
+        'exch': 'CorpRemoval',
+        'disp': 'CorpRemoval',
     }
     cash_subtypes = {
         'cont': 'Contribution',
@@ -131,8 +134,8 @@ def _import_td(rows, account_name=None):
     }
     fee_actions = {'fee', 'gstcharged', 'adminfee'}
     cash_actions = set(cash_subtypes)
-    # Account transfers require source/dest mapping not available in TD CSV
-    skip_actions = {'tfr', 'tfri', 'tfro'}
+    # Account transfers and return-of-capital adjustments — skip entirely
+    skip_actions = {'tfr', 'tfri', 'tfro', 'roc', 'cxlroc', 'cxldiv', 'cxlwhtx02'}
 
     default_account = account_name or 'TD Direct Investing'
     _ensure_account(default_account)
@@ -202,6 +205,21 @@ def _import_td(rows, account_name=None):
             continue
 
         desc = row.get('Description', '') or ''
+
+        # CorpRemoval (EXCH/DISP): only the negative-qty row removes shares from the position.
+        # The positive-qty counterpart is a temp/receipt entry — skip it.
+        # These are in-kind corporate events; cash impact is zero.
+        is_corp_removal = False
+        if txn_type == 'CorpRemoval':
+            qty_sign_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
+            try:
+                qty_signed = float(qty_sign_raw)
+            except Exception:
+                continue
+            if qty_signed >= 0:
+                continue
+            txn_type = 'Sell'
+            is_corp_removal = True
 
         # Skip Buy/Sell cancellation reversal rows — they zero out a prior entry
         if txn_type in ('Buy', 'Sell') and re.search(r'CANCELLATION OF', desc, re.IGNORECASE):
@@ -283,9 +301,27 @@ def _import_td(rows, account_name=None):
                 price = abs(float(price_raw)) if price_raw else 0.0
                 comm_raw = (row.get('Commission', '') or '0').replace(',', '').strip()
                 fees = abs(float(comm_raw)) if comm_raw else 0.0
+                net_raw = (row.get('Net Amount', '') or '').replace(',', '').strip()
+
                 amount_native = qty * price
-                amount_cad = amount_native
-                net_cad = (amount_cad - fees) if txn_type == 'Sell' else -(amount_cad + fees)
+                # Net Amount already holds the actual CAD value at purchase-day FX.
+                # Use it for both Buy cost and Sell proceeds so cash and book cost
+                # are correct regardless of whether the ticker is CAD- or USD-priced.
+                # Corporate removals (EXCH/DISP) are in-kind; set cash impact to zero.
+                if net_raw and not is_corp_removal:
+                    try:
+                        net_amount_cad = abs(float(net_raw))
+                    except Exception:
+                        net_amount_cad = None
+                else:
+                    net_amount_cad = None
+
+                if txn_type == 'Buy':
+                    amount_cad = (net_amount_cad - fees) if net_amount_cad else amount_native
+                    net_cad = -(amount_cad + fees)
+                else:  # Sell
+                    amount_cad = amount_native
+                    net_cad = net_amount_cad if net_amount_cad else (amount_cad - fees)
 
                 existing = Transaction.query.filter_by(
                     date=txn_date, ticker=ticker, type=txn_type, qty=qty, price=price

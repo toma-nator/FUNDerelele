@@ -32,9 +32,9 @@ def get_holdings():
         pos = positions[key]
 
         if t.type == 'Buy':
-            rate = fx_rate if t.currency == 'USD' else 1.0
-            price_cad = t.price * rate
-            buy_cost = t.qty * price_cad + (t.fees_cad or 0)
+            # amount_cad stores the actual CAD stock cost at purchase-day FX
+            # (set by the importer from Net Amount). Add fees to get total book cost.
+            buy_cost = (t.amount_cad or t.qty * t.price) + (t.fees_cad or 0)
             new_qty = pos['qty'] + t.qty
             new_cost = pos['total_cost_cad'] + buy_cost
             pos['avg_cost_cad'] = new_cost / new_qty if new_qty > 0 else 0
@@ -53,13 +53,9 @@ def get_holdings():
             pos['total_fees_cad'] += t.fees_cad or 0
 
         elif t.type == 'Split':
-            if t.qty > 0:
-                # TD records the post-split total (e.g. 32 pre-split × 4:1 = 128).
-                # SET qty to this total; ACB is unchanged, avg cost per share falls.
-                pos['qty'] = t.qty
-            else:
-                # CXLSPL: arithmetic reversal used to zero out a temp-ticker entry.
-                pos['qty'] = max(0.0, pos['qty'] + t.qty)
+            # TD records the number of NEW shares created (not the post-split total).
+            # Both positive (new shares) and negative (CXLSPL reversal) use ADD.
+            pos['qty'] = max(0.0, pos['qty'] + t.qty)
             pos['avg_cost_cad'] = pos['total_cost_cad'] / pos['qty'] if pos['qty'] > 0 else 0.0
 
         elif t.type == 'Dividend':
@@ -568,8 +564,7 @@ def _holdings_acb(txns, fx_rate):
             }
         pos = positions[key]
         if t.type == 'Buy':
-            rate = fx_rate if t.currency == 'USD' else 1.0
-            cost = t.qty * t.price * rate + (t.fees_cad or 0)
+            cost = (t.amount_cad or t.qty * t.price) + (t.fees_cad or 0)
             new_qty = pos['qty'] + t.qty
             new_cost = pos['total_cost_cad'] + cost
             pos['avg_cost_cad'] = new_cost / new_qty if new_qty else 0
@@ -580,10 +575,7 @@ def _holdings_acb(txns, fx_rate):
             pos['qty'] = max(pos['qty'] - t.qty, 0)
             pos['total_cost_cad'] = pos['avg_cost_cad'] * pos['qty']
         elif t.type == 'Split':
-            if t.qty > 0:
-                pos['qty'] = t.qty
-            else:
-                pos['qty'] = max(0.0, pos['qty'] + t.qty)
+            pos['qty'] = max(0.0, pos['qty'] + t.qty)
             pos['avg_cost_cad'] = pos['total_cost_cad'] / pos['qty'] if pos['qty'] > 0 else 0.0
     return [
         {'ticker': pos['ticker'], 'currency': pos['currency'],
