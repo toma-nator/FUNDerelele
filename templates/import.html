@@ -5,11 +5,12 @@
 {% block content %}
 <div class="two-col">
   <div class="card">
-    <div class="card-header">Upload Broker CSV</div>
+    <div class="card-header">Upload Broker File</div>
     <div class="import-body">
       <p class="text-dim">
-        Export your transaction history from TD Direct Investing or CIBC Investor's Edge,
-        then upload the CSV here. Duplicate transactions are automatically skipped.
+        Upload a TD Direct Investing or CIBC Investor's Edge export.
+        Accepts CSV files (both brokers) or PDF account statements (TD only).
+        Duplicate transactions are automatically skipped.
       </p>
 
       <form method="POST" action="{{ url_for('import_upload') }}" enctype="multipart/form-data" class="import-form">
@@ -22,19 +23,26 @@
           </select>
         </div>
         <div class="form-group">
-          <label>CSV File</label>
-          <input type="file" name="file" accept=".csv,.txt" required class="form-input file-input" />
+          <label>File (CSV or PDF)</label>
+          <input type="file" name="file" accept=".csv,.txt,.pdf" required class="form-input file-input" />
         </div>
         <button type="submit" class="btn btn-primary">Upload &amp; Import</button>
       </form>
 
       <div class="import-help">
-        <div class="help-title">How to export from TD Direct Investing</div>
+        <div class="help-title">How to export from TD Direct Investing (CSV — 2 years)</div>
         <ol class="help-list">
           <li>Log in → Accounts → Account Activity</li>
           <li>Set your date range, then click <strong>Download</strong></li>
           <li>Choose <strong>CSV</strong> format and save the file</li>
           <li>Upload the file above</li>
+        </ol>
+
+        <div class="help-title" style="margin-top:1.5rem">TD account statements (PDF — full history)</div>
+        <ol class="help-list">
+          <li>Log in → Accounts → Statements &amp; Documents</li>
+          <li>Download monthly or quarterly PDF statements</li>
+          <li>Upload each PDF above (select TD Direct Investing or Auto-detect)</li>
         </ol>
 
         <div class="help-title" style="margin-top:1.5rem">How to export from CIBC Investor's Edge</div>

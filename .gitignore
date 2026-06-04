@@ -4,8 +4,9 @@ instance/
 *.sqlite
 *.sqlite3
 
-# CSV imports
+# CSV and PDF imports — contain real financial data
 *.csv
+*.pdf
 
 # Python
 __pycache__/
