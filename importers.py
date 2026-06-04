@@ -129,6 +129,7 @@ def _import_td(rows, account_name=None):
         'cdsg': 'RDSP Grant',
         'cdsb': 'RDSP Bond',
     }
+    fee_actions = {'fee', 'gstcharged', 'adminfee'}
     cash_actions = set(cash_subtypes)
     # Account transfers require source/dest mapping not available in TD CSV
     skip_actions = {'tfr', 'tfri', 'tfro'}
@@ -141,6 +142,32 @@ def _import_td(rows, account_name=None):
         action_key = action_raw.lower()
 
         if action_key in skip_actions:
+            continue
+
+        # Fees (GST, admin fees) — negative cash outflows
+        if action_key in fee_actions:
+            try:
+                date_str = (row.get('Trade Date', '') or row.get('Settle Date', '') or '').strip()
+                txn_date = _parse_date(date_str, date_fmts)
+                net_raw = (row.get('Net Amount', '') or '0').replace(',', '').strip()
+                amount = abs(float(net_raw)) if net_raw else 0.0
+                if amount == 0:
+                    continue
+                desc = (row.get('Description', '') or '').strip()
+                existing = Transaction.query.filter_by(
+                    date=txn_date, type='Fee', net_cad=-amount
+                ).first()
+                if existing:
+                    continue
+                db.session.add(Transaction(
+                    date=txn_date, ticker='CASH', account=default_account,
+                    type='Fee', qty=0, price=0, currency='CAD',
+                    amount_native=amount, amount_cad=amount,
+                    fees_cad=0, net_cad=-amount, notes=desc,
+                ))
+                count += 1
+            except Exception:
+                pass
             continue
 
         # Cash deposits / government grants
@@ -413,8 +440,12 @@ def _import_td_pdf(file_bytes, account_name=None):
                     tail = first[17:].strip()
                 elif fl.startswith('reinvested distribution'):
                     action, tail = 'DIV', first[23:].strip()
+                elif fl.startswith('gst charged'):
+                    action, tail = 'FEE', first[11:].strip()
+                elif fl.startswith('admin fee'):
+                    action, tail = 'FEE', first[9:].strip()
                 else:
-                    continue  # fees, beginning/ending balance, unknown — skip
+                    continue  # beginning/ending balance, unknown — skip
 
                 # Extract trailing numeric columns from the first line.
                 qty = price = amount = None
@@ -450,7 +481,7 @@ def _import_td_pdf(file_bytes, account_name=None):
                         else:
                             continue
 
-                else:  # CONT, CDSG, CDSB
+                else:  # CONT, CDSG, CDSB, FEE
                     m = _PDF_CASH_TAIL.search(tail)
                     if m:
                         amount = float(m.group(1).replace(',', ''))
@@ -476,6 +507,16 @@ def _import_td_pdf(file_bytes, account_name=None):
                 except ValueError:
                     continue
 
+                # Back-calculate commission for Buy/Sell
+                commission_str = ''
+                if action in ('Buy', 'Sell') and qty is not None and price is not None and amount is not None:
+                    is_usd = 'CONV TO CAD' in description.upper()
+                    if is_usd:
+                        commission_str = '9.99'
+                    else:
+                        calc = round(abs(amount) - qty * price, 2)
+                        commission_str = str(calc) if 0 < calc < 50 else '9.99'
+
                 all_rows.append({
                     'Trade Date':  txn_date.strftime('%Y-%m-%d'),
                     'Settle Date': txn_date.strftime('%Y-%m-%d'),
@@ -483,7 +524,7 @@ def _import_td_pdf(file_bytes, account_name=None):
                     'Action':      action,
                     'Quantity':    str(qty)   if qty   is not None else '',
                     'Price':       str(price) if price is not None else '',
-                    'Commission':  '',
+                    'Commission':  commission_str,
                     'Net Amount':  str(amount),
                     'Currency':    'CAD',
                 })
