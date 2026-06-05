@@ -6,7 +6,7 @@ def get_fx_rate():
     return _get()
 
 
-def get_holdings():
+def get_holdings(include_closed=False):
     transactions = (
         Transaction.query
         .order_by(Transaction.date.asc(), Transaction.id.asc())
@@ -67,7 +67,11 @@ def get_holdings():
 
     result = []
     for key, pos in positions.items():
-        if pos['qty'] < 0.0001:
+        # 'CASH' is a pseudo-ticker for deposits/fees/ROC, not a real position.
+        if pos['ticker'] == 'CASH':
+            continue
+        is_closed = pos['qty'] < 0.0001
+        if is_closed and not include_closed:
             continue
 
         ticker = pos['ticker']
@@ -115,6 +119,7 @@ def get_holdings():
             'realized_gl_cad': pos['realized_gl_cad'],
             'last_updated': last_updated,
             'port_pct': 0,
+            'closed': is_closed,
         })
 
     result.sort(key=lambda x: x['market_value_cad'] or 0, reverse=True)

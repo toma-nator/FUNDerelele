@@ -103,9 +103,12 @@ def dashboard():
 @app.route('/holdings')
 def holdings():
     from calculations import get_holdings
-    data = get_holdings()
+    data = get_holdings(include_closed=True)
+    accounts = sorted({h['account'] for h in data})
+    currencies = sorted({h['currency'] for h in data})
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
-    return render_template('holdings.html', holdings=data, last_updated=last_updated, active='holdings')
+    return render_template('holdings.html', holdings=data, accounts=accounts,
+                           currencies=currencies, last_updated=last_updated, active='holdings')
 
 
 @app.route('/transactions')

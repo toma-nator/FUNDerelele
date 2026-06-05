@@ -11,49 +11,98 @@
       <span class="card-sub">prices as of {{ last_updated.last_updated.strftime('%Y-%m-%d %H:%M') }}</span>
     {% endif %}
   </div>
+
+  <div class="holdings-toolbar">
+    <div class="filter-group">
+      <label>Positions</label>
+      <div class="seg" id="status-seg">
+        <button type="button" class="seg-btn active" data-status-filter="active">Active</button>
+        <button type="button" class="seg-btn" data-status-filter="closed">Closed</button>
+        <button type="button" class="seg-btn" data-status-filter="all">All</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <label>Currency</label>
+      <select id="filter-ccy" class="filter-select">
+        <option value="">All</option>
+        {% for c in currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Account</label>
+      <select id="filter-account" class="filter-select">
+        <option value="">All</option>
+        {% for a in accounts %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Search</label>
+      <input type="text" id="filter-search" class="filter-select filter-search"
+             placeholder="ticker or account…" autocomplete="off" />
+    </div>
+    <div class="filter-spacer"></div>
+    <span class="holdings-count" id="holdings-count"></span>
+  </div>
+
   <div class="table-scroll">
-    <table class="data-table">
+    <table class="data-table sortable" id="holdings-table">
       <thead>
         <tr>
           <th>#</th>
-          <th>Ticker</th>
-          <th>Account</th>
-          <th>CCY</th>
-          <th class="r">Qty</th>
-          <th class="r">Avg Cost</th>
-          <th class="r">Live Price</th>
-          <th class="r">Book Val</th>
-          <th class="r">Mkt Val</th>
-          <th class="r">Unreal G/L $</th>
-          <th class="r">Unreal G/L %</th>
-          <th class="r">Day Chg $</th>
-          <th class="r">Day Chg %</th>
-          <th class="r">% Port</th>
-          <th class="r">Dividends</th>
-          <th class="r">Realized G/L</th>
+          <th data-sort data-type="text">Ticker <span class="sort-arrow"></span></th>
+          <th data-sort data-type="text">Account <span class="sort-arrow"></span></th>
+          <th data-sort data-type="text">CCY <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Qty <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Avg Cost <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Live Price <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Book Val <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num" data-default-sort>Mkt Val <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Unreal G/L $ <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Unreal G/L % <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Day Chg $ <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Day Chg % <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">% Port <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Dividends <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Realized G/L <span class="sort-arrow"></span></th>
         </tr>
       </thead>
       <tbody>
         {% for h in holdings %}
-        <tr>
-          <td class="text-dim mono">{{ loop.index }}</td>
-          <td class="mono ticker">{{ h.ticker }}</td>
-          <td><span class="acct-badge acct-{{ h.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ h.account }}</span></td>
-          <td class="mono">{{ h.currency }}</td>
-          <td class="r mono">{{ h.qty | num(4) }}</td>
-          <td class="r mono">{{ h.avg_cost_cad | cad }}</td>
-          <td class="r mono {% if h.live_price %}{% else %}text-dim{% endif %}">
+        <tr data-status="{{ 'closed' if h.closed else 'active' }}"
+            data-ccy="{{ h.currency }}" data-account="{{ h.account }}"
+            data-search="{{ (h.ticker ~ ' ' ~ h.account ~ ' ' ~ h.currency) | lower }}">
+          <td class="text-dim mono col-rownum">{{ loop.index }}</td>
+          <td class="mono ticker" data-val="{{ h.ticker }}">
+            {{ h.ticker }}{% if h.closed %} <span class="closed-badge">closed</span>{% endif %}
+          </td>
+          <td data-val="{{ h.account }}"><span class="acct-badge acct-{{ h.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ h.account }}</span></td>
+          <td class="mono" data-val="{{ h.currency }}">{{ h.currency }}</td>
+          <td class="r mono" data-val="{{ h.qty }}">{{ h.qty | num(4) }}</td>
+          {% if h.closed %}
+          <td class="r mono text-dim" data-val="">—</td>
+          <td class="r mono text-dim" data-val="">—</td>
+          <td class="r mono text-dim" data-val="">—</td>
+          <td class="r mono text-dim" data-val="">—</td>
+          <td class="r mono text-dim" data-val="">—</td>
+          <td class="r mono text-dim" data-val="">—</td>
+          <td class="r mono text-dim" data-val="">—</td>
+          <td class="r mono text-dim" data-val="">—</td>
+          <td class="r mono text-dim" data-val="">—</td>
+          {% else %}
+          <td class="r mono" data-val="{{ h.avg_cost_cad }}">{{ h.avg_cost_cad | cad }}</td>
+          <td class="r mono {% if not h.live_price %}text-dim{% endif %}" data-val="{{ h.live_price if h.live_price else '' }}">
             {% if h.live_price %}${{ '%.2f' % h.live_price }}{% else %}—{% endif %}
           </td>
-          <td class="r mono">{{ h.book_value_cad | cad }}</td>
-          <td class="r mono">{{ h.market_value_cad | cad }}</td>
-          <td class="r mono {{ h.unrealized_gl | gl_class }}">{{ h.unrealized_gl | signed_cad }}</td>
-          <td class="r mono {{ h.unrealized_gl_pct | gl_class }}">{{ h.unrealized_gl_pct | pct }}</td>
-          <td class="r mono {{ h.day_change | gl_class }}">{{ h.day_change | signed_cad }}</td>
-          <td class="r mono {{ h.day_change_pct | gl_class }}">{{ h.day_change_pct | pct }}</td>
-          <td class="r mono">{{ '%.1f' % h.port_pct }}%</td>
-          <td class="r mono text-green">{{ h.dividends_cad | cad }}</td>
-          <td class="r mono {{ h.realized_gl_cad | gl_class }}">{{ h.realized_gl_cad | signed_cad }}</td>
+          <td class="r mono" data-val="{{ h.book_value_cad }}">{{ h.book_value_cad | cad }}</td>
+          <td class="r mono" data-val="{{ h.market_value_cad if h.market_value_cad is not none else '' }}">{{ h.market_value_cad | cad }}</td>
+          <td class="r mono {{ h.unrealized_gl | gl_class }}" data-val="{{ h.unrealized_gl if h.unrealized_gl is not none else '' }}">{{ h.unrealized_gl | signed_cad }}</td>
+          <td class="r mono {{ h.unrealized_gl_pct | gl_class }}" data-val="{{ h.unrealized_gl_pct if h.unrealized_gl_pct is not none else '' }}">{{ h.unrealized_gl_pct | pct }}</td>
+          <td class="r mono {{ h.day_change | gl_class }}" data-val="{{ h.day_change if h.day_change is not none else '' }}">{{ h.day_change | signed_cad }}</td>
+          <td class="r mono {{ h.day_change_pct | gl_class }}" data-val="{{ h.day_change_pct if h.day_change_pct is not none else '' }}">{{ h.day_change_pct | pct }}</td>
+          <td class="r mono" data-val="{{ h.port_pct }}">{{ '%.1f' % h.port_pct }}%</td>
+          {% endif %}
+          <td class="r mono text-green" data-val="{{ h.dividends_cad }}">{{ h.dividends_cad | cad }}</td>
+          <td class="r mono {{ h.realized_gl_cad | gl_class }}" data-val="{{ h.realized_gl_cad }}">{{ h.realized_gl_cad | signed_cad }}</td>
         </tr>
         {% else %}
         <tr><td colspan="16" class="empty-row">No holdings yet. Add transactions to see your portfolio here.</td></tr>
@@ -61,5 +110,119 @@
       </tbody>
     </table>
   </div>
+  <div class="empty-row" id="no-match-row" style="display:none">No positions match the current filters.</div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const table = document.getElementById('holdings-table');
+  if (!table) return;
+  const tbody = table.tBodies[0];
+  const rows = Array.from(tbody.rows).filter(r => r.dataset.status);  // skip the empty-state row
+  const headers = Array.from(table.tHead.rows[0].cells);
+  let sortIdx = -1, sortDir = -1;  // dir: 1 asc, -1 desc
+
+  // ── Sorting ──────────────────────────────────────────────
+  function cellVal(row, idx, type) {
+    const cell = row.cells[idx];
+    const raw = cell.dataset.val !== undefined ? cell.dataset.val : cell.textContent.trim();
+    if (type === 'num') {
+      if (raw === '' || raw === null) return NaN;
+      const n = parseFloat(raw);
+      return isNaN(n) ? NaN : n;
+    }
+    return raw.toLowerCase();
+  }
+
+  function sortBy(idx) {
+    const type = headers[idx].dataset.type || 'text';
+    if (sortIdx === idx) { sortDir = -sortDir; } else { sortIdx = idx; sortDir = (type === 'num') ? -1 : 1; }
+
+    rows.sort((a, b) => {
+      const va = cellVal(a, idx, type), vb = cellVal(b, idx, type);
+      if (type === 'num') {
+        const an = isNaN(va), bn = isNaN(vb);
+        if (an && bn) return 0;
+        if (an) return 1;          // blanks always to bottom
+        if (bn) return -1;
+        return (va - vb) * sortDir;
+      }
+      if (va < vb) return -1 * sortDir;
+      if (va > vb) return 1 * sortDir;
+      return 0;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+
+    headers.forEach((h, i) => {
+      const arrow = h.querySelector('.sort-arrow');
+      if (arrow) arrow.textContent = (i === sortIdx) ? (sortDir === 1 ? '▲' : '▼') : '';
+      h.classList.toggle('sorted', i === sortIdx);
+    });
+    renumber();
+  }
+
+  headers.forEach((h, i) => {
+    if (h.dataset.sort !== undefined) {
+      h.style.cursor = 'pointer';
+      h.addEventListener('click', () => sortBy(i));
+    }
+  });
+
+  // Reflect the initial server order (Mkt Val desc) in the header arrow.
+  const defIdx = headers.findIndex(h => h.dataset.defaultSort !== undefined);
+  if (defIdx >= 0) {
+    sortIdx = defIdx; sortDir = -1;
+    const a = headers[defIdx].querySelector('.sort-arrow');
+    if (a) a.textContent = '▼';
+    headers[defIdx].classList.add('sorted');
+  }
+
+  // ── Filtering ────────────────────────────────────────────
+  let statusFilter = 'active';
+  const ccySel = document.getElementById('filter-ccy');
+  const acctSel = document.getElementById('filter-account');
+  const searchInp = document.getElementById('filter-search');
+  const countEl = document.getElementById('holdings-count');
+  const noMatch = document.getElementById('no-match-row');
+
+  function applyFilters() {
+    const ccy = ccySel ? ccySel.value : '';
+    const acct = acctSel ? acctSel.value : '';
+    const q = searchInp ? searchInp.value.trim().toLowerCase() : '';
+    let visible = 0;
+    rows.forEach(r => {
+      const ok = (statusFilter === 'all' || r.dataset.status === statusFilter)
+              && (!ccy || r.dataset.ccy === ccy)
+              && (!acct || r.dataset.account === acct)
+              && (!q || (r.dataset.search || '').indexOf(q) !== -1);
+      r.style.display = ok ? '' : 'none';
+      if (ok) visible++;
+    });
+    if (noMatch) noMatch.style.display = (visible === 0 && rows.length) ? '' : 'none';
+    renumber();
+    if (countEl) countEl.textContent = visible + ' position' + (visible === 1 ? '' : 's');
+  }
+
+  function renumber() {
+    let n = 0;
+    rows.forEach(r => { if (r.style.display !== 'none') { n++; r.cells[0].textContent = n; } });
+  }
+
+  document.querySelectorAll('#status-seg .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#status-seg .seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      statusFilter = btn.dataset.statusFilter;
+      applyFilters();
+    });
+  });
+  if (ccySel) ccySel.addEventListener('change', applyFilters);
+  if (acctSel) acctSel.addEventListener('change', applyFilters);
+  if (searchInp) searchInp.addEventListener('input', applyFilters);
+
+  applyFilters();  // default: active only
+})();
+</script>
 {% endblock %}
