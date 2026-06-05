@@ -134,8 +134,9 @@ def _import_td(rows, account_name=None):
     }
     fee_actions = {'fee', 'gstcharged', 'adminfee'}
     cash_actions = set(cash_subtypes)
-    # Account transfers and return-of-capital adjustments — skip entirely
-    skip_actions = {'tfr', 'tfri', 'tfro', 'roc', 'cxlroc', 'cxldiv', 'cxlwhtx02'}
+    # Account transfers — pure in-kind moves with no cash impact, skip entirely.
+    # (ROC/CXLROC and CXLDIV/CXLWHTX02 are handled below as real cash events.)
+    skip_actions = {'tfr', 'tfri', 'tfro'}
 
     default_account = account_name or 'TD Direct Investing'
     _ensure_account(default_account)
@@ -200,6 +201,74 @@ def _import_td(rows, account_name=None):
                 pass
             continue
 
+        # Return of capital — real cash credited to the account (ROC) and its
+        # reversal (CXLROC). Net Amount is already signed (ROC +, CXLROC −).
+        # Booked as cash-only; the underlying position, if disposed, no longer
+        # appears in holdings. (ACB reduction for still-held positions is not modelled.)
+        if action_key in ('roc', 'cxlroc'):
+            try:
+                date_str = (row.get('Trade Date', '') or row.get('Settle Date', '') or '').strip()
+                txn_date = _parse_date(date_str, date_fmts)
+                net_raw = (row.get('Net Amount', '') or '0').replace(',', '').strip()
+                amount = float(net_raw) if net_raw else 0.0  # keep sign
+                if amount == 0:
+                    continue
+                desc = (row.get('Description', '') or '').strip()
+                existing = Transaction.query.filter_by(
+                    date=txn_date, type='ReturnOfCapital', net_cad=amount
+                ).first()
+                if existing:
+                    continue
+                db.session.add(Transaction(
+                    date=txn_date, ticker='CASH', account=default_account,
+                    type='ReturnOfCapital', qty=0, price=0, currency='CAD',
+                    amount_native=abs(amount), amount_cad=amount,
+                    fees_cad=0, net_cad=amount, notes=desc,
+                ))
+                count += 1
+            except Exception:
+                pass
+            continue
+
+        # Dividend / withholding-tax cancellations — reverse a previously booked
+        # amount so cancelled (or cancelled-and-reissued) distributions net out in
+        # both cash and dividend income.
+        #   CXLDIV    → negative Dividend  (income down, cash out)
+        #   CXLWHTX02 → withholding refund (cash back in)
+        if action_key in ('cxldiv', 'cxlwhtx02'):
+            try:
+                date_str = (row.get('Trade Date', '') or row.get('Settle Date', '') or '').strip()
+                txn_date = _parse_date(date_str, date_fmts)
+                net_raw = (row.get('Net Amount', '') or '0').replace(',', '').strip()
+                amount = abs(float(net_raw)) if net_raw else 0.0
+                if amount == 0:
+                    continue
+                desc = (row.get('Description', '') or '').strip()
+                ticker = (row.get('Symbol', '') or '').strip().upper() or _td_ticker_from_desc(desc)
+                if not ticker or ticker == 'UNKNOWN':
+                    continue
+                currency = (row.get('Currency', 'CAD') or 'CAD').strip().upper() or 'CAD'
+                qty_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
+                qty = abs(float(qty_raw)) if qty_raw else 0.0
+                if action_key == 'cxldiv':
+                    rtype, amt_cad, ncad = 'Dividend', -amount, -amount
+                else:  # cxlwhtx02 — reverses a withholding tax, cash returns
+                    rtype, amt_cad, ncad = 'WithholdingTax', -amount, amount
+                existing = Transaction.query.filter_by(
+                    date=txn_date, ticker=ticker, type=rtype, qty=qty, price=0, net_cad=ncad
+                ).first()
+                if existing:
+                    continue
+                db.session.add(Transaction(
+                    date=txn_date, ticker=ticker, account=default_account,
+                    type=rtype, qty=qty, price=0, currency=currency,
+                    amount_native=amount, amount_cad=amt_cad, fees_cad=0, net_cad=ncad,
+                ))
+                count += 1
+            except Exception:
+                pass
+            continue
+
         txn_type = action_map.get(action_key)
         if not txn_type:
             continue
@@ -208,8 +277,10 @@ def _import_td(rows, account_name=None):
 
         # CorpRemoval (EXCH/DISP): only the negative-qty row removes shares from the position.
         # The positive-qty counterpart is a temp/receipt entry — skip it.
-        # These are in-kind corporate events; cash impact is zero.
+        # EXCH is an in-kind exchange (paired rows net to zero → no cash). DISP is a
+        # disposition that pays cash-in-lieu, so its Net Amount must be credited.
         is_corp_removal = False
+        is_inkind = False
         if txn_type == 'CorpRemoval':
             qty_sign_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
             try:
@@ -218,6 +289,7 @@ def _import_td(rows, account_name=None):
                 continue
             if qty_signed >= 0:
                 continue
+            is_inkind = (action_key == 'exch')
             txn_type = 'Sell'
             is_corp_removal = True
 
@@ -264,7 +336,7 @@ def _import_td(rows, account_name=None):
                 qty_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
                 qty = abs(float(qty_raw)) if qty_raw else 0.0
                 existing = Transaction.query.filter_by(
-                    date=txn_date, ticker=ticker, type='Dividend', qty=qty, price=0
+                    date=txn_date, ticker=ticker, type='Dividend', qty=qty, price=0, net_cad=amount
                 ).first()
                 if existing:
                     continue
@@ -283,7 +355,7 @@ def _import_td(rows, account_name=None):
                 qty_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
                 qty = abs(float(qty_raw)) if qty_raw else 0.0
                 existing = Transaction.query.filter_by(
-                    date=txn_date, ticker=ticker, type='WithholdingTax', qty=qty, price=0
+                    date=txn_date, ticker=ticker, type='WithholdingTax', qty=qty, price=0, net_cad=-amount
                 ).first()
                 if existing:
                     continue
@@ -307,8 +379,8 @@ def _import_td(rows, account_name=None):
                 # Net Amount already holds the actual CAD value at purchase-day FX.
                 # Use it for both Buy cost and Sell proceeds so cash and book cost
                 # are correct regardless of whether the ticker is CAD- or USD-priced.
-                # Corporate removals (EXCH/DISP) are in-kind; set cash impact to zero.
-                if net_raw and not is_corp_removal:
+                # In-kind removals (EXCH) carry no cash; DISP keeps its cash-in-lieu.
+                if net_raw and not is_inkind:
                     try:
                         net_amount_cad = abs(float(net_raw))
                     except Exception:

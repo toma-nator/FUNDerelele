@@ -8,7 +8,15 @@
   <div class="card account-card">
     <div class="account-header">
       <span class="account-name">{{ acc.name }}</span>
-      <span class="account-type-badge">{{ acc.type }}</span>
+      <form method="post" action="{{ url_for('update_account_type', name=acc.name) }}"
+            style="margin:0">
+        <select name="type" onchange="this.form.submit()" class="account-type-select"
+                title="Registered accounts are tax-sheltered">
+          {% for t in account_types %}
+          <option value="{{ t }}" {% if t == acc.type %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </form>
     </div>
 
     <div class="account-stats">

@@ -182,7 +182,8 @@ def delete_all_transactions():
 def accounts():
     from calculations import get_account_summary
     data = get_account_summary()
-    return render_template('accounts.html', accounts=data, active='accounts')
+    return render_template('accounts.html', accounts=data, active='accounts',
+                           account_types=ACCOUNT_TYPES)
 
 
 @app.route('/accounts/<name>/cash', methods=['POST'])
@@ -194,6 +195,21 @@ def update_cash(name):
         flash(f'Cash updated for {name}.', 'success')
     except Exception as e:
         flash(f'Error: {e}', 'error')
+    return redirect(url_for('accounts'))
+
+
+# Account types — registered ones are tax-sheltered (see Tax & ACB tab).
+ACCOUNT_TYPES = ['Non-Reg', 'TFSA', 'RRSP', 'FHSA', 'RDSP', 'RESP', 'LIRA', 'RRIF']
+
+
+@app.route('/accounts/<name>/type', methods=['POST'])
+def update_account_type(name):
+    account = Account.query.filter_by(name=name).first_or_404()
+    new_type = request.form.get('type', '').strip()
+    if new_type:
+        account.type = new_type
+        db.session.commit()
+        flash(f'Account type for {name} set to {new_type}.', 'success')
     return redirect(url_for('accounts'))
 
 

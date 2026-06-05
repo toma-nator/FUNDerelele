@@ -8,6 +8,11 @@ instance/
 *.csv
 *.pdf
 
+# Spreadsheets — the real Excel tracker contains private financial data
+*.xlsx
+*.xls
+*.xlsm
+
 # Python
 __pycache__/
 *.pyc

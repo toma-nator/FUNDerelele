@@ -44,11 +44,15 @@ def get_holdings():
             pos['currency'] = t.currency
 
         elif t.type == 'Sell':
+            # Proceeds = the actual CAD cash recorded at sale (net_cad already reflects
+            # historical FX and fees). ACB removed is capped at shares actually held, so
+            # corporate-action chains (EXCH then DISP on the same shares) can't remove
+            # the cost basis twice and double-count the loss.
+            sell_qty = min(t.qty, pos['qty']) if pos['qty'] > 0 else 0.0
             rate = fx_rate if t.currency == 'USD' else 1.0
-            price_cad = t.price * rate
-            realized = (price_cad - pos['avg_cost_cad']) * t.qty - (t.fees_cad or 0)
-            pos['realized_gl_cad'] += realized
-            pos['qty'] -= t.qty
+            proceeds = t.net_cad if t.net_cad is not None else (t.price * rate * t.qty - (t.fees_cad or 0))
+            pos['realized_gl_cad'] += proceeds - pos['avg_cost_cad'] * sell_qty
+            pos['qty'] = max(0.0, pos['qty'] - t.qty)
             pos['total_cost_cad'] = pos['avg_cost_cad'] * pos['qty']
             pos['total_fees_cad'] += t.fees_cad or 0
 
@@ -412,6 +416,10 @@ def get_gic_stats():
 
 # ── Tax & ACB ─────────────────────────────────────────────────────────────────
 
+# Registered (tax-sheltered) account types — capital gains here are not taxable.
+REGISTERED_TYPES = {'TFSA', 'RRSP', 'FHSA', 'RDSP', 'RESP', 'LIRA', 'LRSP', 'RRIF'}
+
+
 def get_tax_summary(year=None):
     from datetime import date
 
@@ -420,6 +428,12 @@ def get_tax_summary(year=None):
 
     all_txns = Transaction.query.order_by(Transaction.date.asc(), Transaction.id.asc()).all()
     fx_rate = get_fx_rate()
+
+    # Map account name -> registered? Gains in registered accounts are tax-sheltered.
+    acct_type = {a.name: (a.type or 'Non-Reg') for a in Account.query.all()}
+
+    def is_registered(account_name):
+        return acct_type.get(account_name, 'Non-Reg').strip().upper() in REGISTERED_TYPES
 
     positions_running = {}
     tax_rows = []
@@ -431,8 +445,8 @@ def get_tax_summary(year=None):
         pos = positions_running[key]
 
         if t.type == 'Buy':
-            rate = fx_rate if t.currency == 'USD' else 1.0
-            buy_cost = t.qty * t.price * rate + (t.fees_cad or 0)
+            # Use recorded CAD cost (historical FX), consistent with get_holdings.
+            buy_cost = (t.amount_cad or t.qty * t.price) + (t.fees_cad or 0)
             new_qty = pos['qty'] + t.qty
             new_cost = pos['total_cost_cad'] + buy_cost
             pos['avg_cost_cad'] = new_cost / new_qty if new_qty > 0 else 0
@@ -440,16 +454,16 @@ def get_tax_summary(year=None):
             pos['qty'] = new_qty
 
         elif t.type == 'Split':
-            if t.qty > 0:
-                pos['qty'] = t.qty
-            else:
-                pos['qty'] = max(0.0, pos['qty'] + t.qty)
+            pos['qty'] = max(0.0, pos['qty'] + t.qty)
             pos['avg_cost_cad'] = pos['total_cost_cad'] / pos['qty'] if pos['qty'] > 0 else 0.0
 
         elif t.type == 'Sell':
+            # Proceeds = actual recorded cash; ACB capped at shares actually held so
+            # corporate-action chains don't remove the same cost basis twice.
+            sell_qty = min(t.qty, pos['qty']) if pos['qty'] > 0 else 0.0
             rate = fx_rate if t.currency == 'USD' else 1.0
-            proceeds_cad = t.qty * t.price * rate - (t.fees_cad or 0)
-            acb = pos['avg_cost_cad'] * t.qty
+            proceeds_cad = t.net_cad if t.net_cad is not None else (t.qty * t.price * rate - (t.fees_cad or 0))
+            acb = pos['avg_cost_cad'] * sell_qty
             gl = proceeds_cad - acb
 
             if t.date.year == year:
@@ -457,19 +471,28 @@ def get_tax_summary(year=None):
                     'date': t.date,
                     'ticker': t.ticker,
                     'account': t.account,
+                    'registered': is_registered(t.account),
                     'qty': t.qty,
                     'proceeds_cad': proceeds_cad,
                     'acb': acb,
                     'gl': gl,
                 })
 
-            pos['qty'] = max(0, pos['qty'] - t.qty)
+            pos['qty'] = max(0.0, pos['qty'] - t.qty)
             pos['total_cost_cad'] = pos['avg_cost_cad'] * pos['qty']
 
-    total_gl = sum(r['gl'] for r in tax_rows)
-    total_gains = sum(r['gl'] for r in tax_rows if r['gl'] > 0)
-    total_losses = sum(r['gl'] for r in tax_rows if r['gl'] < 0)
+    # Realized G/L across all accounts (performance tracking)
+    total_realized = sum(r['gl'] for r in tax_rows)
+
+    # Taxable figures come from non-registered accounts only
+    taxable_rows = [r for r in tax_rows if not r['registered']]
+    total_gl = sum(r['gl'] for r in taxable_rows)
+    total_gains = sum(r['gl'] for r in taxable_rows if r['gl'] > 0)
+    total_losses = sum(r['gl'] for r in taxable_rows if r['gl'] < 0)
     taxable_gain = max(0, total_gl) * 0.5  # 50% inclusion rate
+
+    registered_realized = total_realized - total_gl
+    registered_names = sorted({r['account'] for r in tax_rows if r['registered']})
 
     sell_years = sorted(set(
         t.date.year for t in all_txns if t.type == 'Sell'
@@ -478,10 +501,14 @@ def get_tax_summary(year=None):
     return {
         'year': year,
         'rows': sorted(tax_rows, key=lambda r: r['date']),
+        'total_realized': total_realized,
         'total_gl': total_gl,
         'total_gains': total_gains,
         'total_losses': total_losses,
         'taxable_gain': taxable_gain,
+        'registered_realized': registered_realized,
+        'registered_names': registered_names,
+        'has_taxable': len(taxable_rows) > 0,
         'available_years': sell_years,
     }
 

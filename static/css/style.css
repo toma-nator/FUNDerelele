@@ -593,6 +593,22 @@ body {
   border-radius: 10px;
 }
 
+.account-type-select {
+  font-size: .65rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(0,200,240,.1);
+  border: 1px solid rgba(0,200,240,.25);
+  padding: 3px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: var(--mono);
+}
+.account-type-select:hover { background: rgba(0,200,240,.18); }
+.account-type-select:focus { outline: none; border-color: var(--accent); }
+
 .account-stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
