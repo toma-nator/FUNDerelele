@@ -20,54 +20,56 @@ Or double-click `run.bat`. Open http://localhost:5000.
 ## Project structure
 
 ```
-app.py            # Flask routes + app init + template filters
-models.py         # SQLAlchemy models (Transaction, PriceCache, Account, Setting, GIC, WatchlistItem)
-calculations.py   # Holdings calc from transactions, dashboard stats, account summary
-price_service.py  # yfinance fetch + DB cache + background refresh thread
-importers.py      # TD / CIBC CSV parsers
-templates/
-  base.html       # Sidebar nav + topbar layout
-  dashboard.html  # Stat cards + donut chart + top holdings
-  holdings.html   # Full holdings table with live prices
-  transactions.html # Transaction log + add form
-  accounts.html   # Per-account cards with mini holdings tables
-  import.html     # CSV upload + deletable import log
+app.py            # Flask routes + app init + lightweight column migrations + template filters
+models.py         # SQLAlchemy models: Transaction, PriceCache (+meta_json), Account, Setting,
+                  #   GIC, WatchlistItem, PortfolioSnapshot, TickerMap
+calculations.py   # All derived data: holdings, dashboard, account summary + allocation
+                  #   breakdowns, tax/ACB, dividends, performance series, GICs, rebalancer,
+                  #   projections, Monte Carlo, cash flows
+price_service.py  # yfinance live prices + FX + classification/dividend metadata cache + bg thread
+importers.py      # TD CSV, CIBC CSV, and TD PDF-statement parsers
+templates/        # one per tab: dashboard, holdings, transactions, accounts, performance,
+                  #   dividends, cashflows, gics, rebalancer, watchlist, tax, projections,
+                  #   montecarlo, settings, import (+ base.html layout)
 static/
   css/style.css   # Midnight Terminal theme (CSS variables, no framework)
   js/app.js       # refreshPrices(), flash auto-dismiss
+SUGGESTIONS.md    # Backlog of parked feature ideas (read before proposing new work)
 ```
 
 ## Key architecture decisions
 
-- **Holdings are never stored** — always calculated on the fly from the transactions table using the average cost method (Canadian ACB convention)
-- **FX rate** (USD/CAD) is fetched from yfinance (`USDCAD=X`) and cached in the `settings` table
-- **Price cache** lives in `price_cache` table; background thread refreshes every 5 min only in the reloader child process (`WERKZEUG_RUN_MAIN=true`) to avoid double-start in debug mode
-- Delete redirects respect a `?next=` query param so deleting from the Import page stays on Import
+- **Holdings are never stored** — always calculated on the fly from the transactions table using the average cost method (Canadian ACB convention). `get_holdings(include_closed=False)` excludes the `CASH` pseudo-ticker.
+- **FX rate** (USD/CAD) is from yfinance (`USDCAD=X`), cached in `settings`.
+- **Price cache** (`price_cache` table) refreshes every 5 min in the reloader child only (`WERKZEUG_RUN_MAIN=true`). The same table's `meta_json` column caches per-ticker **classification + dividend metadata** (asset type, sector, market cap, ETF sector/asset look-through, dividend rate/yield) fetched once from yfinance — used by the Accounts allocation breakdowns and Dividends forward income.
+- **Ticker mapping** (`ticker_map` table): broker descriptions → real yfinance symbols; mapping the description on the Import page retro-updates existing transactions. Canadian CDRs use the `.NE` suffix (e.g. `AAPL.NE`); US holdings use plain symbols.
+- **Importer correctness** (`importers.py`): handles TD corporate actions — ROC/CXLROC as cash, DISP cash-in-lieu (EXCH stays in-kind), CXLDIV/CXLWHTX02 as reversals, splits as ADD (TD records *new* shares), and withholding tax. Dedup is amount-aware.
+- **Performance series** (`get_performance_series`): live, per-scope (portfolio or account), money-weighted CAD benchmarks (S&P 500 / NASDAQ / TSX), time-weighted return. Historical months use yfinance month-end closes; the **latest point uses live prices**. Valuation uses **unadjusted prices** (dividends tracked separately as cash) and scales pre-split months by future split ratios to avoid split jumps.
+- **Tax tab** is registration-aware: registered account types (TFSA/RRSP/FHSA/RDSP/…) are tax-sheltered and excluded from taxable totals.
+- Delete redirects respect a `?next=` query param.
 
-## Accounts seeded on first run
+## Accounts
 
-TFSA, RRSP, FHSA, Non-Reg — created automatically if the DB is empty.
+Accounts are created **only by imports** (`_ensure_account`, default type `Non-Reg`) or by adding a transaction to a new account name — no placeholder accounts are seeded. Account type is editable on the Accounts page; zero-dollar accounts are hidden.
 
-## What's built (Phase 1)
+## What's built
 
-- Dashboard, Holdings, Transactions, Accounts, Import (TD + CIBC CSV)
+- **Dashboard, Holdings, Transactions, Accounts, Import** (TD CSV/PDF + CIBC CSV)
+- **Holdings**: sortable columns, currency/account/search filters, active/closed toggle
+- **Accounts**: overview ↔ single-account detail (full-width) with allocation breakdowns (asset type, sector w/ ETF look-through, market cap, currency, holdings-vs-cash, weights), book value / contributions / grants / all-time gain / dividends / realized G/L
+- **Performance**: line + monthly-Δ charts, ranges, scope, benchmarks (money-weighted), TWR + per-year returns, cash/%-return/avg-rate toggles
+- **Dividends**: net-of-withholding, account scope, forward income & current yield
+- **Tax & ACB** (registered-aware), GICs, Rebalancer, Cash Flows, Watchlist, Projections, Monte Carlo, Settings
 
-## What's next (Phase 2+)
+## What's next
 
-- Performance history (monthly snapshots)
-- Dividends tracker
-- GICs tracker
-- Rebalancer (target vs actual allocation)
-- Watchlist
-- Monte Carlo simulation
-- Projections / CAGR scenarios
-- Tax & ACB (non-registered accounts)
-- Settings page (FX rate, allocation targets, contribution room)
+- See `SUGGESTIONS.md` for the parked backlog (e.g. asset-class look-through, max drawdown, target-rate line, dividend drill-down/projection, holdings-only return)
 - Auto-import via folder watcher
 
 ## User context
 
-- Canadian investor — accounts are TFSA, RRSP, FHSA, Non-Reg
-- Brokers: TD Direct Investing, CIBC Investor's Edge
-- Mix of CAD and USD holdings; all values displayed in CAD
-- Theme must stay Midnight Terminal dark
+- Canadian investor. The imported account is an **RDSP** (`59WBM0N`, type set to RDSP). Brokers: TD Direct Investing, CIBC Investor's Edge.
+- Mix of CAD and USD holdings (incl. CAD-hedged CDRs); all values displayed in CAD.
+- Has a **dividend-heavy friend** who will also use the app — dividend/withholding/forward-income correctness matters.
+- Theme must stay Midnight Terminal dark; values a clean, uncluttered UI.
+- See `memory/feedback-working-style.md` for how they like to work (tab-by-tab, review-first, commit after each).
