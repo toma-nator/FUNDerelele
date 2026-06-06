@@ -105,3 +105,80 @@ account's funding building up rather than just per-year amounts.
 - **Where:** a toggle on the Annual Cash Flows chart, or a second small chart.
 - **Effort:** small — a running-sum series in `get_cashflow_stats` and a line
   dataset in `cashflows.html`.
+
+## GICs — fold into net worth (Dashboard / Accounts)
+
+GICs currently live only on the GICs tab (`GIC` is never referenced by the
+Dashboard, Accounts, or Performance calcs), so their principal + accrued
+interest isn't part of net worth anywhere. A $5k GIC is invisible outside its
+own tab.
+
+- **Compute:** add active GICs' `current_value` to the relevant account's total
+  in `get_account_summary` / the dashboard net-worth figure (and optionally a
+  "GICs" line in the account allocation, like cash). Use the same per-GIC
+  current-value math already in `get_gic_stats` (factor it out to share).
+- **Scope note:** decide whether GIC value counts as part of the account's cash
+  or as a distinct asset class in the allocation breakdowns; matured GICs should
+  be excluded (their principal returns to cash).
+- **Effort:** medium — cross-tab; touches account summary, dashboard, and
+  possibly the allocation breakdowns and Performance valuation.
+
+## Rebalancer — exact (convergent) trade solver
+
+The v2 per-account rebalancer uses a single-pass greedy allocator: it splits
+the cash/sell budget across buckets by drift and tops up holdings pro-rata to
+their fractional exposure. Because ETFs span several buckets, one pass doesn't
+fully converge to the targets (buying a broad ETF to fill "tech" also feeds
+other buckets), so the "Projected" column lands short of the targets.
+
+- **Improve:** solve it properly as constrained least-squares / LP — minimise
+  Σ(projected_bucket − target)² subject to per-holding trade limits (no negative
+  shares; cash budget in cash mode) using each holding's fractional bucket
+  vector. Iterate the greedy step to convergence as a lighter alternative.
+- **Watch:** keep it dependency-light (no scipy) — an iterative reweighting loop
+  in pure Python is probably enough and matches the existing stack.
+- **Effort:** medium — engine-only change in `get_rebalancer_data`; UI unchanged.
+
+## Rebalancer — risk targeting by historical volatility
+
+The Risk dimension currently buckets holdings Low/Medium/High by market **beta**
+(`price_service` caches `info['beta']`/`beta3Year`, with an asset-type fallback
+when beta is missing). Beta is market-relative; an absolute volatility measure is
+more robust and covers the ETFs/securities that don't report a beta.
+
+- **Add:** compute annualized **standard deviation of ~1yr daily returns** from
+  yfinance price history per ticker, cache it in `price_cache.meta_json`
+  alongside `beta`, and offer a "Risk basis: Beta / Volatility" toggle (or a
+  blended score). Bucket by tunable thresholds.
+- **Bonus:** show the actual beta/volatility number per holding in the account
+  view so the bucketing is transparent, and make the bucket thresholds editable.
+- **Watch:** history fetches are heavier than the one-shot `.info` call — fetch
+  once and cache; refresh lazily.
+- **Effort:** medium — `_fetch_one_metadata` history pull + a basis toggle in the
+  risk classifier.
+
+## Rebalancer — strategy presets (one-click target templates)
+
+Offer a few **common investment strategies** as preset target templates per
+account: pick one and it fills in the target % (across the right dimension),
+then the existing engine produces the buy/sell recommendations. Saves setting
+targets by hand and gives a starting point.
+
+- **Candidates (start with 1–2):**
+  - **Three-fund / classic 60-40** — by asset class: e.g. 60% Stock / 40% Bond
+    (or 60/40/0 with a cash sleeve). Maps cleanly to the Asset Class lens.
+  - **All-Weather (Ray Dalio)** — ~30% stocks / 55% bonds / 15% gold+commodities,
+    by asset class.
+  - **Core-satellite** — large % in broad/diversified (low Blended Risk) + a
+    capped satellite in higher-risk names; maps to the Blended Risk dimension.
+  - **Age-based glide path** — stock/bond split from age (e.g. "110 − age" in
+    stocks); needs a user age/setting.
+- **How it'd work:** a "Strategy" dropdown on the account view → on select,
+  pre-fill the target inputs for the matching dimension (don't save until the
+  user confirms), then the normal Save → recompute flow generates trades. Store
+  chosen strategy alongside the targets if we want it to persist.
+- **Note:** several strategies are asset-class/bond-heavy — pairs well with the
+  asset-class look-through already used in the Overall view, and would benefit
+  from real bond/commodity holdings being classified correctly.
+- **Effort:** medium — a small preset table (strategy → {dimension, targets}) +
+  a dropdown that populates the existing target inputs; engine unchanged.

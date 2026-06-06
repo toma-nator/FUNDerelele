@@ -3,69 +3,223 @@
 {% block page_title %}Rebalancer{% endblock %}
 
 {% block content %}
-{% if not data.targets_set %}
-<div class="flash flash-info" style="margin-bottom:20px">
-  No target allocations set. Go to <a href="{{ url_for('settings') }}" style="color:var(--accent)">Settings</a> to configure your target % per account, then return here.
-</div>
-{% endif %}
+{% if not data.accounts %}
+<div class="flash flash-info">No accounts with holdings or cash yet. Import or add transactions first.</div>
+{% else %}
 
-<div class="stat-grid" style="grid-template-columns:repeat(2,1fr)">
-  <div class="stat-card">
-    <div class="stat-label">Total Portfolio</div>
-    <div class="stat-value">{{ data.total_portfolio | cad }}</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Accounts</div>
-    <div class="stat-value">{{ data.rows | length }}</div>
-  </div>
+{# ── Page-level selector: Overall Portfolio + each account ── #}
+<div class="account-selector" style="margin-bottom:16px">
+  <a href="{{ url_for('rebalancer', view='overall') }}"
+     class="acct-chip {% if overall_mode %}active{% endif %}">Overall Portfolio</a>
+  {% for acc in data.accounts %}
+  <a href="{{ url_for('rebalancer', account=acc, dimension=data.dimension, mode=data.mode) }}"
+     class="acct-chip {% if not overall_mode and data.account == acc %}active{% endif %}">{{ acc }}</a>
+  {% endfor %}
 </div>
 
-<div class="two-col">
-  <div class="card">
-    <div class="card-header">Current Allocation</div>
-    <div class="chart-wrap" style="max-height:260px">
-      <canvas id="currentChart"></canvas>
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-header">Target Allocation</div>
-    <div class="chart-wrap" style="max-height:260px">
-      <canvas id="targetChart"></canvas>
-    </div>
-  </div>
-</div>
-
+{% if overall_mode %}
+{# ════════════ OVERALL PORTFOLIO (read-only) ════════════ #}
 <div class="card">
-  <div class="card-header">Drift Analysis</div>
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+    <span>Overall Portfolio <span class="card-sub">all accounts</span></span>
+    <div style="display:flex;gap:.3rem;flex-wrap:wrap">
+      {% for vk, vlabel in data.overall_view_labels %}
+      <button type="button" class="acct-chip ov-toggle {% if vk == 'sector' %}active{% endif %}" data-view="{{ vk }}">{{ vlabel }}</button>
+      {% endfor %}
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;align-items:start;padding:6px 4px">
+    <div class="chart-wrap" style="max-height:320px;padding:16px 20px">
+      <canvas id="overallChart"></canvas>
+    </div>
+    <div class="table-scroll" style="max-height:340px">
+      <table class="data-table">
+        <thead>
+          <tr><th id="ovHead">Category</th><th class="r">Value</th><th class="r">%</th></tr>
+        </thead>
+        <tbody id="ovBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+<div class="text-dim" style="font-size:.78rem;margin-top:8px">Pick an account above to set targets and get buy/sell recommendations.</div>
+
+{% else %}
+{# ════════════ ACCOUNT REBALANCER ════════════ #}
+
+{# ── Controls: dimension + mode + cash ── #}
+<div class="filter-bar" style="display:flex;gap:1.25rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
+  <div style="display:flex;gap:.4rem;align-items:center">
+    <span class="text-dim" style="font-size:.78rem">Target by</span>
+    {% for d, label in data.dimensions %}
+    <a href="{{ url_for('rebalancer', account=data.account, dimension=d, mode=data.mode) }}"
+       class="acct-chip {% if data.dimension == d %}active{% endif %}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <div style="display:flex;gap:.4rem;align-items:center">
+    <span class="text-dim" style="font-size:.78rem">Mode</span>
+    <a href="{{ url_for('rebalancer', account=data.account, dimension=data.dimension, mode='cash', deploy=data.deploy_cash) }}"
+       class="acct-chip {% if data.mode == 'cash' %}active{% endif %}">Deploy cash</a>
+    <a href="{{ url_for('rebalancer', account=data.account, dimension=data.dimension, mode='full', deploy=data.deploy_cash) }}"
+       class="acct-chip {% if data.mode == 'full' %}active{% endif %}">Full rebalance</a>
+  </div>
+  <form method="GET" action="{{ url_for('rebalancer') }}" style="display:flex;gap:.4rem;align-items:center">
+    <input type="hidden" name="account" value="{{ data.account }}">
+    <input type="hidden" name="dimension" value="{{ data.dimension }}">
+    <input type="hidden" name="mode" value="{{ data.mode }}">
+    <span class="text-dim" style="font-size:.78rem">Cash to deploy</span>
+    <input class="form-input mono no-spin" name="deploy" type="number" step="100" min="0"
+           value="{{ '%g' % data.deploy_cash }}" style="width:110px;padding:4px 8px">
+    <button type="submit" class="btn">Apply</button>
+  </form>
+</div>
+
+{# ── Stat cards ── #}
+<div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+  <div class="stat-card">
+    <div class="stat-label">Invested</div>
+    <div class="stat-value">{{ data.invested | cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Available Cash</div>
+    <div class="stat-value {% if data.cash > 0 %}text-green{% endif %}">{{ data.cash | cad }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Deploying</div>
+    <div class="stat-value">{{ data.deploy_cash | cad }}</div>
+    <div class="stat-sub text-dim">{{ 'buys only' if data.mode == 'cash' else 'buys + sells' }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Cash After</div>
+    <div class="stat-value">{{ data.cash_after | cad }}</div>
+  </div>
+</div>
+
+<div class="two-col" style="align-items:start">
+  {# ── Targets + drift editor ── #}
+  <div class="card">
+    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+      <span>Targets — {{ data.dimension_label }}</span>
+      <span id="targetTotalBox" class="card-sub text-dim">—</span>
+    </div>
+    <form method="POST" action="{{ url_for('rebalancer_targets') }}">
+      <input type="hidden" name="account" value="{{ data.account }}">
+      <input type="hidden" name="dimension" value="{{ data.dimension }}">
+      <input type="hidden" name="mode" value="{{ data.mode }}">
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>{{ data.dimension_label }}</th>
+              <th class="r">Current</th>
+              <th class="r">Target %</th>
+              <th class="r">Projected</th>
+              <th class="r">Drift</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in data.buckets %}
+            <tr>
+              <td style="font-size:.82rem">{{ b.label }}</td>
+              <td class="r mono text-dim">{{ '%.1f' % b.current_pct }}%</td>
+              <td class="r">
+                <input class="form-input mono no-spin" name="target_{{ b.label }}" type="number"
+                       step="0.1" min="0" max="100" style="width:72px;text-align:right;padding:3px 6px"
+                       value="{{ '%g' % b.target_pct if b.target_pct else '' }}" placeholder="0">
+              </td>
+              <td class="r mono {% if not b.target_pct %}text-dim{% endif %}">{{ '%.1f' % b.projected_pct }}%</td>
+              <td class="r mono {{ 'text-green' if b.drift|abs < 1 else ('text-red' if b.drift > 0 else 'text-amber') }}">
+                {% if b.target_pct or b.current_pct %}{{ b.drift | cad }}{% else %}—{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="form-actions" style="padding:12px 16px">
+        <button type="submit" class="btn btn-primary">Save targets &amp; recompute</button>
+      </div>
+    </form>
+  </div>
+
+  {# ── Current account allocation, by the dimension you're targeting ── #}
+  <div class="card">
+    <div class="card-header">Current Account — {{ data.dimension_label }} <span class="card-sub">{{ data.account }}</span></div>
+    <div class="chart-wrap" style="max-height:300px;padding:16px 20px">
+      <canvas id="acctChart"></canvas>
+    </div>
+  </div>
+</div>
+
+{# ── Recommended trades ── #}
+<div class="card">
+  <div class="card-header">
+    Recommended Trades
+    <span class="card-sub">{{ data.trades | length }} · {{ 'deploy available cash' if data.mode == 'cash' else 'full rebalance' }}</span>
+  </div>
+  {% if data.trades %}
   <div class="table-scroll">
     <table class="data-table">
       <thead>
         <tr>
-          <th>Account</th>
-          <th class="r">Current $</th>
-          <th class="r">Current %</th>
-          <th class="r">Target %</th>
-          <th class="r">Target $</th>
-          <th class="r">Drift $</th>
-          <th class="r">Drift %</th>
           <th>Action</th>
+          <th>Ticker</th>
+          <th class="r">Amount (CAD)</th>
+          <th class="r">~ Shares</th>
+          <th class="r">Price</th>
         </tr>
       </thead>
       <tbody>
-        {% for row in data.rows %}
-        {% set drift_class = 'drift-ok' if row.drift_pct | abs < 1 else ('drift-over' if row.drift_pct > 0 else 'drift-under') %}
+        {% for t in data.trades %}
         <tr>
-          <td><span class="acct-badge acct-{{ row.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ row.account }}</span></td>
-          <td class="r mono">{{ row.current_value | cad }}</td>
-          <td class="r mono">{{ '%.1f' % row.current_pct }}%</td>
-          <td class="r mono text-dim">{{ '%.1f' % row.target_pct }}%</td>
-          <td class="r mono text-dim">{{ row.target_value | cad }}</td>
-          <td class="r mono {{ row.drift | gl_class }}">{{ row.drift | signed_cad }}</td>
-          <td class="r"><span class="drift-badge {{ drift_class }}">{{ '+' if row.drift_pct > 0 else '' }}{{ '%.1f' % row.drift_pct }}%</span></td>
-          <td style="font-size:.75rem;color:var(--text-dim)">
-            {% if row.target_pct > 0 %}
-              {% if row.drift_pct > 1 %}Over — consider rebalancing out{% elif row.drift_pct < -1 %}Under — consider adding {{ (row.target_value - row.current_value) | cad }}{% else %}On target{% endif %}
-            {% else %}—{% endif %}
+          <td><span class="type-badge" style="{% if t.action == 'Buy' %}background:rgba(0,230,118,.1);color:var(--green){% else %}background:rgba(255,77,77,.1);color:var(--red){% endif %}">{{ t.action }}</span></td>
+          <td class="mono">{{ t.ticker }}</td>
+          <td class="r mono {{ 'text-green' if t.action == 'Buy' else 'text-red' }}">{{ t.amount_cad | cad }}</td>
+          <td class="r mono">{% if t.shares %}{{ '%g' % t.shares }}{% else %}—{% endif %}</td>
+          <td class="r mono text-dim">{% if t.price_cad %}{{ t.price_cad | cad }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="text-dim" style="padding:10px 16px;font-size:.74rem">
+    Share counts are approximate (live CAD price). ETFs span multiple {{ data.dimension_label | lower }} buckets, so a single trade shifts several — the “Projected” column reflects that.
+  </div>
+  {% elif data.targets_set %}
+  <div class="empty-row">On target — no trades needed{{ ' with the cash available' if data.mode == 'cash' }}.</div>
+  {% else %}
+  <div class="empty-row">Set targets above to get buy/sell recommendations.</div>
+  {% endif %}
+</div>
+
+{# ── Suggested new positions (gaps a focused name would close) ── #}
+{% if data.new_positions %}
+<div class="card">
+  <div class="card-header">Suggested New Positions <span class="card-sub">gaps a focused (non-ETF) name would close</span></div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{{ data.dimension_label }}</th>
+          <th class="r">Gap</th>
+          <th class="r">Add ~</th>
+          <th>Why</th>
+          <th>Watchlist candidates</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for np in data.new_positions %}
+        <tr>
+          <td style="font-size:.82rem">{{ np.bucket }}</td>
+          <td class="r mono text-amber">{{ '%.1f' % np.gap_pct }}%</td>
+          <td class="r mono text-green">{{ np.amount_cad | cad }}</td>
+          <td class="text-dim" style="font-size:.78rem">{{ np.reason }}</td>
+          <td style="font-size:.8rem">
+            {% if np.suggestions %}
+              {% for s in np.suggestions %}<span class="mono {% if not s.focused %}text-dim{% endif %}" title="{{ s.company }}{% if not s.focused %} (ETF){% endif %}">{{ s.ticker }}</span>{% if not loop.last %} · {% endif %}{% endfor %}
+            {% else %}
+              <span class="text-dim">None in <a href="{{ url_for('watchlist') }}" style="color:var(--accent)">watchlist</a> — add one.</span>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -73,34 +227,90 @@
     </table>
   </div>
 </div>
+{% endif %}
+
+{% endif %}{# overall_mode #}
+{% endif %}{# data.accounts #}
 {% endblock %}
 
 {% block scripts %}
+{% if data.accounts %}
 <script>
-const COLORS = ['#00c8f0','#9b72f5','#00e676','#ff8c42','#ffd740','#ff4d4d'];
-const labels = {{ data.chart_labels | tojson }};
-const current = {{ data.chart_current | tojson }};
-const target = {{ data.chart_target | tojson }};
+const COLORS = ['#00c8f0','#9b72f5','#00e676','#ff8c42','#ffd740','#ff4d4d','#4dd0e1','#ba68c8','#81c784','#ffb74d','#e57373','#64b5f6'];
+const cad = v => '$' + (v || 0).toLocaleString('en-CA', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const donutOpts = (fmt) => ({
+  responsive: true, maintainAspectRatio: false, cutout: '60%',
+  plugins: {
+    legend: { position: 'right', labels: { color: '#c8d8e8', font: { size: 11 }, padding: 10 } },
+    tooltip: { callbacks: { label: ctx => fmt(ctx) } }
+  }
+});
 
-function makeDonut(id, data) {
-  new Chart(document.getElementById(id), {
+{% if overall_mode %}
+// ── Overall portfolio: lens chips drive BOTH a donut and a $/% table ──
+const OVERALL = {{ data.overall_views | tojson }};
+const OV_LABELS = {sector: 'Sector', asset_class: 'Asset Class', market_cap: 'Market Cap', currency: 'Currency', beta: 'Beta', blend: 'Blended Risk'};
+let ovChart;
+function renderOverall(view) {
+  const rows = OVERALL[view] || [];
+  document.getElementById('ovHead').textContent = OV_LABELS[view] || 'Category';
+  document.getElementById('ovBody').innerHTML = rows.map(r =>
+    `<tr><td style="font-size:.82rem">${r.label}</td>` +
+    `<td class="r mono">${cad(r.value)}</td>` +
+    `<td class="r mono text-dim">${r.pct.toFixed(1)}%</td></tr>`
+  ).join('') || '<tr><td colspan="3" class="empty-row">No holdings.</td></tr>';
+  if (ovChart) ovChart.destroy();
+  ovChart = new Chart(document.getElementById('overallChart'), {
     type: 'doughnut',
-    data: {
-      labels: labels,
-      datasets: [{ data, backgroundColor: COLORS.slice(0, labels.length), borderColor: '#0c1929', borderWidth: 2 }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: {
-        legend: { position: 'right', labels: { color: '#c8d8e8', font: { size: 11 }, padding: 12 } },
-        tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.raw.toFixed(1)}%` } }
-      },
-      cutout: '60%',
-    }
+    data: { labels: rows.map(r => r.label), datasets: [{ data: rows.map(r => r.value),
+      backgroundColor: rows.map((_, i) => COLORS[i % COLORS.length]), borderColor: '#101f33', borderWidth: 2 }] },
+    options: donutOpts(ctx => ` ${ctx.label}: ${cad(ctx.raw)}`)
   });
 }
+document.querySelectorAll('.ov-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.ov-toggle').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderOverall(btn.dataset.view);
+  });
+});
+renderOverall('sector');
+{% else %}
+// ── Live target total: how much is left to reach 100% ──
+const tInputs = Array.from(document.querySelectorAll('input[name^="target_"]'));
+const totalBox = document.getElementById('targetTotalBox');
+function updateTargetTotal() {
+  const sum = tInputs.reduce((a, el) => a + (parseFloat(el.value) || 0), 0);
+  const diff = Math.round((100 - sum) * 10) / 10;
+  if (sum === 0) {
+    totalBox.className = 'card-sub text-dim';
+    totalBox.textContent = 'no targets set';
+  } else if (Math.abs(diff) < 0.05) {
+    totalBox.className = 'card-sub text-green';
+    totalBox.textContent = '100% ✓';
+  } else if (diff > 0) {
+    totalBox.className = 'card-sub text-amber';
+    totalBox.textContent = sum.toFixed(1) + '% · ' + diff.toFixed(1) + '% left';
+  } else {
+    totalBox.className = 'card-sub text-red';
+    totalBox.textContent = sum.toFixed(1) + '% · ' + (-diff).toFixed(1) + '% over';
+  }
+}
+tInputs.forEach(el => el.addEventListener('input', updateTargetTotal));
+updateTargetTotal();
 
-makeDonut('currentChart', current);
-makeDonut('targetChart', target);
+// ── Current account donut, by the dimension being targeted ──
+const ACCT = {{ data.buckets | tojson }};
+const acctRows = ACCT.filter(b => b.current_value > 0);
+if (acctRows.length) {
+  new Chart(document.getElementById('acctChart'), {
+    type: 'doughnut',
+    data: { labels: acctRows.map(b => b.label), datasets: [{ data: acctRows.map(b => b.current_value),
+      backgroundColor: acctRows.map((_, i) => COLORS[i % COLORS.length]), borderColor: '#101f33', borderWidth: 2 }] },
+    options: donutOpts(ctx => ` ${ctx.label}: ${cad(ctx.raw)}`)
+  });
+}
+{% endif %}
 </script>
+{% endif %}
 {% endblock %}

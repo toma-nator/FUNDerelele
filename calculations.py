@@ -529,22 +529,23 @@ def get_dividend_stats(scope='portfolio'):
 
 # ── GICs ──────────────────────────────────────────────────────────────────────
 
-def get_gic_stats():
+def get_gic_stats(account_filter=None, show_matured=False):
     from models import GIC
     from datetime import date
 
     today = date.today()
     gics = GIC.query.order_by(GIC.maturity_date.asc()).all()
 
-    result = []
-    total_principal = 0.0
-    total_interest = 0.0
-    total_at_maturity = 0.0
+    # Accounts that actually hold a GIC — drives the chip filter row.
+    gic_accounts = sorted({g.account for g in gics if g.account})
 
     comp_periods = {'Monthly': 12, 'Quarterly': 4, 'Semi-Annual': 2, 'Annual': 1}
 
+    rows = []
     for g in gics:
         if not g.start_date or not g.maturity_date:
+            continue
+        if account_filter and g.account != account_filter:
             continue
 
         days_total = max(1, (g.maturity_date - g.start_date).days)
@@ -564,14 +565,7 @@ def get_gic_stats():
             value_at_maturity = g.principal * (1 + rate * years_total)
             current_value = g.principal * (1 + rate * years_elapsed)
 
-        interest_accrued = current_value - g.principal
-        interest_at_maturity = value_at_maturity - g.principal
-
-        total_principal += g.principal
-        total_interest += interest_accrued
-        total_at_maturity += value_at_maturity
-
-        result.append({
+        rows.append({
             'id': g.id,
             'name': g.name or '',
             'institution': g.institution or '',
@@ -584,17 +578,42 @@ def get_gic_stats():
             'days_remaining': days_remaining,
             'pct_elapsed': pct_elapsed,
             'current_value': current_value,
-            'interest_accrued': interest_accrued,
-            'interest_at_maturity': interest_at_maturity,
+            'interest_accrued': current_value - g.principal,
+            'interest_at_maturity': value_at_maturity - g.principal,
             'value_at_maturity': value_at_maturity,
             'is_matured': today >= g.maturity_date,
         })
 
+    # rows is maturity-ascending, so these preserve that order.
+    active_rows = [r for r in rows if not r['is_matured']]
+    matured_rows = [r for r in rows if r['is_matured']]
+
+    # Stat totals reflect ACTIVE GICs only — matured principal has been paid out.
+    total_principal = sum(r['principal'] for r in active_rows)
+    total_interest = sum(r['interest_accrued'] for r in active_rows)
+    total_at_maturity = sum(r['value_at_maturity'] for r in active_rows)
+    wavg_rate = (sum(r['rate'] * r['principal'] for r in active_rows) / total_principal
+                 if total_principal else 0.0)
+
+    next_gic = active_rows[0] if active_rows else None  # soonest maturity
+    next_maturity_date = next_gic['maturity_date'] if next_gic else None
+    next_maturity_days = next_gic['days_remaining'] if next_gic else None
+
+    display = (active_rows + matured_rows) if show_matured else active_rows
+
     return {
-        'gics': result,
+        'gics': display,
         'total_principal': total_principal,
         'total_interest': total_interest,
         'total_at_maturity': total_at_maturity,
+        'wavg_rate': wavg_rate,
+        'next_maturity_date': next_maturity_date,
+        'next_maturity_days': next_maturity_days,
+        'active_count': len(active_rows),
+        'matured_count': len(matured_rows),
+        'gic_accounts': gic_accounts,
+        'active_account': account_filter or '',
+        'show_matured': show_matured,
         'accounts': [a.name for a in Account.query.order_by(Account.name).all()],
     }
 
@@ -699,64 +718,477 @@ def get_tax_summary(year=None):
 
 
 # ── Rebalancer ────────────────────────────────────────────────────────────────
+#
+# Per-account rebalancing: pick one account, set target % by a classification
+# dimension (sector / asset type / market cap / currency), and get concrete
+# buy/sell recommendations that prioritise the account's available cash.
+# ETFs are decomposed via fractional look-through, so trading one spills across
+# several buckets — the engine works in fractional weights and shows the result.
 
-def get_rebalancer_data():
+REBAL_DIMENSIONS = ['sector', 'asset_type', 'market_cap', 'currency', 'beta', 'blend']
+
+REBAL_DIM_LABELS = {
+    'sector': 'Sector', 'asset_type': 'Asset Type',
+    'market_cap': 'Market Cap', 'currency': 'Currency',
+    'beta': 'Beta', 'blend': 'Blended Risk',
+}
+
+# Dimensions whose buckets have a natural low→high order (shown in that order
+# rather than by size).
+ORDINAL_DIMENSIONS = {'market_cap', 'beta', 'blend'}
+
+# A targeted bucket is flagged as needing a focused new position when, after the
+# recommended trades, it's still under target by REBAL_GAP_PP percentage points
+# (big absolute gap) OR filled to less than REBAL_FILL_RATIO of its target (a
+# small target can be proportionally far short with only a few points of gap).
+REBAL_GAP_PP = 3.0
+REBAL_FILL_RATIO = 0.8
+
+_BETA_BUCKETS = ['Low', 'Medium', 'High']
+_BLEND_BUCKETS = ['Very Low', 'Low', 'Moderate', 'High', 'Very High']
+
+
+def _beta_bucket(beta, asset_type):
+    """Volatility tier from market beta; falls back to asset type when beta is
+    unavailable (bonds/cash safest, ETFs medium, individual equities highest)."""
+    if beta is not None:
+        if beta < 0.8:
+            return 'Low'
+        if beta <= 1.2:
+            return 'Medium'
+        return 'High'
+    at = asset_type or 'Equity'
+    if at in ('Bond', 'Cash', 'Mutualfund'):
+        return 'Low'
+    if at == 'ETF':
+        return 'Medium'
+    return 'High'
+
+
+def _blend_bucket(beta, market_cap, asset_type, fund_sectors=None):
+    """Blended risk/uncertainty (0=Very Low … 4=Very High) combining volatility
+    (beta) with company size/maturity (market cap). A big, established name stays
+    moderate even if volatile; a small, unknown name rates highest. Funds are
+    discounted by how diversified they are (sector concentration)."""
+    at = asset_type or 'Equity'
+
+    # Volatility component (0..4)
+    if beta is None:
+        b = {'Bond': 0, 'Cash': 0, 'Mutualfund': 1, 'ETF': 1}.get(at, 2)
+    elif beta < 0.7:
+        b = 0
+    elif beta < 1.0:
+        b = 1
+    elif beta < 1.3:
+        b = 2
+    elif beta < 1.7:
+        b = 3
+    else:
+        b = 4
+
+    # Size / idiosyncratic-uncertainty component (0=mega/diversified … 4=micro/unknown).
+    if at in ('Bond', 'Cash'):
+        s = 0
+    elif at in ('ETF', 'Mutualfund'):
+        # More diversified (lower sector concentration) → lower uncertainty.
+        fs = fund_sectors or {}
+        if fs:
+            tot = sum(fs.values()) or 1
+            hhi = sum((v / tot) ** 2 for v in fs.values())  # 1/N (broad) … 1 (one sector)
+            s = 0 if hhi < 0.25 else (1 if hhi < 0.5 else 2)
+        else:
+            s = 1
+    elif market_cap is None:
+        s = 4
+    elif market_cap >= 200e9:
+        s = 0
+    elif market_cap >= 10e9:
+        s = 1
+    elif market_cap >= 2e9:
+        s = 2
+    elif market_cap >= 300e6:
+        s = 3
+    else:
+        s = 4
+
+    return _BLEND_BUCKETS[int(round((b + s) / 2))]
+
+_ALL_SECTORS = ['Technology', 'Financial Services', 'Healthcare', 'Consumer Cyclical',
+                'Consumer Defensive', 'Industrials', 'Energy', 'Utilities',
+                'Real Estate', 'Basic Materials', 'Communication Services']
+_ALL_ASSET_TYPES = ['Equity', 'ETF', 'Bond', 'Mutualfund', 'Cash']
+_ALL_MARKET_CAPS = ['Mega cap', 'Large cap', 'Mid cap', 'Small cap', 'Fund']
+_ALL_CURRENCIES = ['CAD', 'USD']
+
+
+def _known_buckets(dimension):
+    return {
+        'sector': _ALL_SECTORS, 'asset_type': _ALL_ASSET_TYPES,
+        'market_cap': _ALL_MARKET_CAPS, 'currency': _ALL_CURRENCIES,
+        'beta': _BETA_BUCKETS, 'blend': _BLEND_BUCKETS,
+    }.get(dimension, [])
+
+
+def _bucket_weights(h, m, dimension):
+    """Fractional {bucket: weight} for one holding (weights sum to ~1).
+    Sector & market-cap use ETF look-through when available."""
+    if dimension == 'sector':
+        if m.get('fund_sectors'):
+            tot = sum(m['fund_sectors'].values()) or 1
+            return {sec: w / tot for sec, w in m['fund_sectors'].items()}
+        if m.get('sector'):
+            return {m['sector']: 1.0}
+        return {'Unclassified': 1.0}
+    if dimension == 'asset_type':
+        return {(m.get('asset_type') or 'Equity'): 1.0}
+    if dimension == 'market_cap':
+        if (m.get('asset_type') or 'Equity') == 'ETF':
+            return {'Fund': 1.0}
+        return {(_cap_bucket(m.get('market_cap')) or 'Unclassified'): 1.0}
+    if dimension == 'currency':
+        return {h['currency']: 1.0}
+    if dimension == 'beta':
+        return {_beta_bucket(m.get('beta'), m.get('asset_type')): 1.0}
+    if dimension == 'blend':
+        return {_blend_bucket(m.get('beta'), m.get('market_cap'),
+                              m.get('asset_type'), m.get('fund_sectors')): 1.0}
+    return {'Unclassified': 1.0}
+
+
+def _bucket_of_ticker(ticker, currency, m, dimension):
+    """Single dominant bucket for a non-held ticker (watchlist classification)."""
+    w = _bucket_weights({'currency': currency}, m, dimension)
+    return max(w, key=w.get) if w else 'Unclassified'
+
+
+_ASSET_CLASS_LABELS = {
+    'stockPosition': 'Stock', 'bondPosition': 'Bond', 'cashPosition': 'Cash',
+    'preferredPosition': 'Preferred', 'convertiblePosition': 'Convertible',
+    'otherPosition': 'Other', 'realestatePosition': 'Real Estate',
+}
+
+
+def _asset_class_weights(m):
+    """Fractional stock/bond/cash/... weights for a holding via ETF look-through;
+    individual securities default to Stock."""
+    if m.get('fund_assets'):
+        tot = sum(m['fund_assets'].values()) or 1
+        out = {}
+        for k, v in m['fund_assets'].items():
+            label = _ASSET_CLASS_LABELS.get(k, k.replace('Position', '').title())
+            out[label] = out.get(label, 0) + v / tot
+        return out
+    return {'Stock': 1.0}
+
+
+def _rebal_key(account, dimension):
+    slug = account.lower().replace(' ', '_').replace('-', '_')
+    return f'rebal_{dimension}_{slug}'
+
+
+def get_rebal_targets(account, dimension):
     from models import Setting
+    import json
+    if not account:
+        return {}
+    s = Setting.query.get(_rebal_key(account, dimension))
+    if not s or not s.value:
+        return {}
+    try:
+        return {k: float(v) for k, v in json.loads(s.value).items()}
+    except Exception:
+        return {}
 
-    holdings = get_holdings()
-    accounts_db = Account.query.order_by(Account.name).all()
 
-    def gs(key, default=0.0):
-        s = Setting.query.get(key)
+def save_rebal_targets(account, dimension, targets):
+    from models import Setting, db
+    import json
+    cleaned = {}
+    for k, v in targets.items():
         try:
-            return float(s.value) if s else float(default)
-        except Exception:
-            return float(default)
+            fv = round(float(v), 2)
+        except (TypeError, ValueError):
+            continue
+        if fv > 0:
+            cleaned[k] = fv
+    key = _rebal_key(account, dimension)
+    s = Setting.query.get(key)
+    payload = json.dumps(cleaned)
+    if s:
+        s.value = payload
+    else:
+        db.session.add(Setting(key=key, value=payload))
+    db.session.commit()
 
-    total_mv = sum(h['market_value_cad'] or 0 for h in holdings)
-    cash_by_account = get_cash_by_account()
-    total_cash = sum(cash_by_account.values())
-    total_portfolio = total_mv + total_cash
 
-    account_current = {}
+def _watchlist_by_bucket(dimension):
+    """{bucket: [{ticker, company}]} for watchlist items, for suggesting names
+    in under-target buckets where the account holds nothing."""
+    from models import WatchlistItem
+    from price_service import get_holdings_metadata
+    items = WatchlistItem.query.all()
+    if not items:
+        return {}
+    metas = get_holdings_metadata([w.ticker for w in items])
+    out = {}
+    for w in items:
+        m = metas.get(w.ticker, {})
+        if dimension == 'sector' and not m.get('sector') and not m.get('fund_sectors') and w.sector:
+            bucket = w.sector  # fall back to the stored watchlist sector
+        else:
+            bucket = _bucket_of_ticker(w.ticker, w.currency or 'CAD', m, dimension)
+        focused = (m.get('asset_type') or 'Equity') != 'ETF'  # pure-play, not another broad ETF
+        out.setdefault(bucket, []).append(
+            {'ticker': w.ticker, 'company': w.company or '', 'focused': focused})
+    for cands in out.values():  # focused (pure-play) names first
+        cands.sort(key=lambda x: (not x['focused'], x['ticker']))
+    return out
+
+
+def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_cash=None):
+    """Per-account rebalancing analysis + trade recommendations."""
+    from price_service import get_holdings_metadata
+
+    if dimension not in REBAL_DIMENSIONS:
+        dimension = 'sector'
+    if mode not in ('cash', 'full'):
+        mode = 'cash'
+
+    all_holdings = [h for h in get_holdings() if (h['market_value_cad'] or 0) > 0]
+    cash_by = get_cash_by_account()
+    meta_all = get_holdings_metadata([h['ticker'] for h in all_holdings])
+
+    # Accounts with holdings or cash drive the chip selector.
+    acct_names = sorted(
+        {h['account'] for h in all_holdings} |
+        {a for a, c in cash_by.items() if abs(c) > 0.005}
+    )
+    if account not in acct_names:
+        account = acct_names[0] if acct_names else None
+
+    # ---- Overall portfolio allocation (read-only), multiple view lenses ----
+    # Each lens is fractional (ETF look-through) and includes total cash so the
+    # view sums to the whole portfolio. Independent of the targeting dimension.
+    total_cash = sum(c for c in cash_by.values() if c > 0)
+    view_fns = {
+        'sector': lambda h, m: _bucket_weights(h, m, 'sector'),
+        'asset_class': lambda h, m: _asset_class_weights(m),
+        'market_cap': lambda h, m: _bucket_weights(h, m, 'market_cap'),
+        'currency': lambda h, m: _bucket_weights(h, m, 'currency'),
+        'beta': lambda h, m: _bucket_weights(h, m, 'beta'),
+        'blend': lambda h, m: _bucket_weights(h, m, 'blend'),
+    }
+    overall_views = {}
+    for vk, fn in view_fns.items():
+        agg, tot = {}, 0.0
+        for h in all_holdings:
+            mv = h['market_value_cad']
+            tot += mv
+            for b, w in fn(h, meta_all.get(h['ticker'], {})).items():
+                agg[b] = agg.get(b, 0) + mv * w
+        if total_cash > 0:
+            cb = 'CAD' if vk == 'currency' else 'Cash'
+            agg[cb] = agg.get(cb, 0) + total_cash
+            tot += total_cash
+        overall_views[vk] = sorted(
+            [{'label': k, 'value': round(v, 2),
+              'pct': round(v / tot * 100, 1) if tot else 0}
+             for k, v in agg.items()],
+            key=lambda x: x['value'], reverse=True)
+
+    base_result = {
+        'account': account, 'accounts': acct_names,
+        'dimension': dimension, 'dimension_label': REBAL_DIM_LABELS[dimension],
+        'dimensions': [(d, REBAL_DIM_LABELS[d]) for d in REBAL_DIMENSIONS],
+        'mode': mode, 'overall_views': overall_views,
+        'overall_view_labels': [('sector', 'Sector'), ('asset_class', 'Asset Class'),
+                                ('market_cap', 'Market Cap'), ('currency', 'Currency'),
+                                ('beta', 'Beta'), ('blend', 'Blended Risk')],
+        'known_buckets': _known_buckets(dimension),
+    }
+    if not account:
+        return {**base_result, 'buckets': [], 'trades': [], 'new_positions': [],
+                'cash': 0, 'deploy_cash': 0, 'invested': 0, 'targets_set': False,
+                'cash_after': 0, 'target_total': 0}
+
+    holdings = [h for h in all_holdings if h['account'] == account]
+    cash = cash_by.get(account, 0.0)
+    avail_cash = max(0.0, cash)
+    invested = sum(h['market_value_cad'] for h in holdings)
+    targets = get_rebal_targets(account, dimension)   # {bucket: pct}
+
+    # For Asset Type, cash is itself an asset class held in the account, so it's
+    # a bucket and percentages are of the whole account. For sector/market-cap/
+    # currency, cash isn't a category — it's external fuel, so the base is the
+    # invested holdings plus whatever cash we're deploying.
+    cash_as_bucket = (dimension == 'asset_type')
+    if cash_as_bucket:
+        base = pct_base = invested + cash
+        if deploy_cash is None:
+            # Deploy everything except what a Cash target wants kept.
+            keep = base * float(targets.get('Cash', 0)) / 100
+            deploy_cash = avail_cash - keep
+        deploy_cash = max(0.0, min(deploy_cash, avail_cash))
+    else:
+        if deploy_cash is None:
+            deploy_cash = avail_cash
+        deploy_cash = max(0.0, min(deploy_cash, avail_cash))
+        base = invested + deploy_cash
+        pct_base = invested
+
+    # Per-holding fractional exposure and current bucket dollars.
+    hold_exp, current = [], {}
     for h in holdings:
-        acc = h['account']
-        account_current[acc] = account_current.get(acc, 0) + (h['market_value_cad'] or 0)
-    for a in accounts_db:
-        account_current[a.name] = account_current.get(a.name, 0) + cash_by_account.get(a.name, 0.0)
+        w = _bucket_weights(h, meta_all.get(h['ticker'], {}), dimension)
+        hold_exp.append((h, w))
+        for b, frac in w.items():
+            current[b] = current.get(b, 0) + h['market_value_cad'] * frac
+    if cash_as_bucket and cash > 0:
+        current['Cash'] = current.get('Cash', 0) + cash
 
-    rows = []
-    for a in accounts_db:
-        current_val = account_current.get(a.name, 0)
-        key = 'target_alloc_' + a.name.lower().replace(' ', '_').replace('-', '_')
-        target_pct = gs(key, 0)
-        target_val = total_portfolio * target_pct / 100
-        current_pct = (current_val / total_portfolio * 100) if total_portfolio else 0
-        drift = current_val - target_val
-        drift_pct = current_pct - target_pct
+    targets_set = bool(targets)
+    target_total = round(sum(targets.values()), 1)
 
-        rows.append({
-            'account': a.name,
-            'current_value': current_val,
-            'current_pct': current_pct,
-            'target_pct': target_pct,
-            'target_value': target_val,
-            'drift': drift,
-            'drift_pct': drift_pct,
+    # Include every known bucket so the editor can target ones not yet held.
+    bucket_labels = sorted(set(current) | set(targets) | set(_known_buckets(dimension)))
+    target_val = {b: base * float(targets.get(b, 0)) / 100 for b in bucket_labels}
+    shortfalls = {b: max(0.0, target_val[b] - current.get(b, 0)) for b in bucket_labels}
+    surpluses = {b: max(0.0, current.get(b, 0) - target_val[b]) for b in bucket_labels}
+
+    trade_by_ticker = {h['ticker']: 0.0 for h in holdings}
+
+    def _exposed(b):
+        exps = [(h, w[b] * h['market_value_cad']) for h, w in hold_exp if w.get(b, 0) > 0]
+        return exps, sum(e for _, e in exps)
+
+    # Cash is never a tradable holding — it's the funding source, not a buy/sell.
+    tradable_short = {b: s for b, s in shortfalls.items() if b != 'Cash'}
+
+    # Buckets with no holding to buy into can't be filled by trades; their share
+    # of cash stays uninvested and they're surfaced as new-position suggestions.
+    if mode == 'cash':
+        total_short = sum(tradable_short.values())
+        spend = min(deploy_cash, total_short)
+        for b, short in tradable_short.items():
+            if short <= 0 or total_short <= 0:
+                continue
+            buy_b = short / total_short * spend
+            exps, tot = _exposed(b)
+            if tot <= 0:
+                continue
+            for h, e in exps:
+                trade_by_ticker[h['ticker']] += buy_b * (e / tot)
+    else:  # full rebalance — sell surpluses, buy shortfalls
+        for b, surp in surpluses.items():
+            if surp <= 0 or b == 'Cash':
+                continue
+            exps, tot = _exposed(b)
+            if tot <= 0:
+                continue
+            for h, e in exps:
+                trade_by_ticker[h['ticker']] -= surp * (e / tot)
+        for b, short in tradable_short.items():
+            if short <= 0:
+                continue
+            exps, tot = _exposed(b)
+            if tot <= 0:
+                continue
+            for h, e in exps:
+                trade_by_ticker[h['ticker']] += short * (e / tot)
+
+    # Clamp sells to what's actually held.
+    for h in holdings:
+        if trade_by_ticker[h['ticker']] < -h['market_value_cad']:
+            trade_by_ticker[h['ticker']] = -h['market_value_cad']
+
+    # Build trade list with share counts from live prices.
+    trades = []
+    for h in holdings:
+        amt = trade_by_ticker.get(h['ticker'], 0.0)
+        if abs(amt) < 1.0:
+            continue
+        price = h['live_price_cad']
+        trades.append({
+            'ticker': h['ticker'], 'action': 'Buy' if amt > 0 else 'Sell',
+            'amount_cad': round(abs(amt), 2), 'currency': h['currency'],
+            'price_cad': round(price, 2) if price else None,
+            'shares': round(abs(amt) / price, 4) if price else None,
         })
+    trades.sort(key=lambda t: t['amount_cad'], reverse=True)
 
-    chart_current = [round(r['current_pct'], 2) for r in rows]
-    chart_target = [round(r['target_pct'], 2) for r in rows]
-    chart_labels = [r['account'] for r in rows]
-    targets_set = any(r['target_pct'] > 0 for r in rows)
+    net_cash_used = sum(t['amount_cad'] if t['action'] == 'Buy' else -t['amount_cad'] for t in trades)
+    cash_after = cash - net_cash_used
+
+    # Projected allocation after the recommended trades — reflects only what the
+    # existing holdings + trades actually achieve (so ETF dilution shows up as a
+    # residual gap rather than being optimistically filled).
+    proj, proj_total = {}, 0.0
+    for h, w in hold_exp:
+        mv = h['market_value_cad'] + trade_by_ticker.get(h['ticker'], 0.0)
+        proj_total += mv
+        for b, frac in w.items():
+            proj[b] = proj.get(b, 0) + mv * frac
+    if cash_as_bucket and cash > 0:
+        proj['Cash'] = proj.get('Cash', 0) + cash_after
+        proj_total += cash_after
+
+    buckets = []
+    for b in bucket_labels:
+        cur = current.get(b, 0)
+        buckets.append({
+            'label': b,
+            'current_value': round(cur, 2),
+            'current_pct': round(cur / pct_base * 100, 1) if pct_base else 0,
+            'target_pct': round(float(targets.get(b, 0)), 1),
+            'target_value': round(target_val[b], 2),
+            'projected_pct': round(proj.get(b, 0) / proj_total * 100, 1) if proj_total else 0,
+            'drift': round(cur - target_val[b], 2),
+        })
+    if dimension in ORDINAL_DIMENSIONS:
+        order = {b: i for i, b in enumerate(_known_buckets(dimension))}
+        buckets.sort(key=lambda x: order.get(x['label'], 999))
+    else:
+        buckets.sort(key=lambda x: (x['target_pct'], x['current_value']), reverse=True)
+
+    # Suggest a focused new position wherever a targeted bucket is still well
+    # under target after trades: either nothing is held there, or what's held
+    # (broad ETFs) can't close the gap. Cash is funding, never a suggestion.
+    wl = _watchlist_by_bucket(dimension)
+    floor = max(250.0, 0.01 * base)  # ignore trivial gaps (< ~1% of the account)
+    new_positions = []
+    for bk in buckets:
+        b = bk['label']
+        if b == 'Cash' or bk['target_pct'] <= 0:
+            continue
+        gap_val = bk['target_value'] - proj.get(b, 0)
+        gap_pct = bk['target_pct'] - bk['projected_pct']
+        if gap_val < floor:
+            continue
+        held = current.get(b, 0) > 0.005
+        # New bucket, big absolute gap, or filled well under its target.
+        under = (not held) or gap_pct >= REBAL_GAP_PP or proj.get(b, 0) < REBAL_FILL_RATIO * bk['target_value']
+        if not under:
+            continue
+        new_positions.append({
+            'bucket': b,
+            'amount_cad': round(gap_val, 2),
+            'gap_pct': round(gap_pct, 1),
+            'reason': 'Holdings here (ETFs) leave it short' if held else 'No position yet',
+            'suggestions': wl.get(b, []),
+        })
+    new_positions.sort(key=lambda x: x['amount_cad'], reverse=True)
 
     return {
-        'rows': rows,
-        'total_portfolio': total_portfolio,
-        'chart_labels': chart_labels,
-        'chart_current': chart_current,
-        'chart_target': chart_target,
+        **base_result,
+        'buckets': buckets,
+        'trades': trades,
+        'new_positions': new_positions,
+        'cash': round(cash, 2),
+        'deploy_cash': round(deploy_cash, 2),
+        'invested': round(invested, 2),
+        'cash_after': round(cash_after, 2),
         'targets_set': targets_set,
+        'target_total': target_total,
     }
 
 

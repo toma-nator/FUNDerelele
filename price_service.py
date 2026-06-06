@@ -27,7 +27,7 @@ def _fetch_one_metadata(ticker):
     """Fetch classification metadata for a single ticker (asset type, sector,
     market cap, and ETF look-through sector/asset-class weightings)."""
     meta = {'asset_type': None, 'sector': None, 'market_cap': None,
-            'fund_sectors': None, 'fund_assets': None}
+            'fund_sectors': None, 'fund_assets': None, 'beta': None}
     try:
         tk = yf.Ticker(ticker)
         info = tk.info or {}
@@ -36,6 +36,10 @@ def _fetch_one_metadata(ticker):
         meta['sector'] = info.get('sector')
         mc = info.get('marketCap')
         meta['market_cap'] = float(mc) if mc else None
+        # Beta (market-relative volatility) for risk targeting; ETFs often only
+        # report beta3Year.
+        b = info.get('beta') or info.get('beta3Year')
+        meta['beta'] = float(b) if b else None
         # Forward annual dividend per share (ticker currency) + yield (%), with
         # fallbacks for ETFs that don't report dividendRate.
         dr = info.get('dividendRate') or info.get('trailingAnnualDividendRate')
@@ -71,7 +75,7 @@ def get_holdings_metadata(tickers, force=False):
         if pc and pc.meta_json and not force:
             try:
                 m = json.loads(pc.meta_json)
-                if 'dividend_rate' in m:  # re-fetch older cache entries missing div fields
+                if 'dividend_rate' in m and 'beta' in m:  # re-fetch caches missing newer fields
                     result[t] = m
                     continue
             except Exception:

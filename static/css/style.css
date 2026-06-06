@@ -414,6 +414,7 @@ body {
 
 .text-green { color: var(--green); }
 .text-red   { color: var(--red);   }
+.text-amber { color: var(--yellow); }
 .text-dim   { color: var(--text-dim); }
 .text-muted { color: var(--text-muted); }
 
@@ -569,6 +570,11 @@ body {
 .form-input.mono { font-family: var(--mono); }
 .form-input:focus { border-color: var(--accent); }
 .form-input option { background: var(--bg-surface); }
+
+/* Hide number-input spinner arrows (they crowd narrow fields) */
+.no-spin::-webkit-inner-spin-button,
+.no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.no-spin { -moz-appearance: textfield; appearance: textfield; }
 
 .form-row {
   display: flex;

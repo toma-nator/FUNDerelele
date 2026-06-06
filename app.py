@@ -394,7 +394,9 @@ def watchlist_delete(id):
 @app.route('/gics')
 def gics():
     from calculations import get_gic_stats
-    data = get_gic_stats()
+    account = request.args.get('account', '').strip()
+    show = request.args.get('show', '')
+    data = get_gic_stats(account_filter=account or None, show_matured=(show == 'all'))
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
     return render_template('gics.html', data=data, last_updated=last_updated, active='gics')
 
@@ -404,10 +406,14 @@ def gics_add():
     try:
         start = datetime.strptime(request.form['start_date'], '%Y-%m-%d').date()
         maturity = datetime.strptime(request.form['maturity_date'], '%Y-%m-%d').date()
+        account = request.form.get('account', '').strip()
+        # Create the account on first use so GICs can go to a new custom account.
+        if account and not Account.query.filter_by(name=account).first():
+            db.session.add(Account(name=account, type='Non-Reg', cash_balance=0))
         db.session.add(GIC(
             name=request.form.get('name', '').strip(),
             institution=request.form.get('institution', '').strip(),
-            account=request.form.get('account', '').strip(),
+            account=account,
             principal=float(request.form['principal']),
             rate=float(request.form['rate']),
             compounding=request.form.get('compounding', 'Annual'),
@@ -490,9 +496,46 @@ def tax():
 @app.route('/rebalancer')
 def rebalancer():
     from calculations import get_rebalancer_data
-    data = get_rebalancer_data()
+    account = request.args.get('account', '').strip() or None
+    dimension = request.args.get('dimension', 'sector').strip()
+    mode = request.args.get('mode', 'cash').strip()
+    deploy_raw = request.args.get('deploy', '').strip()
+    try:
+        deploy_cash = float(deploy_raw) if deploy_raw else None
+    except ValueError:
+        deploy_cash = None
+    view = request.args.get('view', '').strip()
+    data = get_rebalancer_data(account=account, dimension=dimension, mode=mode, deploy_cash=deploy_cash)
+    # Overall mode is the default landing view (like the Accounts overview);
+    # picking an account chip switches to that account's rebalancer.
+    overall_mode = (view == 'overall') or (account is None)
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
-    return render_template('rebalancer.html', data=data, last_updated=last_updated, active='rebalancer')
+    return render_template('rebalancer.html', data=data, overall_mode=overall_mode,
+                           last_updated=last_updated, active='rebalancer')
+
+
+@app.route('/rebalancer/targets', methods=['POST'])
+def rebalancer_targets():
+    from calculations import save_rebal_targets, REBAL_DIMENSIONS, _known_buckets
+    account = request.form.get('account', '').strip()
+    dimension = request.form.get('dimension', 'sector').strip()
+    if not account or dimension not in REBAL_DIMENSIONS:
+        flash('Could not save targets: missing account or dimension.', 'error')
+        return redirect(url_for('rebalancer'))
+    # Buckets come in as target_<bucket> fields; collect any with a value.
+    targets = {}
+    for b in _known_buckets(dimension):
+        raw = request.form.get('target_' + b, '').strip()
+        if raw:
+            targets[b] = raw
+    save_rebal_targets(account, dimension, targets)
+    total = sum(float(v) for v in targets.values()) if targets else 0
+    if abs(total - 100) > 0.5 and targets:
+        flash(f'Targets saved — note they sum to {total:.0f}%, not 100%.', 'info')
+    else:
+        flash('Targets saved.', 'success')
+    return redirect(url_for('rebalancer', account=account, dimension=dimension,
+                            mode=request.form.get('mode', 'cash')))
 
 
 # ── Performance ───────────────────────────────────────────────────────────────
