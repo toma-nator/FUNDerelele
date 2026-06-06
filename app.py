@@ -631,25 +631,8 @@ def performance_backfill():
 
 @app.route('/projections')
 def projections():
-    from calculations import get_projections, get_holdings, get_dashboard_stats
-    holdings = get_holdings()
-    stats = get_dashboard_stats(holdings)
-    current_value = stats['total_portfolio']
-    monthly_contrib = request.args.get('monthly_contrib', 500.0, type=float)
-    years = min(50, max(1, request.args.get('years', 25, type=int)))
-    proj = get_projections(current_value, monthly_contrib, years)
-    last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
-    return render_template('projections.html',
-                           proj=proj, current_value=current_value,
-                           monthly_contrib=monthly_contrib, years=years,
-                           last_updated=last_updated, active='projections')
-
-
-# ── Monte Carlo ───────────────────────────────────────────────────────────────
-
-@app.route('/montecarlo')
-def montecarlo():
-    from calculations import run_monte_carlo, get_holdings, get_dashboard_stats
+    from calculations import (get_projections, run_monte_carlo, get_planning_stats,
+                              get_holdings, get_dashboard_stats)
     holdings = get_holdings()
     stats = get_dashboard_stats(holdings)
     current_value = stats['total_portfolio']
@@ -657,13 +640,27 @@ def montecarlo():
     years = min(50, max(1, request.args.get('years', 25, type=int)))
     mean_return = request.args.get('mean_return', 7.0, type=float)
     std_dev = request.args.get('std_dev', 15.0, type=float)
+    target = request.args.get('target', 1000000.0, type=float)
+    inflation = request.args.get('inflation', 2.5, type=float)
+    div_growth = request.args.get('div_growth', 5.0, type=float)
+
+    proj = get_projections(current_value, monthly_contrib, years)
     mc = run_monte_carlo(current_value, monthly_contrib, years, mean_return / 100, std_dev / 100)
+    planning = get_planning_stats(current_value, monthly_contrib, years, mean_return / 100,
+                                  inflation / 100, target, div_growth / 100)
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
-    return render_template('montecarlo.html',
-                           mc=mc, current_value=current_value,
+    return render_template('projections.html',
+                           proj=proj, mc=mc, planning=planning, current_value=current_value,
                            monthly_contrib=monthly_contrib, years=years,
                            mean_return=mean_return, std_dev=std_dev,
-                           last_updated=last_updated, active='montecarlo')
+                           target=target, inflation=inflation, div_growth=div_growth,
+                           last_updated=last_updated, active='projections')
+
+
+# Monte Carlo merged into Projections — keep the URL working.
+@app.route('/montecarlo')
+def montecarlo():
+    return redirect(url_for('projections', **request.args))
 
 
 # ── API ───────────────────────────────────────────────────────────────────────

@@ -1,8 +1,10 @@
 {% extends 'base.html' %}
 {% block title %}Projections — Portfolio Tracker{% endblock %}
-{% block page_title %}Projections{% endblock %}
+{% block page_title %}Projections &amp; Planning{% endblock %}
 
 {% block content %}
+
+{# ── Parameters ── #}
 <div class="card">
   <div class="card-header">Parameters</div>
   <form method="GET" action="{{ url_for('projections') }}">
@@ -13,80 +15,264 @@
       </div>
       <div class="form-group">
         <label>Monthly Contribution</label>
-        <input class="form-input mono" name="monthly_contrib" type="number" step="50" value="{{ monthly_contrib | int }}">
+        <input class="form-input mono no-spin" name="monthly_contrib" type="number" step="50" value="{{ monthly_contrib | int }}">
       </div>
       <div class="form-group">
         <label>Time Horizon (years)</label>
-        <input class="form-input mono" name="years" type="number" min="1" max="50" value="{{ years }}">
+        <input class="form-input mono no-spin" name="years" type="number" min="1" max="50" value="{{ years }}">
+      </div>
+      <div class="form-group">
+        <label>Expected Return % <span class="text-dim">(MC + planning)</span></label>
+        <input class="form-input mono no-spin" name="mean_return" type="number" step="0.5" min="-10" max="30" value="{{ mean_return }}">
+      </div>
+      <div class="form-group">
+        <label>Volatility % <span class="text-dim">(MC)</span></label>
+        <input class="form-input mono no-spin" name="std_dev" type="number" step="0.5" min="1" max="60" value="{{ std_dev }}">
+      </div>
+      <div class="form-group">
+        <label>Retirement Target</label>
+        <input class="form-input mono no-spin" name="target" type="number" step="50000" value="{{ target | int }}">
+      </div>
+      <div class="form-group">
+        <label>Inflation %</label>
+        <input class="form-input mono no-spin" name="inflation" type="number" step="0.1" min="0" max="15" value="{{ inflation }}">
+      </div>
+      <div class="form-group">
+        <label>Dividend Growth %</label>
+        <input class="form-input mono no-spin" name="div_growth" type="number" step="0.5" min="0" max="25" value="{{ div_growth }}">
       </div>
       <div style="align-self:flex-end">
-        <button type="submit" class="btn btn-primary">Run</button>
+        <button type="submit" class="btn btn-primary">Update</button>
       </div>
     </div>
   </form>
 </div>
 
+{# ── Growth chart: Scenarios ⇄ Monte Carlo ── #}
 <div class="card">
-  <div class="card-header">Portfolio Growth Scenarios</div>
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+    <span>{{ years }}-Year Growth</span>
+    <div style="display:flex;gap:.3rem">
+      <button type="button" class="acct-chip growth-toggle active" data-mode="scenarios">Scenarios</button>
+      <button type="button" class="acct-chip growth-toggle" data-mode="mc">Monte Carlo</button>
+    </div>
+  </div>
   <div class="chart-wrap" style="max-height:340px;padding:20px 24px">
-    <canvas id="projChart"></canvas>
+    <canvas id="growthChart"></canvas>
+  </div>
+
+  {# Scenario finals #}
+  <div class="stat-grid growth-stats" id="scenario-stats" style="grid-template-columns:repeat(3,1fr)">
+    {% for s in proj.scenarios %}
+    <div class="stat-card">
+      <div class="stat-label">{{ s.label }}</div>
+      <div class="stat-value" style="color:{{ s.color }}">{{ s.final | cad }}</div>
+      <div class="stat-sub text-dim">in {{ years }} years</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {# Monte Carlo percentiles #}
+  <div class="stat-grid growth-stats" id="mc-stats" style="grid-template-columns:repeat(3,1fr);display:none">
+    <div class="stat-card">
+      <div class="stat-label">10th Percentile</div>
+      <div class="stat-value text-red">{{ mc.final_p10 | cad }}</div>
+      <div class="stat-sub text-dim">pessimistic</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Median (50th)</div>
+      <div class="stat-value" style="color:var(--accent)">{{ mc.final_p50 | cad }}</div>
+      <div class="stat-sub text-dim">{{ mc.n_sims }} sims · most likely</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">90th Percentile</div>
+      <div class="stat-value text-green">{{ mc.final_p90 | cad }}</div>
+      <div class="stat-sub text-dim">optimistic</div>
+    </div>
   </div>
 </div>
 
-<div class="stat-grid" style="grid-template-columns:repeat(3,1fr)">
-  {% for s in proj.scenarios %}
-  <div class="stat-card">
-    <div class="stat-label">{{ s.label }}</div>
-    <div class="stat-value" style="color:{{ s.color }}">{{ s.final | cad }}</div>
-    <div class="stat-sub text-dim">in {{ years }} years</div>
+{# ── Planning ── #}
+<div class="two-col" style="align-items:start">
+  {# Retirement goal #}
+  <div class="card">
+    <div class="card-header">Retirement Goal</div>
+    <div style="padding:14px 20px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <span class="text-dim">Target</span><span class="mono">{{ planning.retirement.target | cad }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <span class="text-dim">Projected in {{ years }} yrs</span>
+        <span class="mono {{ 'text-green' if planning.retirement.on_track else 'text-amber' }}">{{ planning.retirement.projected | cad }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px;border-top:1px solid var(--border-sub);padding-top:8px">
+        <span class="text-dim">{{ 'Surplus' if planning.retirement.on_track else 'Shortfall' }}</span>
+        <span class="mono {{ 'text-green' if planning.retirement.on_track else 'text-red' }}">
+          {{ (planning.retirement.surplus if planning.retirement.on_track else planning.retirement.shortfall) | cad }}
+        </span>
+      </div>
+      {% if planning.retirement.on_track %}
+      <div class="callout callout-good">On track — projected to beat target by {{ planning.retirement.surplus | cad }}.</div>
+      {% else %}
+      <div class="callout callout-info">
+        Short by {{ planning.retirement.shortfall | cad }}. Need ≈<b>{{ planning.retirement.needed_contrib | cad }}/mo</b>
+        ({{ planning.retirement.extra_needed | cad }}/mo more than now).
+      </div>
+      {% endif %}
+    </div>
   </div>
-  {% endfor %}
+
+  {# Contribution needed #}
+  <div class="card">
+    <div class="card-header">Monthly Contribution Needed <span class="card-sub">over {{ years }} yrs @ {{ mean_return }}%</span></div>
+    <table class="data-table">
+      <thead><tr><th>Milestone</th><th class="r">$ / month</th></tr></thead>
+      <tbody>
+        {% for c in planning.contrib_grid %}
+        <tr>
+          <td class="mono">{{ c.target | cad }}</td>
+          <td class="r mono {% if c.pmt <= 0 %}text-green{% endif %}">{% if c.pmt <= 0 %}covered{% else %}{{ c.pmt | cad }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="two-col" style="align-items:start">
+  {# Inflation-adjusted #}
+  <div class="card">
+    <div class="card-header">Inflation-Adjusted <span class="card-sub">{{ planning.inflation.inflation_pct }}% inflation · real {{ planning.inflation.real_rate_pct }}%/yr</span></div>
+    <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);margin:0">
+      <div class="stat-card">
+        <div class="stat-label">Nominal</div>
+        <div class="stat-value" style="font-size:1.1rem">{{ planning.inflation.nominal | cad }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Real (today's $)</div>
+        <div class="stat-value text-amber" style="font-size:1.1rem">{{ planning.inflation.real | cad }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Buying power lost</div>
+        <div class="stat-value text-red" style="font-size:1.1rem">{{ planning.inflation.lost | cad }}</div>
+      </div>
+    </div>
+    <div class="chart-wrap" style="max-height:200px;padding:12px 20px">
+      <canvas id="infChart"></canvas>
+    </div>
+  </div>
+
+  {# Dividend snowball #}
+  <div class="card">
+    <div class="card-header">Dividend Snowball <span class="card-sub">forward income +{{ planning.dividend.growth_pct }}%/yr</span></div>
+    <div class="stat-grid" style="grid-template-columns:repeat(3,1fr);margin:0">
+      <div class="stat-card">
+        <div class="stat-label">Forward / yr</div>
+        <div class="stat-value text-green" style="font-size:1.1rem">{{ planning.dividend.forward | cad }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Yr {{ years }} income</div>
+        <div class="stat-value" style="font-size:1.1rem">{{ planning.dividend.final_annual | cad }}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total collected</div>
+        <div class="stat-value" style="font-size:1.1rem">{{ planning.dividend.total | cad }}</div>
+      </div>
+    </div>
+    <div class="chart-wrap" style="max-height:200px;padding:12px 20px">
+      <canvas id="divChart"></canvas>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-const labels = {{ proj.labels | tojson }};
-const scenarios = {{ proj.scenarios | tojson }};
+const tickFmt = v => '$' + (v >= 1e6 ? (v/1e6).toFixed(1)+'M' : (v/1000).toFixed(0)+'k');
 
-new Chart(document.getElementById('projChart'), {
+// ── Growth chart: Scenarios ⇄ Monte Carlo ──
+const labels = {{ proj.labels | tojson }};
+const SCEN = {{ proj.scenarios | tojson }};
+const MC = { p10: {{ mc.p10 | tojson }}, p50: {{ mc.p50 | tojson }}, p90: {{ mc.p90 | tojson }} };
+let growthChart;
+
+function renderGrowth(mode) {
+  let datasets;
+  if (mode === 'mc') {
+    datasets = [
+      { label: '90th %ile', data: MC.p90, borderColor: 'rgba(0,230,118,.5)', backgroundColor: 'rgba(0,230,118,.08)', fill: '+1', borderWidth: 1.5, borderDash: [5,3], pointRadius: 0, tension: .1 },
+      { label: 'Median', data: MC.p50, borderColor: '#00c8f0', fill: false, borderWidth: 2.5, pointRadius: 0, tension: .1 },
+      { label: '10th %ile', data: MC.p10, borderColor: 'rgba(255,77,77,.5)', fill: false, borderWidth: 1.5, borderDash: [5,3], pointRadius: 0, tension: .1 },
+    ];
+  } else {
+    datasets = SCEN.map(s => ({ label: s.label, data: s.data, borderColor: s.color, backgroundColor: s.color + '15', fill: false, borderWidth: 2, pointRadius: 0, tension: .1 }));
+  }
+  if (growthChart) growthChart.destroy();
+  growthChart = new Chart(document.getElementById('growthChart'), {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { labels: { color: '#c8d8e8', font: { size: 11 } } },
+        tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => ` ${ctx.dataset.label}: $${ctx.raw.toLocaleString()}` } }
+      },
+      scales: {
+        x: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: (v,i) => labels[i] || '', maxTicksLimit: 15, maxRotation: 0 } },
+        y: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: tickFmt } }
+      }
+    }
+  });
+  document.getElementById('scenario-stats').style.display = (mode === 'mc') ? 'none' : '';
+  document.getElementById('mc-stats').style.display = (mode === 'mc') ? '' : 'none';
+}
+document.querySelectorAll('.growth-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.growth-toggle').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderGrowth(btn.dataset.mode);
+  });
+});
+renderGrowth('scenarios');
+
+// ── Inflation: nominal vs real ──
+new Chart(document.getElementById('infChart'), {
   type: 'line',
   data: {
-    labels,
-    datasets: scenarios.map(s => ({
-      label: s.label,
-      data: s.data,
-      borderColor: s.color,
-      backgroundColor: s.color + '15',
-      fill: false,
-      tension: 0.1,
-      pointRadius: 0,
-      borderWidth: 2,
-    }))
+    labels: {{ planning.inflation.labels | tojson }},
+    datasets: [
+      { label: 'Nominal', data: {{ planning.inflation.nominal_data | tojson }}, borderColor: '#00c8f0', borderWidth: 2, pointRadius: 0, tension: .1 },
+      { label: 'Real (after inflation)', data: {{ planning.inflation.real_data | tojson }}, borderColor: '#ffd740', borderWidth: 2, borderDash: [5,3], pointRadius: 0, tension: .1 },
+    ]
   },
   options: {
     responsive: true, maintainAspectRatio: false,
-    plugins: {
-      legend: { labels: { color: '#c8d8e8', font: { size: 11 } } },
-      tooltip: {
-        mode: 'index', intersect: false,
-        callbacks: { label: ctx => ` ${ctx.dataset.label}: $${ctx.raw.toLocaleString()}` }
-      }
-    },
+    plugins: { legend: { labels: { color: '#c8d8e8', font: { size: 10 } } },
+               tooltip: { mode: 'index', intersect: false, callbacks: { label: ctx => ` ${ctx.dataset.label}: $${ctx.raw.toLocaleString()}` } } },
     scales: {
-      x: {
-        grid: { color: '#1a3050' },
-        ticks: {
-          color: '#5a7a96',
-          callback: (val, idx) => labels[idx] || '',
-          maxTicksLimit: 15,
-          maxRotation: 0,
-        }
-      },
-      y: {
-        grid: { color: '#1a3050' },
-        ticks: { color: '#5a7a96', callback: v => '$' + (v >= 1e6 ? (v/1e6).toFixed(1)+'M' : (v/1000).toFixed(0)+'k') }
-      }
+      x: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', maxTicksLimit: 12, maxRotation: 0 } },
+      y: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: tickFmt } }
+    }
+  }
+});
+
+// ── Dividend snowball ──
+new Chart(document.getElementById('divChart'), {
+  data: {
+    labels: {{ planning.dividend.labels | tojson }},
+    datasets: [
+      { type: 'bar', label: 'Annual income', data: {{ planning.dividend.annual_data | tojson }}, backgroundColor: 'rgba(0,230,118,.35)', borderColor: '#00e676', borderWidth: 1 },
+      { type: 'line', label: 'Cumulative', data: {{ planning.dividend.cumulative_data | tojson }}, borderColor: '#00c8f0', borderWidth: 2, pointRadius: 0, tension: .1, yAxisID: 'y1' },
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: '#c8d8e8', font: { size: 10 } } },
+               tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: $${ctx.raw.toLocaleString()}` } } },
+    scales: {
+      x: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', maxTicksLimit: 12, maxRotation: 0 } },
+      y: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: tickFmt } },
+      y1: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#5a7a96', callback: tickFmt } }
     }
   }
 });

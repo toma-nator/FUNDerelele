@@ -1654,6 +1654,103 @@ def run_monte_carlo(current_value, monthly_contrib, years, mean_annual, std_annu
     }
 
 
+# ── Planning (retirement goal, contribution solver, inflation, dividends) ──────
+
+def _forward_annual_dividend():
+    """Current forward annual dividend income across holdings, in CAD."""
+    from price_service import get_holdings_metadata, get_fx_rate
+    fx = get_fx_rate()
+    holdings = get_holdings()
+    meta = get_holdings_metadata([h['ticker'] for h in holdings])
+    total = 0.0
+    for h in holdings:
+        m = meta.get(h['ticker'], {})
+        rate = m.get('dividend_rate')
+        if not rate and m.get('dividend_yield') and h['live_price']:
+            rate = m['dividend_yield'] / 100.0 * h['live_price']
+        if rate:
+            total += rate * h['qty'] * (fx if h['currency'] == 'USD' else 1.0)
+    return total
+
+
+def get_planning_stats(current_value, monthly_contrib, years, base_return,
+                       inflation, target, div_growth):
+    """Planning calculators: retirement goal, contribution-needed solver,
+    inflation-adjusted value, and a dividend-income snowball."""
+
+    def fv(pv, pmt, annual, yrs):
+        n = int(round(yrs * 12)); r = annual / 12
+        if abs(r) < 1e-9:
+            return pv + pmt * n
+        g = (1 + r) ** n
+        return pv * g + pmt * ((g - 1) / r)
+
+    def pmt_for(amt, annual, yrs):
+        n = int(round(yrs * 12)); r = annual / 12
+        if n == 0:
+            return 0.0
+        if abs(r) < 1e-9:
+            return (amt - current_value) / n
+        g = (1 + r) ** n
+        factor = (g - 1) / r
+        return (amt - current_value * g) / factor if factor else 0.0
+
+    # Retirement goal
+    projected = fv(current_value, monthly_contrib, base_return, years)
+    needed = pmt_for(target, base_return, years)
+    retirement = {
+        'target': target, 'projected': round(projected, 2),
+        'on_track': projected >= target,
+        'gap': round(projected - target, 2),
+        'shortfall': round(max(0.0, target - projected), 2),
+        'surplus': round(max(0.0, projected - target), 2),
+        'needed_contrib': round(max(0.0, needed), 2),
+        'extra_needed': round(max(0.0, needed - monthly_contrib), 2),
+    }
+
+    # Contribution needed for round milestones (over the same horizon)
+    contrib_grid = [{'target': t, 'pmt': round(max(0.0, pmt_for(t, base_return, years)), 2)}
+                    for t in (500000, 1000000, 1500000, 2000000)]
+
+    # Inflation-adjusted (real) value — yearly nominal vs real series
+    real_rate = (1 + base_return) / (1 + inflation) - 1
+    inf_labels, nominal_data, real_data = [], [], []
+    for y in range(0, int(years) + 1):
+        inf_labels.append(f'Yr {y}')
+        nominal_data.append(round(fv(current_value, monthly_contrib, base_return, y), 2))
+        real_data.append(round(fv(current_value, monthly_contrib, real_rate, y), 2))
+    nominal_final = nominal_data[-1] if nominal_data else 0.0
+    real_final = real_data[-1] if real_data else 0.0
+    inflation_adj = {
+        'inflation_pct': round(inflation * 100, 1),
+        'real_rate_pct': round(real_rate * 100, 2),
+        'nominal': nominal_final,
+        'real': real_final,
+        'lost': round(nominal_final - real_final, 2),
+        'labels': inf_labels, 'nominal_data': nominal_data, 'real_data': real_data,
+    }
+
+    # Dividend snowball — forward income growing at div_growth per year
+    fwd = _forward_annual_dividend()
+    labels, annual_data, cumulative_data = [], [], []
+    cumulative = 0.0
+    for y in range(1, int(years) + 1):
+        annual = fwd * (1 + div_growth) ** (y - 1)
+        cumulative += annual
+        labels.append(f'Yr {y}')
+        annual_data.append(round(annual, 2))
+        cumulative_data.append(round(cumulative, 2))
+    dividend = {
+        'forward': round(fwd, 2), 'growth_pct': round(div_growth * 100, 1),
+        'final_annual': annual_data[-1] if annual_data else 0.0,
+        'total': round(cumulative, 2),
+        'labels': labels, 'annual_data': annual_data, 'cumulative_data': cumulative_data,
+    }
+
+    return {'retirement': retirement, 'contrib_grid': contrib_grid,
+            'inflation': inflation_adj, 'dividend': dividend}
+
+
 # ── Performance series (live, per-scope, with benchmarks) ─────────────────────
 
 # name -> (yfinance symbol, currency)

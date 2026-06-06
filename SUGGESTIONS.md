@@ -210,3 +210,75 @@ created and tracked.
   ideas for a bucket at once.
 - **Effort:** small–medium — one route + a textarea; reuses the existing add and
   auto-classify logic.
+
+## Projections — TFSA room projector
+
+Track and project TFSA contribution room (the V6 Excel had this on the
+Projections sheet). Given current TFSA value, room remaining, and the annual
+limit, project the account value year by year assuming room is filled each year.
+
+- **How:** add a small section to the Projections tab: inputs for current TFSA
+  value, room remaining, and annual room added (e.g. $7,000); compound at the
+  expected return while adding the yearly room. Could read the actual TFSA
+  account value from holdings if an account is flagged as TFSA.
+- **Effort:** small — one calculator + a card; reuses the FV helper in
+  `get_planning_stats`.
+
+## Projections — sequence-of-returns risk
+
+Show how the *order* of returns affects outcomes (the V6 Excel had this): a big
+crash early vs. late produces very different ending balances even with the same
+average return — important once withdrawals/decumulation matter.
+
+- **How:** run two deterministic paths over the horizon — one with a crash in the
+  first few years then recovery, one with the crash at the end — and report the
+  ending-balance difference ("timing risk cost"). Optionally overlay both on the
+  growth chart.
+- **Effort:** small–medium — two scripted return sequences through the FV loop +
+  a stat card / overlay.
+
+## New tab — Portfolio Optimizer (efficient frontier)
+
+Mean-variance (Markowitz) optimization over the holdings of an account: compute
+the efficient frontier and the optimal weights for max-Sharpe and min-variance
+portfolios, then diff against current weights (ties naturally into the
+Rebalancer). The V6 Excel had this as a `run_optimizer.bat`-driven "Efficient
+Frontier" tab reading `EF_POINTS`, `EF_MIN_W`, `EF_MAX_W`, `RISK_FREE_RATE`,
+`HISTORY_DAYS` from Settings.
+
+- **Data:** per-holding historical returns from yfinance (e.g. ~1–3yr daily),
+  build the covariance matrix + expected returns; we already fetch price history
+  elsewhere, so cache it.
+- **Compute:** efficient frontier points and optimal weights under min/max
+  per-holding weight constraints and a risk-free rate (for Sharpe). Keep it
+  dependency-light — numpy is available via yfinance, but **scipy is not**, so
+  use a constrained quadratic solve / random-portfolio sampling in pure
+  Python+numpy rather than `scipy.optimize`.
+- **Where:** a new Advanced tab; show the frontier scatter (risk vs return),
+  current portfolio as a point, and the suggested optimal weights vs current as
+  a table — with a hand-off to the Rebalancer to act on the deltas.
+- **Effort:** medium–large — history fetch + covariance + optimizer + a new tab;
+  the math is the bulk of it.
+
+## New tab — RDSP tracker & decumulation planner
+
+A dedicated RDSP planner (the imported account is an RDSP). Beyond the
+accumulation projection, model the **withdrawal / decumulation phase**: how the
+portfolio draws down over time once payments start.
+
+- **Accumulation:** project contributions + government grants (CDSG, up to
+  $3,500/yr matched) and bonds (CDSB) growing to the withdrawal age, honouring
+  the 10-year assistance-holdback rule (grants/bonds repaid if withdrawn early).
+- **Decumulation:** model **LDAP** (Lifetime Disability Assistance Payments) —
+  the annual withdrawal formula based on account value and life expectancy
+  (roughly value ÷ (83 − age + 3)) — and show the **portfolio decreasing over
+  time** through the withdrawal years (value, annual payment, depletion age).
+- **Risk glide path:** let the assumed return/volatility **shift down over time**
+  (de-risk as withdrawals approach and during drawdown), instead of one fixed
+  return — ties into the Rebalancer's Blended-Risk dimension.
+- **Inputs:** current value, contribution, grant/bond schedule, withdrawal start
+  age, expected return (and a glide path), life expectancy.
+- **Reference:** the official RDSP calculator at <https://www.rdsp.com/calculator/>
+  (saved in memory) for the grant/bond and LDAP rules to mirror.
+- **Effort:** large — RDSP-specific rules (grants/bonds, holdback, LDAP) plus a
+  two-phase (accumulate → decumulate) projection and a glide-path model.

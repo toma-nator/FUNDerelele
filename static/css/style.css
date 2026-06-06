@@ -583,6 +583,12 @@ body {
 .cand-add { background: var(--bg-surface); color: var(--text-dim); cursor: pointer; font-family: var(--mono); }
 .cand-add:hover { color: var(--green); border-color: var(--green); }
 
+/* Permanent inline callouts (not auto-dismissed like .flash) */
+.callout { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius-sm);
+           font-size: .82rem; line-height: 1.4; border: 1px solid var(--border); }
+.callout-good { background: rgba(0,230,118,.10); border-color: rgba(0,230,118,.30); color: var(--green); }
+.callout-info { background: rgba(0,200,240,.08); border-color: var(--accent-dim); color: var(--text); }
+
 /* Modal (candidate review) */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 1000;
                  display: flex; align-items: center; justify-content: center; padding: 20px; }
