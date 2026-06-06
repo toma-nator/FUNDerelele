@@ -36,6 +36,12 @@ def _fetch_one_metadata(ticker):
         meta['sector'] = info.get('sector')
         mc = info.get('marketCap')
         meta['market_cap'] = float(mc) if mc else None
+        # Forward annual dividend per share (ticker currency) + yield (%), with
+        # fallbacks for ETFs that don't report dividendRate.
+        dr = info.get('dividendRate') or info.get('trailingAnnualDividendRate')
+        meta['dividend_rate'] = float(dr) if dr else None
+        dy = info.get('dividendYield')
+        meta['dividend_yield'] = float(dy) if dy else None
         if qt == 'ETF':
             try:
                 fd = tk.funds_data
@@ -64,8 +70,10 @@ def get_holdings_metadata(tickers, force=False):
         pc = PriceCache.query.get(t)
         if pc and pc.meta_json and not force:
             try:
-                result[t] = json.loads(pc.meta_json)
-                continue
+                m = json.loads(pc.meta_json)
+                if 'dividend_rate' in m:  # re-fetch older cache entries missing div fields
+                    result[t] = m
+                    continue
             except Exception:
                 pass
         to_fetch.append(t)

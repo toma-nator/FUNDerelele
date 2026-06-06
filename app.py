@@ -318,9 +318,14 @@ def cashflows():
 @app.route('/dividends')
 def dividends():
     from calculations import get_dividend_stats
-    stats = get_dividend_stats()
+    scope = request.args.get('scope', 'portfolio')
+    stats = get_dividend_stats(scope)
+    accounts = [r[0] for r in Transaction.query.filter_by(type='Dividend')
+                .with_entities(Transaction.account).distinct().all()]
+    accounts.sort()
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
-    return render_template('dividends.html', stats=stats, last_updated=last_updated, active='dividends')
+    return render_template('dividends.html', stats=stats, accounts=accounts, scope=scope,
+                           last_updated=last_updated, active='dividends')
 
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────

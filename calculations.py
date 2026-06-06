@@ -402,63 +402,110 @@ def get_cashflow_stats(account_filter=None, subtype_filter=None):
 
 # ── Dividends ─────────────────────────────────────────────────────────────────
 
-def get_dividend_stats():
+def get_dividend_stats(scope='portfolio'):
     from datetime import date
     from datetime import datetime as dt
+    from price_service import get_holdings_metadata
 
-    dividends = Transaction.query.filter_by(type='Dividend').order_by(Transaction.date.asc()).all()
+    dq = Transaction.query.filter_by(type='Dividend')
+    wq = Transaction.query.filter_by(type='WithholdingTax')
+    if scope and scope != 'portfolio':
+        dq = dq.filter_by(account=scope)
+        wq = wq.filter_by(account=scope)
+    dividends = dq.order_by(Transaction.date.asc()).all()
+    withholdings = wq.all()
 
     today = date.today()
     ytd_start = date(today.year, 1, 1)
     ttm_start = date(today.year - 1, today.month, today.day)
 
-    all_time = sum(d.amount_cad for d in dividends)
-    ytd = sum(d.amount_cad for d in dividends if d.date >= ytd_start)
-    ttm = sum(d.amount_cad for d in dividends if d.date >= ttm_start)
+    def period_sums(rows):
+        return (sum(r.amount_cad for r in rows),
+                sum(r.amount_cad for r in rows if r.date >= ytd_start),
+                sum(r.amount_cad for r in rows if r.date >= ttm_start))
 
+    g_all, g_ytd, g_ttm = period_sums(dividends)      # gross
+    w_all, w_ytd, w_ttm = period_sums(withholdings)   # withholding tax (amount_cad positive)
+    n_all, n_ytd, n_ttm = g_all - w_all, g_ytd - w_ytd, g_ttm - w_ttm  # net received
+
+    # Per-ticker gross / net / withheld / TTM(net) / count / last payment
     by_ticker = {}
+
+    def _row(tk):
+        return by_ticker.setdefault(tk, {'ticker': tk, 'gross': 0.0, 'withheld': 0.0,
+                                         'ttm': 0.0, 'count': 0, 'last_date': None})
     for d in dividends:
-        t = d.ticker
-        if t not in by_ticker:
-            by_ticker[t] = {'ticker': t, 'total': 0.0, 'ytd': 0.0, 'ttm': 0.0, 'count': 0, 'last_date': None}
-        by_ticker[t]['total'] += d.amount_cad
-        if d.date >= ytd_start:
-            by_ticker[t]['ytd'] += d.amount_cad
+        r = _row(d.ticker)
+        r['gross'] += d.amount_cad
         if d.date >= ttm_start:
-            by_ticker[t]['ttm'] += d.amount_cad
-        by_ticker[t]['count'] += 1
-        if not by_ticker[t]['last_date'] or d.date > by_ticker[t]['last_date']:
-            by_ticker[t]['last_date'] = d.date
+            r['ttm'] += d.amount_cad
+        r['count'] += 1
+        if not r['last_date'] or d.date > r['last_date']:
+            r['last_date'] = d.date
+    for w in withholdings:
+        r = _row(w.ticker)
+        r['withheld'] += w.amount_cad
+        if w.date >= ttm_start:
+            r['ttm'] -= w.amount_cad
 
-    holdings = get_holdings()
-    book_by_ticker = {}
+    # Current holdings → book, market value, and forward income (current yields)
+    holdings = [h for h in get_holdings() if scope == 'portfolio' or h['account'] == scope]
+    book_by, mv_by, fwd_by = {}, {}, {}
     for h in holdings:
-        book_by_ticker[h['ticker']] = book_by_ticker.get(h['ticker'], 0) + h['book_value_cad']
+        book_by[h['ticker']] = book_by.get(h['ticker'], 0) + h['book_value_cad']
+        mv_by[h['ticker']] = mv_by.get(h['ticker'], 0) + (h['market_value_cad'] or 0)
 
-    for row in by_ticker.values():
-        book = book_by_ticker.get(row['ticker'], 0)
-        row['yield_on_cost'] = (row['ttm'] / book * 100) if book and row['ttm'] else None
+    fx = get_fx_rate()
+    meta = get_holdings_metadata([h['ticker'] for h in holdings])
+    for h in holdings:
+        m = meta.get(h['ticker'], {})
+        rate = m.get('dividend_rate')
+        if not rate and m.get('dividend_yield') and h['live_price']:
+            rate = m['dividend_yield'] / 100.0 * h['live_price']
+        if rate:
+            inc = rate * h['qty'] * (fx if h['currency'] == 'USD' else 1.0)
+            fwd_by[h['ticker']] = fwd_by.get(h['ticker'], 0) + inc
 
-    ticker_list = sorted(by_ticker.values(), key=lambda x: x['total'], reverse=True)
+    for r in by_ticker.values():
+        r['net'] = r['gross'] - r['withheld']
+        book = book_by.get(r['ticker'], 0)
+        r['yield_on_cost'] = (r['ttm'] / book * 100) if book and r['ttm'] else None
+        mv, fwd = mv_by.get(r['ticker'], 0), fwd_by.get(r['ticker'], 0)
+        r['fwd_income'] = fwd
+        r['current_yield'] = (fwd / mv * 100) if mv and fwd else None
+    # include current holdings that pay but have no recorded dividends yet
+    for tk, fwd in fwd_by.items():
+        if tk not in by_ticker and fwd:
+            mv = mv_by.get(tk, 0)
+            by_ticker[tk] = {'ticker': tk, 'gross': 0.0, 'withheld': 0.0, 'net': 0.0, 'ttm': 0.0,
+                             'count': 0, 'last_date': None, 'yield_on_cost': None,
+                             'fwd_income': fwd, 'current_yield': (fwd / mv * 100) if mv else None}
 
-    by_year = {}
+    ticker_list = sorted(by_ticker.values(), key=lambda x: (x['net'], x['fwd_income']), reverse=True)
+
+    fwd_total = sum(fwd_by.values())
+    total_mv = sum(mv_by.values())
+
+    # Net by year, and net monthly across all history (frontend range-selects)
+    by_year, div_m, wh_m = {}, {}, {}
     for d in dividends:
         by_year[d.date.year] = by_year.get(d.date.year, 0) + d.amount_cad
+        div_m[d.date.strftime('%Y-%m')] = div_m.get(d.date.strftime('%Y-%m'), 0) + d.amount_cad
+    for w in withholdings:
+        by_year[w.date.year] = by_year.get(w.date.year, 0) - w.amount_cad
+        wh_m[w.date.strftime('%Y-%m')] = wh_m.get(w.date.strftime('%Y-%m'), 0) + w.amount_cad
 
-    by_month = {}
-    for d in dividends:
-        if d.date >= ttm_start:
-            key = d.date.strftime('%b %Y')
-            by_month[key] = by_month.get(key, 0) + d.amount_cad
-
-    sorted_months = sorted(by_month.keys(), key=lambda k: dt.strptime(k, '%b %Y'))
-    month_chart = [{'label': k, 'value': round(by_month[k], 2)} for k in sorted_months]
+    months = sorted(set(div_m) | set(wh_m))
+    month_chart = [{'label': dt.strptime(mk, '%Y-%m').strftime('%b %Y'),
+                    'value': round(div_m.get(mk, 0) - wh_m.get(mk, 0), 2)} for mk in months]
 
     return {
-        'all_time': all_time,
-        'ytd': ytd,
-        'ttm': ttm,
-        'ttm_monthly_avg': ttm / 12 if ttm else 0,
+        'scope': scope,
+        'all_time': n_all, 'ytd': n_ytd, 'ttm': n_ttm,
+        'gross_all': g_all, 'withheld_all': w_all,
+        'ttm_monthly_avg': n_ttm / 12 if n_ttm else 0,
+        'forward_income': fwd_total,
+        'forward_yield': (fwd_total / total_mv * 100) if total_mv else 0,
         'by_ticker': ticker_list,
         'by_year': dict(sorted(by_year.items())),
         'month_chart': month_chart,

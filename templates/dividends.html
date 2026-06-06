@@ -3,19 +3,34 @@
 {% block page_title %}Dividends{% endblock %}
 
 {% block content %}
-<div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+{% if accounts %}
+<div class="account-selector" style="margin-bottom:16px">
+  <a href="{{ url_for('dividends') }}" class="acct-chip {% if scope == 'portfolio' %}active{% endif %}">Whole Portfolio</a>
+  {% for a in accounts %}
+  <a href="{{ url_for('dividends', scope=a) }}" class="acct-chip {% if scope == a %}active{% endif %}">{{ a }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="stat-grid" style="grid-template-columns:repeat(5,1fr)">
   <div class="stat-card">
-    <div class="stat-label">All-Time</div>
+    <div class="stat-label">All-Time (net)</div>
     <div class="stat-value text-green">{{ stats.all_time | cad }}</div>
-    <div class="stat-sub text-dim">{{ stats.count }} payments</div>
+    <div class="stat-sub text-dim">gross {{ stats.gross_all | cad }} · withheld {{ stats.withheld_all | cad }}</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">YTD</div>
+    <div class="stat-label">YTD (net)</div>
     <div class="stat-value">{{ stats.ytd | cad }}</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">TTM</div>
+    <div class="stat-label">TTM (net)</div>
     <div class="stat-value">{{ stats.ttm | cad }}</div>
+    <div class="stat-sub text-dim">{{ stats.count }} payments</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Forward Income</div>
+    <div class="stat-value text-green">{{ stats.forward_income | cad }}</div>
+    <div class="stat-sub text-dim">{{ '%.2f' % stats.forward_yield }}% fwd yield · est. /yr</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Monthly Avg (TTM)</div>
@@ -26,17 +41,24 @@
 {% if stats.month_chart %}
 <div class="two-col">
   <div class="card">
-    <div class="card-header">Monthly Income — Last 12 Months</div>
+    <div class="card-header">
+      Monthly Income (net)
+      <div class="seg" id="divRange" style="margin-left:auto">
+        <button type="button" class="seg-btn active" data-months="12">12M</button>
+        <button type="button" class="seg-btn" data-months="24">24M</button>
+        <button type="button" class="seg-btn" data-months="0">All</button>
+      </div>
+    </div>
     <div class="chart-wrap" style="max-height:220px;padding:16px 20px">
       <canvas id="monthChart"></canvas>
     </div>
   </div>
   <div class="card">
-    <div class="card-header">Annual Summary</div>
+    <div class="card-header">Annual Summary (net)</div>
     <div class="table-scroll">
       <table class="data-table">
         <thead>
-          <tr><th>Year</th><th class="r">Total</th></tr>
+          <tr><th>Year</th><th class="r">Net Total</th></tr>
         </thead>
         <tbody>
           {% for year, total in stats.by_year.items() | reverse %}
@@ -61,10 +83,12 @@
       <thead>
         <tr>
           <th>Ticker</th>
-          <th class="r">All-Time</th>
-          <th class="r">YTD</th>
-          <th class="r">TTM</th>
+          <th class="r">All-Time (net)</th>
+          <th class="r">Withheld</th>
+          <th class="r">TTM (net)</th>
           <th class="r">Yield on Cost</th>
+          <th class="r">Current Yield</th>
+          <th class="r">Fwd Income /yr</th>
           <th class="r">Payments</th>
           <th class="r">Last Payment</th>
         </tr>
@@ -73,17 +97,17 @@
         {% for row in stats.by_ticker %}
         <tr>
           <td class="mono ticker">{{ row.ticker }}</td>
-          <td class="r mono text-green">{{ row.total | cad }}</td>
-          <td class="r mono">{{ row.ytd | cad }}</td>
+          <td class="r mono text-green">{{ row.net | cad }}</td>
+          <td class="r mono text-dim">{% if row.withheld %}{{ row.withheld | cad }}{% else %}—{% endif %}</td>
           <td class="r mono">{{ row.ttm | cad }}</td>
-          <td class="r mono">
-            {% if row.yield_on_cost %}{{ '%.2f' % row.yield_on_cost }}%{% else %}—{% endif %}
-          </td>
+          <td class="r mono">{% if row.yield_on_cost %}{{ '%.2f' % row.yield_on_cost }}%{% else %}—{% endif %}</td>
+          <td class="r mono">{% if row.current_yield %}{{ '%.2f' % row.current_yield }}%{% else %}—{% endif %}</td>
+          <td class="r mono text-green">{% if row.fwd_income %}{{ row.fwd_income | cad }}{% else %}—{% endif %}</td>
           <td class="r mono text-dim">{{ row.count }}</td>
           <td class="r mono text-dim">{{ row.last_date or '—' }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="empty-row">No dividend transactions yet. Add dividends via the Transactions page.</td></tr>
+        <tr><td colspan="9" class="empty-row">No dividend transactions yet. Add dividends via the Transactions page.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -94,28 +118,41 @@
 {% block scripts %}
 {% if stats.month_chart %}
 <script>
-const mc = {{ stats.month_chart | tojson }};
-new Chart(document.getElementById('monthChart'), {
-  type: 'bar',
-  data: {
-    labels: mc.map(d => d.label),
-    datasets: [{
-      data: mc.map(d => d.value),
-      backgroundColor: 'rgba(0,200,240,.2)',
-      borderColor: '#00c8f0',
-      borderWidth: 1,
-      borderRadius: 3,
-    }]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    plugins: { legend: { display: false } },
-    scales: {
-      x: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', font: { size: 10 } } },
-      y: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: v => '$' + v.toLocaleString() } }
+const mcAll = {{ stats.month_chart | tojson }};
+let divChart = null;
+
+function renderDivChart(months) {
+  const data = months > 0 ? mcAll.slice(-months) : mcAll;
+  if (divChart) divChart.destroy();
+  divChart = new Chart(document.getElementById('monthChart'), {
+    type: 'bar',
+    data: {
+      labels: data.map(d => d.label),
+      datasets: [{
+        data: data.map(d => d.value),
+        backgroundColor: 'rgba(0,200,240,.2)',
+        borderColor: '#00c8f0', borderWidth: 1, borderRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+                 tooltip: { callbacks: { label: c => ' $' + c.raw.toLocaleString() } } },
+      scales: {
+        x: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', font: { size: 10 }, autoSkip: true, maxTicksLimit: 12 } },
+        y: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: v => '$' + v.toLocaleString() } }
+      }
     }
-  }
-});
+  });
+}
+
+document.querySelectorAll('#divRange .seg-btn').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#divRange .seg-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  renderDivChart(parseInt(b.dataset.months, 10));
+}));
+
+renderDivChart(12);
 </script>
 {% endif %}
 {% endblock %}

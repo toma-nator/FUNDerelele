@@ -37,6 +37,28 @@ deployed." Pairs with the existing total-account TWR (which includes cash).
   (instead of `market_value + cash`) and use the net buy/sell cash as the
   per-month flow rather than deposits.
 
+## Dividends — Per-ticker payment drill-down
+
+Click a ticker row in the "By Ticker" table to expand its individual dividend
+payments (date, gross, withheld, net) — useful for spotting cuts, special
+dividends, or reconciling against statements.
+
+- **Compute:** already have every Dividend/WithholdingTax row; just group by
+  ticker and render an expandable sub-row (or a small modal) on click.
+- **Effort:** small — a hidden detail row toggled in `dividends.html`.
+
+## Dividends — Income projection & growth
+
+A forward 12-month income calendar (expected payment per month from current
+holdings) plus a year-over-year dividend growth rate per ticker. Turns the tab
+from "what I received" into "what I'll receive."
+
+- **Data:** forward rate per share is already cached (`dividend_rate`); pair it
+  with each holding's pay frequency/schedule (yfinance `dividends` history) to
+  place expected payments on a calendar.
+- **Growth:** compare each ticker's trailing-year net vs. the prior year.
+- **Effort:** medium — needs a payment-schedule heuristic from dividend history.
+
 ## Performance — Max drawdown
 
 Largest peak-to-trough decline over the selected range, as a stat card (and
