@@ -23,3 +23,39 @@ Decompose each ETF's market value into its underlying **asset classes**
 
 _Effort: small — the data is already cached; it's one more aggregation dict in
 `get_account_breakdown` and one more `breakdown-block` in `accounts.html`._
+
+## Performance — Holdings-only return
+
+A toggle to compute TWR / yearly returns on **holdings market value only**
+(excluding the cash balance), treating buys/sells as the flows instead of
+deposits. Isolates *investment performance* (price + dividends) from the
+**cash drag** — i.e. "how good are my picks" vs. "how much did I keep
+deployed." Pairs with the existing total-account TWR (which includes cash).
+
+- **Where:** a toggle next to the cash option on the Performance tab.
+- **Compute:** in `computeTWR` / `computeYearly`, use `market_value` as the base
+  (instead of `market_value + cash`) and use the net buy/sell cash as the
+  per-month flow rather than deposits.
+
+## Performance — Max drawdown
+
+Largest peak-to-trough decline over the selected range, as a stat card (and
+optionally a shaded region on the chart). Good risk context next to TWR.
+
+- **Compute:** over the value series, track the running peak; drawdown at each
+  point = (value − peak) / peak; max drawdown = the most negative. Compute in
+  the Performance JS from the already-loaded series (respects scope/range/cash).
+- **Where:** another stat card beside "Annualized TWR", e.g. "Max Drawdown −18%".
+
+## Performance — Target rate line
+
+A user-set target annual return (e.g. 7%) drawn as a reference line on the
+Performance chart, so actual vs. goal is visible at a glance.
+
+- **Setting:** store the target in the `settings` table (e.g. `target_return`),
+  editable on the Settings page.
+- **Line:** in `%` mode, a straight/compounding line from the range start at the
+  target rate; in `$` mode, grow the starting value at the target rate. Pairs
+  naturally with the existing "Avg rate" line.
+- **Effort:** small-to-medium — a setting + input on Settings, and one more
+  dataset in the Performance render.

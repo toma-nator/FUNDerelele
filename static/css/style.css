@@ -921,6 +921,13 @@ body {
 .filter-search { min-width: 170px; }
 .filter-search::placeholder { color: var(--text-muted); }
 
+.perf-check {
+  display: flex; align-items: center; gap: 6px;
+  font-size: .76rem; color: var(--text-dim);
+  cursor: pointer; white-space: nowrap;
+}
+.perf-check input { accent-color: var(--accent); cursor: pointer; }
+
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
 .seg-btn {
   background: var(--bg-surface);

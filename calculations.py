@@ -961,3 +961,192 @@ def run_monte_carlo(current_value, monthly_contrib, years, mean_annual, std_annu
         'n_sims': n_sims,
         'months': months,
     }
+
+
+# ── Performance series (live, per-scope, with benchmarks) ─────────────────────
+
+# name -> (yfinance symbol, currency)
+_PERF_BENCHMARKS = {
+    'S&P 500': ('^GSPC', 'USD'),
+    'NASDAQ': ('^IXIC', 'USD'),
+    'TSX': ('^GSPTSE', 'CAD'),
+}
+_perf_series_cache = {}
+
+
+def get_performance_series(scope='portfolio'):
+    """
+    Monthly value series for the whole portfolio or a single account: market
+    value (holdings at month-end historical prices), book value (ACB), and cash
+    — plus money-weighted benchmark series (CAD) that invest the same external
+    contributions into each index. Computed live and cached by transaction set.
+    """
+    import yfinance as yf
+    import pandas as pd
+    from datetime import date, timedelta
+
+    q = Transaction.query
+    if scope and scope != 'portfolio':
+        q = q.filter_by(account=scope)
+    txns = q.order_by(Transaction.date.asc(), Transaction.id.asc()).all()
+
+    if not txns:
+        return {'ok': True, 'scope': scope, 'labels': [], 'dates': [],
+                'market_value': [], 'book_value': [], 'cash': [], 'benchmarks': {}}
+
+    sig = (scope, len(txns), max(t.id for t in txns))
+
+    def _with_live(hist):
+        # The latest point should reflect live prices (matching the rest of the
+        # app), not the last historical close. Applied fresh each call (uncached).
+        out = dict(hist)
+        out['market_value'] = list(hist['market_value'])
+        try:
+            live = [h for h in get_holdings() if scope == 'portfolio' or h['account'] == scope]
+            live_mv = sum(h['market_value_cad'] or 0 for h in live)
+            if out['market_value'] and live_mv:
+                out['market_value'][-1] = round(live_mv, 2)
+        except Exception:
+            pass
+        return out
+
+    cached = _perf_series_cache.get(scope)
+    if cached and cached[0] == sig:
+        return _with_live(cached[1])
+
+    first = min(t.date for t in txns)
+    today = date.today()
+
+    months = []
+    y, m = first.year, first.month
+    while (y, m) <= (today.year, today.month):
+        last_day = date(y, 12, 31) if m == 12 else date(y, m + 1, 1) - timedelta(days=1)
+        months.append(min(last_day, today))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+
+    ccy = {t.ticker: t.currency for t in txns
+           if t.type in ('Buy', 'Sell', 'Split') and t.ticker != 'CASH' and ' ' not in t.ticker}
+    tickers = sorted(ccy.keys())
+
+    symbols = tickers + [s for s, _ in _PERF_BENCHMARKS.values()] + ['USDCAD=X']
+    prices, ok = {}, True
+    try:
+        # auto_adjust=False → split-adjusted but NOT dividend-adjusted prices.
+        # Dividends are already tracked as cash, so this avoids double-counting them.
+        raw = yf.download(symbols, start=first.strftime('%Y-%m-%d'),
+                          end=(today + timedelta(days=1)).strftime('%Y-%m-%d'),
+                          auto_adjust=False, progress=False)
+        close = raw['Close'] if isinstance(raw.columns, pd.MultiIndex) else raw[['Close']].rename(columns={'Close': symbols[0]})
+        close.index = pd.to_datetime(close.index).normalize()
+        for s in symbols:
+            if s in close.columns:
+                col = close[s].dropna()
+                if not col.empty:
+                    prices[s] = col
+    except Exception:
+        ok = False
+
+    def price_on(sym, as_of):
+        col = prices.get(sym)
+        if col is None:
+            return None
+        before = col[col.index <= pd.Timestamp(as_of)]
+        return float(before.iloc[-1]) if not before.empty else None
+
+    # Per-ticker split events (date, ratio) from the SPLIT transactions. yfinance
+    # prices are split-adjusted (today's terms), so to value a month *before* a
+    # split we scale actual shares up by the split ratios that occur after it —
+    # otherwise the share-count change creates a spurious jump at the split date.
+    split_events, _running = {}, {}
+    for t in txns:
+        tk = t.ticker
+        if tk == 'CASH' or ' ' in tk:
+            continue
+        q = _running.get(tk, 0.0)
+        if t.type == 'Buy':
+            _running[tk] = q + t.qty
+        elif t.type == 'Sell':
+            _running[tk] = max(0.0, q - t.qty)
+        elif t.type == 'Split':
+            newq = max(0.0, q + t.qty)
+            if q > 0.0001 and newq > 0.0001:
+                split_events.setdefault(tk, []).append((t.date, newq / q))
+            _running[tk] = newq
+
+    def future_split_factor(tk, me):
+        factor = 1.0
+        for d, r in split_events.get(tk, []):
+            if d > me:
+                factor *= r
+        return factor
+
+    market_value, book_value, cash_series = [], [], []
+    for me in months:
+        cash, pos = 0.0, {}
+        for t in txns:
+            if t.date > me:
+                break
+            cash += t.net_cad or 0.0
+            if t.ticker == 'CASH' or ' ' in t.ticker:
+                continue
+            p = pos.setdefault(t.ticker, {'qty': 0.0, 'cost': 0.0, 'avg': 0.0})
+            if t.type == 'Buy':
+                p['cost'] += (t.amount_cad or t.qty * t.price) + (t.fees_cad or 0)
+                p['qty'] += t.qty
+                p['avg'] = p['cost'] / p['qty'] if p['qty'] else 0
+            elif t.type == 'Sell':
+                p['qty'] = max(0.0, p['qty'] - t.qty)
+                p['cost'] = p['avg'] * p['qty']
+            elif t.type == 'Split':
+                p['qty'] = max(0.0, p['qty'] + t.qty)
+                p['avg'] = p['cost'] / p['qty'] if p['qty'] else 0
+        fx = price_on('USDCAD=X', me) or 1.365
+        mv, bk = 0.0, 0.0
+        for tk, p in pos.items():
+            if p['qty'] <= 0.0001:
+                continue
+            bk += p['cost']
+            pr = price_on(tk, me)
+            if pr:
+                shares = p['qty'] * future_split_factor(tk, me)
+                mv += shares * pr * (fx if ccy.get(tk) == 'USD' else 1.0)
+        market_value.append(round(mv, 2))
+        book_value.append(round(bk, 2))
+        cash_series.append(round(cash, 2))
+
+    # Benchmarks — money-weighted in CAD: each month's deposits buy index units.
+    ym_to_me = {(me.year, me.month): me for me in months}
+    flows = {me: 0.0 for me in months}
+    for t in txns:
+        if t.type == 'Deposit':
+            me = ym_to_me.get((t.date.year, t.date.month))
+            if me is not None:
+                flows[me] += t.net_cad or 0.0
+
+    benchmarks = {}
+    for name, (sym, cur) in _PERF_BENCHMARKS.items():
+        if sym not in prices:
+            continue
+        units, series = 0.0, []
+        for me in months:
+            idx = price_on(sym, me)
+            fx = price_on('USDCAD=X', me) or 1.365
+            cad_price = (idx * fx if cur == 'USD' else idx) if idx else None
+            if cad_price and flows[me]:
+                units += flows[me] / cad_price
+            series.append(round(units * cad_price, 2) if cad_price else None)
+        benchmarks[name] = series
+
+    result = {
+        'ok': ok,
+        'scope': scope,
+        'labels': [me.strftime('%b %Y') for me in months],
+        'dates': [me.strftime('%Y-%m-%d') for me in months],
+        'market_value': market_value,
+        'book_value': book_value,
+        'cash': cash_series,
+        'flows': [round(flows[me], 2) for me in months],
+        'benchmarks': benchmarks,
+    }
+    _perf_series_cache[scope] = (sig, result)
+    return _with_live(result)

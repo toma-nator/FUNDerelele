@@ -494,10 +494,18 @@ def rebalancer():
 
 @app.route('/performance')
 def performance():
-    from calculations import get_performance_data
-    perf = get_performance_data()
+    accounts = [r[0] for r in Transaction.query.with_entities(Transaction.account).distinct().all()]
+    accounts.sort()
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
-    return render_template('performance.html', perf=perf, last_updated=last_updated, active='performance')
+    return render_template('performance.html', accounts=accounts,
+                           last_updated=last_updated, active='performance')
+
+
+@app.route('/performance/data')
+def performance_data():
+    from calculations import get_performance_series
+    scope = request.args.get('scope', 'portfolio')
+    return jsonify(get_performance_series(scope))
 
 
 @app.route('/performance/snapshot', methods=['POST'])

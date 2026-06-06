@@ -3,141 +3,324 @@
 {% block page_title %}Performance{% endblock %}
 
 {% block content %}
-{% if not perf.snapshots %}
-<div class="card">
-  <div style="padding:40px;text-align:center">
-    <div style="font-size:2rem;margin-bottom:16px;color:var(--text-muted)">◈</div>
-    <div style="font-size:.9rem;color:var(--text-dim);margin-bottom:20px">No performance history yet. Take your first snapshot to start tracking your portfolio over time.</div>
-    <form method="POST" action="{{ url_for('performance_snapshot') }}">
-      <button type="submit" class="btn btn-primary">+ Take First Snapshot</button>
-    </form>
-  </div>
-</div>
-{% else %}
-
-<div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+<div class="stat-grid" style="grid-template-columns:repeat(5,1fr)">
   <div class="stat-card">
     <div class="stat-label">Current Value</div>
-    <div class="stat-value">{{ perf.last_value | cad }}</div>
+    <div class="stat-value" id="statValue">—</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Total Return</div>
-    <div class="stat-value {{ perf.total_return | gl_class }}">{{ perf.total_return | pct }}</div>
-    <div class="stat-sub text-dim">since {{ perf.first_date }}</div>
+    <div class="stat-label">Period Change</div>
+    <div class="stat-value" id="statChange">—</div>
+    <div class="stat-sub text-dim" id="statChangeSub"></div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">CAGR</div>
-    <div class="stat-value {{ perf.cagr | gl_class }}">
-      {% if perf.cagr is not none %}{{ perf.cagr | pct }}{% else %}<span class="text-dim">—</span>{% endif %}
-    </div>
-    <div class="stat-sub text-dim">annualized</div>
+    <div class="stat-label">Period Change %</div>
+    <div class="stat-value" id="statChangePct">—</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">Snapshots</div>
-    <div class="stat-value">{{ perf.snapshots | length }}</div>
-    <div class="stat-sub">
-      <form method="POST" action="{{ url_for('performance_snapshot') }}" style="display:inline">
-        <button type="submit" class="btn btn-sm" style="margin-top:6px">+ Snapshot Now</button>
-      </form>
-    </div>
+    <div class="stat-label">Annualized TWR</div>
+    <div class="stat-value" id="statTwr">—</div>
+    <div class="stat-sub text-dim">time-weighted</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">vs S&amp;P 500</div>
+    <div class="stat-value" id="statVsBench">—</div>
+    <div class="stat-sub text-dim">money-weighted, CAD</div>
   </div>
 </div>
 
 <div class="card">
-  <div class="card-header">Portfolio Value Over Time</div>
-  <div class="chart-wrap" style="max-height:300px;padding:20px 24px">
+  <div class="holdings-toolbar">
+    <div class="filter-group">
+      <label>Scope</label>
+      <select id="perfScope" class="filter-select">
+        <option value="portfolio">Whole Portfolio</option>
+        {% for a in accounts %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Chart</label>
+      <div class="seg" id="perfType">
+        <button type="button" class="seg-btn active" data-type="line">Line</button>
+        <button type="button" class="seg-btn" data-type="bar">Monthly Δ</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <label>Range</label>
+      <div class="seg" id="perfRange">
+        <button type="button" class="seg-btn" data-range="6m">6M</button>
+        <button type="button" class="seg-btn" data-range="1y">1Y</button>
+        <button type="button" class="seg-btn" data-range="5y">5Y</button>
+        <button type="button" class="seg-btn" data-range="10y">10Y</button>
+        <button type="button" class="seg-btn active" data-range="all">All</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <label>Options</label>
+      <div style="display:flex;gap:14px;align-items:center;height:30px">
+        <label class="perf-check"><input type="checkbox" id="perfCash" checked> Include cash &amp; dividends</label>
+        <label class="perf-check"><input type="checkbox" id="perfBench" checked> Benchmarks</label>
+        <label class="perf-check"><input type="checkbox" id="perfPct"> % return</label>
+        <label class="perf-check" id="avgWrap"><input type="checkbox" id="perfAvg"> Avg rate</label>
+        <span id="barLineWrap" style="display:none;gap:6px;align-items:center">
+          <span style="font-size:.72rem;color:var(--text-dim)">Bar overlay</span>
+          <select id="perfBarLine" class="filter-select">
+            <option value="S&P 500">S&amp;P 500</option>
+            <option value="NASDAQ">NASDAQ</option>
+            <option value="TSX">TSX</option>
+          </select>
+        </span>
+      </div>
+    </div>
+    <div class="filter-spacer"></div>
+    <span class="holdings-count" id="perfMsg"></span>
+  </div>
+
+  <div class="chart-wrap" style="height:380px;padding:18px 22px">
     <canvas id="perfChart"></canvas>
   </div>
 </div>
 
 <div class="card">
-  <div class="card-header">Recent Monthly Snapshots</div>
+  <div class="card-header">Returns by Year <span class="card-sub">time-weighted, current scope</span></div>
   <div class="table-scroll">
     <table class="data-table">
       <thead>
         <tr>
-          <th>Period</th>
-          <th class="r">Market Value</th>
-          <th class="r">Monthly Return</th>
+          <th>Year</th>
+          <th class="r">Monthly Return (avg)</th>
+          <th class="r">Yearly TWR</th>
+          <th class="r">Months</th>
         </tr>
       </thead>
-      <tbody>
-        {% for row in perf.monthly_returns %}
-        <tr>
-          <td class="mono text-dim">{{ row.label }}</td>
-          <td class="r mono">{{ row.value | cad }}</td>
-          <td class="r mono {{ row.return_pct | gl_class }}">{{ row.return_pct | pct }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
+      <tbody id="yearlyBody"></tbody>
     </table>
-  </div>
-</div>
-{% endif %}
-
-<div class="card" style="margin-top:1.5rem">
-  <div class="card-header">Backfill History</div>
-  <div style="padding:1rem 1.25rem">
-    <p class="text-dim" style="font-size:.85rem;margin:0 0 1rem">
-      Reconstructs one month-end snapshot per past month from your existing transactions
-      and historical prices from Yahoo Finance. Run once after all transactions are imported.
-      Tickers that are still unmapped (no real symbol) will be excluded from market value.
-      May take up to 30 seconds.
-    </p>
-    <form method="POST" action="{{ url_for('performance_backfill') }}"
-          onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Fetching prices…'">
-      <button type="submit" class="btn">↺ Backfill Monthly History</button>
-    </form>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-{% if perf.snapshots %}
 <script>
-const labels = {{ perf.labels | tojson }};
-const values = {{ perf['values'] | tojson }};
-const bookVals = {{ perf.book_values | tojson }};
+(function () {
+  const C = { accent: '#00c8f0', dim: '#5a7a96', grid: '#1a3050',
+              green: '#00e676', red: '#ff4d4d', bench: ['#9b72f5', '#ff8c42', '#ffd740'] };
+  const state = { data: null, scope: 'portfolio', type: 'line', range: 'all',
+                  cash: true, bench: true, pct: false, avg: false, barLine: 'S&P 500' };
+  let chart = null;
+  const msg = document.getElementById('perfMsg');
 
-new Chart(document.getElementById('perfChart'), {
-  type: 'line',
-  data: {
-    labels,
-    datasets: [
-      {
-        label: 'Market Value',
-        data: values,
-        borderColor: '#00c8f0',
-        backgroundColor: 'rgba(0,200,240,.08)',
-        fill: true,
-        tension: 0.2,
-        pointRadius: labels.length > 20 ? 0 : 3,
-        borderWidth: 2,
-      },
-      {
-        label: 'Book Value',
-        data: bookVals,
-        borderColor: '#5a7a96',
-        fill: false,
-        tension: 0.2,
-        pointRadius: 0,
-        borderWidth: 1.5,
-        borderDash: [4, 4],
-      }
-    ]
-  },
-  options: {
-    responsive: true, maintainAspectRatio: false,
-    plugins: {
-      legend: { labels: { color: '#c8d8e8', font: { size: 11 } } },
-      tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: $${ctx.raw.toLocaleString()}` } }
-    },
-    scales: {
-      x: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', maxRotation: 0 } },
-      y: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: v => '$' + (v/1000).toFixed(0) + 'k' } }
-    }
+  const RANGE_MONTHS = { '6m': 6, '1y': 12, '5y': 60, '10y': 120, 'all': 100000 };
+
+  function fmt(v) { return '$' + Math.round(v).toLocaleString(); }
+  function setStat(id, txt, cls) {
+    const el = document.getElementById(id);
+    el.textContent = txt;
+    el.classList.remove('text-green', 'text-red');
+    if (cls) el.classList.add(cls);
   }
-});
+
+  function valueSeries(d) {
+    return d.market_value.map((mv, i) => mv + (state.cash ? (d.cash[i] || 0) : 0));
+  }
+
+  // Time-weighted return over [s..end]: chain monthly sub-period returns, removing
+  // the effect of contribution timing. Uses total value (holdings + cash).
+  function computeTWR(s) {
+    const d = state.data;
+    const V = d.market_value.map((mv, i) => mv + (d.cash[i] || 0));
+    const F = d.flows || [];
+    let cum = 1, months = 0;
+    for (let i = s + 1; i < V.length; i++) {
+      const prev = V[i - 1];
+      if (prev <= 0) continue;
+      cum *= (V[i] - (F[i] || 0)) / prev;
+      months++;
+    }
+    return { cumulative: cum - 1, annual: months ? Math.pow(cum, 12 / months) - 1 : 0, months };
+  }
+
+  // Per-year time-weighted return + average monthly (geometric) return.
+  function computeYearly() {
+    const d = state.data;
+    const V = d.market_value.map((mv, i) => mv + (d.cash[i] || 0));
+    const F = d.flows || [];
+    const byYear = {};
+    for (let i = 1; i < V.length; i++) {
+      if (V[i - 1] <= 0) continue;
+      const r = (V[i] - (F[i] || 0)) / V[i - 1] - 1;
+      const yr = (d.dates[i] || d.labels[i]).slice(0, 4);
+      (byYear[yr] = byYear[yr] || []).push(r);
+    }
+    return Object.keys(byYear).sort().reverse().map(yr => {
+      const rs = byYear[yr];
+      let cum = 1; rs.forEach(r => cum *= (1 + r));
+      return { year: yr, twr: cum - 1, avgMonthly: Math.pow(cum, 1 / rs.length) - 1, months: rs.length };
+    });
+  }
+
+  function renderYearly() {
+    const body = document.getElementById('yearlyBody');
+    const rows = computeYearly();
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="4" class="empty-row">Not enough history yet.</td></tr>'; return; }
+    const pct = (v, dp) => (v >= 0 ? '+' : '') + (v * 100).toFixed(dp) + '%';
+    body.innerHTML = rows.map(r =>
+      '<tr><td class="mono">' + r.year + '</td>'
+      + '<td class="r mono ' + (r.avgMonthly >= 0 ? 'text-green' : 'text-red') + '">' + pct(r.avgMonthly, 2) + '</td>'
+      + '<td class="r mono ' + (r.twr >= 0 ? 'text-green' : 'text-red') + '">' + pct(r.twr, 1) + '</td>'
+      + '<td class="r mono text-dim">' + r.months + '</td></tr>'
+    ).join('');
+  }
+
+  function updateModeControls() {
+    document.getElementById('avgWrap').style.display = state.type === 'line' ? 'flex' : 'none';
+    document.getElementById('barLineWrap').style.display = state.type === 'bar' ? 'inline-flex' : 'none';
+  }
+
+  function fetchScope() {
+    msg.textContent = 'Loading…';
+    fetch('/performance/data?scope=' + encodeURIComponent(state.scope))
+      .then(r => r.json())
+      .then(d => { state.data = d; msg.textContent = d.ok ? '' : 'Some historical prices unavailable.'; render(); })
+      .catch(() => { msg.textContent = 'Could not load performance data.'; });
+  }
+
+  function render() {
+    const d = state.data;
+    if (!d || !d.labels.length) { msg.textContent = 'No transactions to chart yet.'; return; }
+    updateModeControls();
+    renderYearly();
+
+    const full = valueSeries(d);
+    const n = d.labels.length;
+    const k = Math.min(n, RANGE_MONTHS[state.range]);
+    const s = n - k;
+    const labels = d.labels.slice(s);
+    const value = full.slice(s);
+    const book = d.book_value.slice(s);
+
+    // ── stat cards (over the selected range) ──
+    const cur = value[value.length - 1];
+    const change = cur - value[0];
+    const changePct = value[0] ? change / value[0] * 100 : 0;
+    setStat('statValue', fmt(cur));
+    setStat('statChange', (change >= 0 ? '+' : '−') + fmt(Math.abs(change)), change >= 0 ? 'text-green' : 'text-red');
+    document.getElementById('statChangeSub').textContent = labels.length ? (labels[0] + ' → ' + labels[labels.length - 1]) : '';
+    setStat('statChangePct', (changePct >= 0 ? '+' : '') + changePct.toFixed(1) + '%', changePct >= 0 ? 'text-green' : 'text-red');
+
+    const sp = d.benchmarks['S&P 500'];
+    if (sp) {
+      const spNow = sp.slice(s)[sp.slice(s).length - 1] || 0;
+      const diff = cur - spNow;
+      setStat('statVsBench', (diff >= 0 ? '+' : '−') + fmt(Math.abs(diff)), diff >= 0 ? 'text-green' : 'text-red');
+    } else { setStat('statVsBench', '—'); }
+
+    // ── Time-weighted return over the range (uses total value incl. cash) ──
+    const twr = computeTWR(s);
+    if (twr.months > 0) {
+      setStat('statTwr', (twr.annual >= 0 ? '+' : '') + (twr.annual * 100).toFixed(1) + '%',
+              twr.annual >= 0 ? 'text-green' : 'text-red');
+    } else { setStat('statTwr', '—'); }
+
+    // rebase a $ series to "% change from the start of the range"
+    const rebase = arr => {
+      const base = arr.find(v => v != null && v !== 0);
+      if (!base) return arr.map(() => 0);
+      return arr.map(v => v == null ? null : (v / base - 1) * 100);
+    };
+
+    // ── datasets ──
+    let datasets, type = state.type;
+    if (state.type === 'bar') {
+      // month-over-month change (dollar, or % when in % mode)
+      const changes = value.map((v, i) => {
+        if (i === 0) return 0;
+        return state.pct ? (value[i - 1] ? +((v / value[i - 1] - 1) * 100).toFixed(2) : 0)
+                         : +(v - value[i - 1]).toFixed(2);
+      });
+      datasets = [{
+        type: 'bar',
+        label: 'Monthly Change',
+        data: changes,
+        backgroundColor: changes.map(v => v >= 0 ? 'rgba(0,230,118,.75)' : 'rgba(255,77,77,.75)'),
+        borderWidth: 0,
+      }];
+      // Overlay the selected benchmark's monthly change as a line (combo chart)
+      if (state.bench && d.benchmarks[state.barLine]) {
+        const bs = d.benchmarks[state.barLine].slice(s);
+        const bchg = bs.map((v, i) => i === 0 ? 0
+          : state.pct ? (bs[i - 1] ? +((v / bs[i - 1] - 1) * 100).toFixed(2) : 0)
+                      : +(v - bs[i - 1]).toFixed(2));
+        const bidx = Object.keys(d.benchmarks).indexOf(state.barLine);
+        datasets.push({ type: 'line', label: state.barLine + ' (monthly)', data: bchg,
+          borderColor: C.bench[bidx % 3], backgroundColor: C.bench[bidx % 3],
+          fill: false, tension: 0.2, pointRadius: 0, borderWidth: 2 });
+      }
+    } else {
+      datasets = [
+        { label: 'Value', data: state.pct ? rebase(value) : value, borderColor: C.accent,
+          backgroundColor: 'rgba(0,200,240,.08)', fill: !state.pct, tension: 0.2,
+          pointRadius: labels.length > 24 ? 0 : 2, borderWidth: 2 },
+      ];
+      if (!state.pct) {
+        datasets.push({ label: 'Book Value', data: book, borderColor: C.dim, fill: false,
+          tension: 0.2, pointRadius: 0, borderWidth: 1.5, borderDash: [4, 4] });
+      }
+      if (state.bench) {
+        Object.keys(d.benchmarks).forEach((name, idx) => {
+          const bs = d.benchmarks[name].slice(s);
+          datasets.push({ label: name, data: state.pct ? rebase(bs) : bs, borderColor: C.bench[idx % 3],
+            fill: false, tension: 0.2, pointRadius: 0, borderWidth: 1.5 });
+        });
+      }
+      // Average-rate reference: straight line between the portfolio's endpoints
+      if (state.avg) {
+        const pv = state.pct ? rebase(value) : value;
+        const a = pv[0], b = pv[pv.length - 1], m = pv.length - 1;
+        const avgLine = pv.map((_, i) => m ? +(a + (b - a) * i / m).toFixed(2) : a);
+        datasets.push({ label: 'Avg rate', data: avgLine, borderColor: '#ff7eb6',
+          fill: false, pointRadius: 0, borderWidth: 1.5, borderDash: [6, 4] });
+      }
+    }
+    const yFmt = state.pct ? (v => v.toFixed(0) + '%') : (v => '$' + (v / 1000).toFixed(0) + 'k');
+    const tipFmt = state.pct
+      ? (ctx => ' ' + ctx.dataset.label + ': ' + (ctx.raw >= 0 ? '+' : '') + (ctx.raw == null ? '—' : ctx.raw.toFixed(1)) + '%')
+      : (ctx => ' ' + ctx.dataset.label + ': ' + (ctx.raw >= 0 ? '' : '−') + '$' + Math.abs(ctx.raw).toLocaleString());
+
+    if (chart) chart.destroy();
+    chart = new Chart(document.getElementById('perfChart'), {
+      type: type,
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { display: true, labels: { color: '#c8d8e8', font: { size: 11 }, usePointStyle: true } },
+          tooltip: { callbacks: { label: tipFmt } }
+        },
+        scales: {
+          x: { grid: { color: C.grid, display: state.type === 'line' }, ticks: { color: C.dim, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+          y: { grid: { color: C.grid }, ticks: { color: C.dim, callback: yFmt } }
+        }
+      }
+    });
+  }
+
+  // ── wire controls ──
+  document.getElementById('perfScope').addEventListener('change', e => { state.scope = e.target.value; fetchScope(); });
+  document.querySelectorAll('#perfType .seg-btn').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#perfType .seg-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); state.type = b.dataset.type; render();
+  }));
+  document.querySelectorAll('#perfRange .seg-btn').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('#perfRange .seg-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); state.range = b.dataset.range; render();
+  }));
+  document.getElementById('perfCash').addEventListener('change', e => { state.cash = e.target.checked; render(); });
+  document.getElementById('perfBench').addEventListener('change', e => { state.bench = e.target.checked; render(); });
+  document.getElementById('perfPct').addEventListener('change', e => { state.pct = e.target.checked; render(); });
+  document.getElementById('perfAvg').addEventListener('change', e => { state.avg = e.target.checked; render(); });
+  document.getElementById('perfBarLine').addEventListener('change', e => { state.barLine = e.target.value; render(); });
+
+  fetchScope();
+})();
 </script>
-{% endif %}
 {% endblock %}
