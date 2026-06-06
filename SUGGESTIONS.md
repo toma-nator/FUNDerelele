@@ -182,3 +182,31 @@ targets by hand and gives a starting point.
   from real bond/commodity holdings being classified correctly.
 - **Effort:** medium — a small preset table (strategy → {dimension, targets}) +
   a dropdown that populates the existing target inputs; engine unchanged.
+
+## Watchlist — quick "add transaction" from a row
+
+A one-click action on a watchlist row that jumps to the Add Transaction form
+(or a modal) pre-filled with the ticker, currency, and live price, so a watched
+name can be turned into a Buy without retyping.
+
+- **How:** link/button on each row → Transactions add form with query params
+  pre-filling ticker/currency/price (form reads them on load), or a small inline
+  buy modal that POSTs to the existing add-transaction route.
+- **Effort:** small — a pre-fill on the existing transaction form + a row action.
+
+## Watchlist — bulk add tickers
+
+A way to add many tickers to the watchlist at once instead of one form
+submission each — paste a list (e.g. `AAPL, MSFT, XLV NVDA`) and have them all
+created and tracked.
+
+- **How:** a "Bulk add" textarea (comma/space/newline separated) → a new route
+  that loops the tickers, dedupes against existing watchlist entries, fetches a
+  price + metadata for each (`refresh_prices` + `get_holdings_metadata`), and
+  auto-classifies company/sector/currency like the single add already does.
+  Report how many were added vs skipped.
+- **Bonus:** accept currency per line or guess from the symbol suffix (`.TO`/`.NE`
+  → CAD, plain → USD); let the rebalancer-gap "candidates" feed a bulk add of all
+  ideas for a bucket at once.
+- **Effort:** small–medium — one route + a textarea; reuses the existing add and
+  auto-classify logic.

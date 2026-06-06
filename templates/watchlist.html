@@ -3,6 +3,71 @@
 {% block page_title %}Watchlist{% endblock %}
 
 {% block content %}
+
+{# ── Rebalancer gaps → candidates to fill them ── #}
+{% if gaps %}
+{% set gap_accts = gaps | map(attribute='account') | unique | list %}
+<div class="card">
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+    <span>Rebalancer Gaps <span class="card-sub">under-target buckets · candidates to fill them</span></span>
+    <select id="gap-account" class="filter-select" style="width:auto">
+      <option value="">All accounts</option>
+      {% for a in gap_accts %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+    </select>
+  </div>
+
+  {# Vague "balance everything" summary — shown only when one account is selected #}
+  {% for s in gap_summary %}
+  <div class="gap-summary" data-account="{{ s.account }}" style="display:none;padding:10px 16px;border-bottom:1px solid var(--border-sub);font-size:.84rem">
+    <span class="acct-badge acct-{{ s.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ s.account }}</span>
+    <span class="text-dim">— deploy ≈</span><span class="mono text-green">{{ s.total | cad }}</span><span class="text-dim"> ({{ s.primary_label | lower }}):</span>
+    {% for ln in s.lines %}<span class="mono">{{ ln.amount | cad }}</span> {{ ln.label }}{% if not loop.last %}, {% endif %}{% endfor %}.
+    {% if s.bias %}<span class="text-dim"> Also favour {{ s.bias | join(', ') | lower }}.</span>{% endif %}
+  </div>
+  {% endfor %}
+
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Account</th>
+          <th>Target by</th>
+          <th>Bucket</th>
+          <th class="r">Gap</th>
+          <th class="r">Add ~</th>
+          <th>Candidates <span class="text-dim" style="font-weight:400">(click to review)</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for g in gaps %}
+        <tr class="gap-row" data-account="{{ g.account }}">
+          <td><span class="acct-badge acct-{{ g.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ g.account }}</span></td>
+          <td class="text-dim" style="font-size:.78rem">{{ g.dimension_label }}</td>
+          <td style="font-size:.82rem">{{ g.bucket }}</td>
+          <td class="r mono text-amber">{{ '%.1f' % g.gap_pct }}%</td>
+          <td class="r mono text-green">{{ g.amount_cad | cad }}</td>
+          <td style="font-size:.8rem">
+            {% if g.candidates %}
+              {% for c in g.candidates %}
+                {% if c.in_wl %}
+                  <span class="mono cand cand-wl" title="already on watchlist ({{ c.source }})">{{ c.ticker }}</span>
+                {% else %}
+                  <button type="button" class="cand cand-add mono" title="Review {{ c.ticker }} ({{ c.source }})" onclick="reviewTicker('{{ c.ticker }}')">{{ c.ticker }}</button>
+                {% endif %}
+              {% endfor %}
+            {% else %}
+              <span class="text-dim">No candidates — set a watchlist name in this bucket.</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ── Add form ── #}
 <div class="card">
   <div class="card-header toggle-header" onclick="togglePanel('addForm','addArrow')">
     Add to Watchlist
@@ -16,8 +81,8 @@
           <input class="form-input mono" name="ticker" required placeholder="AAPL" style="text-transform:uppercase">
         </div>
         <div class="form-group">
-          <label>Company</label>
-          <input class="form-input" name="company" placeholder="Apple Inc.">
+          <label>Company <span class="text-dim">(auto)</span></label>
+          <input class="form-input" name="company" placeholder="auto-filled">
         </div>
         <div class="form-group">
           <label>Currency</label>
@@ -27,12 +92,18 @@
           </select>
         </div>
         <div class="form-group">
-          <label>Sector</label>
-          <input class="form-input" name="sector" placeholder="Technology">
+          <label>Sector <span class="text-dim">(auto)</span></label>
+          <input class="form-input" name="sector" placeholder="auto-filled">
         </div>
         <div class="form-group">
-          <label>Target Price</label>
-          <input class="form-input mono" name="target_price" type="number" step="0.01" placeholder="150.00">
+          <label>Target</label>
+          <div style="display:flex;gap:.3rem">
+            <select class="form-input" name="target_type" style="width:auto">
+              <option value="below">Buy ≤</option>
+              <option value="above">Sell ≥</option>
+            </select>
+            <input class="form-input mono no-spin" name="target_price" type="number" step="0.01" placeholder="150.00">
+          </div>
         </div>
         <div class="form-group" style="min-width:200px">
           <label>Notes</label>
@@ -46,55 +117,142 @@
   </div>
 </div>
 
+{# ── Watchlist table ── #}
 <div class="card">
-  <div class="card-header">Watchlist</div>
+  <div class="card-header">
+    Watchlist
+    {% if last_updated and last_updated.last_updated %}
+      <span class="card-sub">prices as of {{ last_updated.last_updated.strftime('%Y-%m-%d %H:%M') }}</span>
+    {% endif %}
+  </div>
+
+  <div class="holdings-toolbar">
+    <div class="filter-group">
+      <label>Show</label>
+      <div class="seg" id="owned-seg">
+        <button type="button" class="seg-btn active" data-owned-filter="all">All</button>
+        <button type="button" class="seg-btn" data-owned-filter="owned">Owned</button>
+        <button type="button" class="seg-btn" data-owned-filter="not">Not owned</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <label>Sector</label>
+      <select id="filter-sector" class="filter-select">
+        <option value="">All</option>
+        {% for s in data.sectors %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Currency</label>
+      <select id="filter-ccy" class="filter-select">
+        <option value="">All</option>
+        {% for c in data.currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Search</label>
+      <input type="text" id="filter-search" class="filter-select filter-search" placeholder="ticker or company…" autocomplete="off">
+    </div>
+    <div class="filter-spacer"></div>
+    <span class="holdings-count" id="wl-count"></span>
+  </div>
+
   <div class="table-scroll">
-    <table class="data-table">
+    <table class="data-table sortable" id="wl-table">
       <thead>
         <tr>
-          <th>Ticker</th>
-          <th>Company</th>
-          <th>CCY</th>
-          <th class="r">Live Price</th>
-          <th class="r">Target</th>
-          <th class="r">% to Target</th>
-          <th class="r">Since Added</th>
-          <th>Sector</th>
+          <th>#</th>
+          <th data-sort data-type="text">Ticker <span class="sort-arrow"></span></th>
+          <th data-sort data-type="text">Company <span class="sort-arrow"></span></th>
+          <th data-sort data-type="text">CCY <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Live <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Day % <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Beta <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Yield <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Mkt Cap <span class="sort-arrow"></span></th>
+          <th data-sort data-type="text">Type <span class="sort-arrow"></span></th>
+          <th data-sort data-type="text">Sector <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Target <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">% → Target <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Since Added <span class="sort-arrow"></span></th>
           <th>Notes</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-        {% for item in items %}
-        <tr>
-          <td class="mono ticker">{{ item.ticker }}</td>
-          <td class="text-dim" style="font-size:.78rem">{{ item.company or '—' }}</td>
-          <td class="mono text-dim">{{ item.currency }}</td>
-          <td class="r mono">
-            {% if item.live_price %}${{ '%.2f' % item.live_price }}{% else %}<span class="text-dim">—</span>{% endif %}
+        {% for it in data.rows %}
+        <tr data-owned="{{ 'owned' if it.owned else 'not' }}" data-sector="{{ it.sector }}" data-ccy="{{ it.currency }}"
+            data-search="{{ (it.ticker ~ ' ' ~ it.company) | lower }}">
+          <td class="text-dim mono col-rownum">{{ loop.index }}</td>
+          <td class="mono ticker" data-val="{{ it.ticker }}">
+            {{ it.ticker }}{% if it.owned %} <span class="closed-badge" title="Held — {{ it.owned_value | cad }}">held</span>{% endif %}
           </td>
-          <td class="r mono text-dim">
-            {% if item.target_price %}${{ '%.2f' % item.target_price }}{% else %}—{% endif %}
+          <td class="text-dim" style="font-size:.78rem;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" data-val="{{ it.company }}" title="{{ it.company }}">{{ it.company or '—' }}</td>
+          <td class="mono text-dim" data-val="{{ it.currency }}">{{ it.currency }}</td>
+          <td class="r mono" data-val="{{ it.live_price_cad if it.live_price_cad is not none else '' }}">
+            {% if it.live_price is not none %}
+              ${{ '%.2f' % it.live_price }}
+              {% if it.currency != 'CAD' %}<div class="text-dim" style="font-size:.68rem">{{ it.live_price_cad | cad }} CAD</div>{% endif %}
+            {% else %}<span class="text-dim">—</span>{% endif %}
           </td>
-          <td class="r mono {{ item.pct_to_target | gl_class }}">
-            {% if item.pct_to_target is not none %}{{ item.pct_to_target | pct }}{% else %}—{% endif %}
+          <td class="r mono {{ it.day_pct | gl_class }}" data-val="{{ it.day_pct if it.day_pct is not none else '' }}">{{ it.day_pct | pct }}</td>
+          <td class="r mono" data-val="{{ it.beta if it.beta is not none else '' }}">{% if it.beta is not none %}{{ '%.2f' % it.beta }}{% else %}<span class="text-dim">—</span>{% endif %}</td>
+          <td class="r mono" data-val="{{ it.yield_pct if it.yield_pct is not none else '' }}">{% if it.yield_pct is not none %}{{ '%.2f' % it.yield_pct }}%{% else %}<span class="text-dim">—</span>{% endif %}</td>
+          <td class="r mono text-dim" data-val="{{ it.market_cap_raw }}">{{ it.market_cap or '—' }}</td>
+          <td class="text-dim" style="font-size:.78rem" data-val="{{ it.asset_type }}">{{ it.asset_type or '—' }}</td>
+          <td class="text-dim" style="font-size:.78rem" data-val="{{ it.sector }}">{{ it.sector or '—' }}</td>
+          <td class="r mono {% if it.target_hit %}text-green{% else %}text-dim{% endif %}" data-val="{{ it.target_price if it.target_price is not none else '' }}">
+            {% if it.target_price is not none %}
+              <span title="{{ 'Buy at or below' if it.target_type == 'below' else 'Sell at or above' }}">{{ '≤' if it.target_type == 'below' else '≥' }}${{ '%.2f' % it.target_price }}</span>
+              {% if it.target_hit %}<span class="closed-badge" style="background:rgba(0,230,118,.12);color:var(--green)">hit</span>{% endif %}
+            {% else %}—{% endif %}
           </td>
-          <td class="r mono {{ item.pct_since_added | gl_class }}">
-            {% if item.pct_since_added is not none %}{{ item.pct_since_added | pct }}{% else %}—{% endif %}
+          <td class="r mono {{ it.pct_to_target | gl_class }}" data-val="{{ it.pct_to_target if it.pct_to_target is not none else '' }}">{% if it.pct_to_target is not none %}{{ it.pct_to_target | pct }}{% else %}—{% endif %}</td>
+          <td class="r mono {{ it.pct_since_added | gl_class }}" data-val="{{ it.pct_since_added if it.pct_since_added is not none else '' }}">{% if it.pct_since_added is not none %}{{ it.pct_since_added | pct }}{% else %}—{% endif %}</td>
+          <td class="text-dim" style="font-size:.78rem;max-width:160px;white-space:normal">{{ it.notes or '' }}</td>
+          <td style="white-space:nowrap">
+            <button type="button" class="btn-delete" title="Edit" onclick="toggleEdit({{ it.id }})" style="color:var(--accent)">✎</button>
+            <form method="POST" action="{{ url_for('watchlist_delete', id=it.id) }}" style="display:inline" onsubmit="return confirm('Remove {{ it.ticker }} from watchlist?')">
+              <button type="submit" class="btn-delete" title="Remove">✕</button>
+            </form>
           </td>
-          <td class="text-dim" style="font-size:.78rem">{{ item.sector or '—' }}</td>
-          <td class="text-dim" style="font-size:.78rem;max-width:180px;white-space:normal">{{ item.notes or '' }}</td>
-          <td>
-            <form method="POST" action="{{ url_for('watchlist_delete', id=item.id) }}" onsubmit="return confirm('Remove {{ item.ticker }} from watchlist?')">
-              <button type="submit" class="btn-delete">✕</button>
+        </tr>
+        <tr class="wl-edit-row" id="edit-{{ it.id }}" style="display:none">
+          <td></td>
+          <td colspan="15">
+            <form method="POST" action="{{ url_for('watchlist_edit', id=it.id) }}" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;padding:6px 0">
+              <span class="text-dim" style="font-size:.78rem">Target</span>
+              <select class="form-input" name="target_type" style="width:auto">
+                <option value="below" {% if it.target_type == 'below' %}selected{% endif %}>Buy ≤</option>
+                <option value="above" {% if it.target_type == 'above' %}selected{% endif %}>Sell ≥</option>
+              </select>
+              <input class="form-input mono no-spin" name="target_price" type="number" step="0.01" style="width:110px"
+                     value="{{ '%g' % it.target_price if it.target_price is not none else '' }}" placeholder="price">
+              <input class="form-input" name="notes" value="{{ it.notes }}" placeholder="notes" style="flex:1;min-width:180px">
+              <button type="submit" class="btn btn-primary" style="padding:4px 12px">Save</button>
             </form>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="10" class="empty-row">Watchlist is empty. Add tickers above to track stocks you're monitoring.</td></tr>
+        <tr><td colspan="16" class="empty-row">Watchlist is empty. Add tickers above to track stocks you're monitoring.</td></tr>
         {% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="empty-row" id="wl-no-match" style="display:none">No tickers match the current filters.</div>
+</div>
+
+{# ── Candidate review modal ── #}
+<div id="reviewModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeReview()">
+  <div class="modal-box">
+    <div id="reviewBody">Loading…</div>
+    <div class="modal-actions">
+      <button type="button" class="btn" onclick="closeReview()">Close</button>
+      <form id="reviewAddForm" method="POST" action="{{ url_for('watchlist_add') }}" style="display:inline">
+        <input type="hidden" name="ticker" id="reviewAddTicker">
+        <button type="submit" class="btn btn-primary">+ Add to Watchlist</button>
+      </form>
+    </div>
   </div>
 </div>
 {% endblock %}
@@ -108,5 +266,143 @@ function togglePanel(id, arrowId) {
   el.style.display = open ? 'block' : 'none';
   arrow.textContent = open ? '▲' : '▼';
 }
+function toggleEdit(id) {
+  const row = document.getElementById('edit-' + id);
+  if (row) row.style.display = (row.style.display === 'none') ? '' : 'none';
+}
+
+// ── Candidate review (before adding to watchlist) ──
+function closeReview() { document.getElementById('reviewModal').style.display = 'none'; }
+function reviewTicker(t) {
+  const modal = document.getElementById('reviewModal');
+  const body = document.getElementById('reviewBody');
+  modal.style.display = 'flex';
+  body.innerHTML = 'Loading ' + t + '…';
+  document.getElementById('reviewAddTicker').value = t;
+  document.getElementById('reviewAddForm').style.display = 'inline';
+  fetch('/ticker/' + encodeURIComponent(t) + '/review')
+    .then(r => r.json())
+    .then(d => {
+      const meta = [d.asset_type, d.sector, d.market_cap,
+                    (d.beta != null ? 'β ' + d.beta : null),
+                    (d.yield != null ? d.yield + '% yield' : null)].filter(Boolean).join(' · ');
+      let h = '<div style="font-weight:600;font-size:1rem">' + (d.name || d.ticker) +
+              ' <span class="mono text-dim" style="font-size:.8rem">' + d.ticker + '</span></div>';
+      if (meta) h += '<div class="text-dim" style="font-size:.8rem;margin:4px 0">' + meta + '</div>';
+      if (d.price != null) h += '<div class="mono">$' + d.price.toFixed(2) + ' ' + (d.currency || '') + '</div>';
+      if (d.owned) h += '<div class="text-green" style="font-size:.78rem;margin-top:4px">✓ You already hold this.</div>';
+      if (d.in_wl) h += '<div class="text-dim" style="font-size:.78rem;margin-top:4px">Already on watchlist.</div>';
+      h += '<p style="font-size:.82rem;line-height:1.45;margin-top:10px;color:var(--text)">' +
+           (d.summary || 'No description available.') + '</p>';
+      body.innerHTML = h;
+      document.getElementById('reviewAddForm').style.display = d.in_wl ? 'none' : 'inline';
+    })
+    .catch(() => { body.innerHTML = 'Could not load a review for ' + t + '.'; });
+}
+
+(function () {
+  const table = document.getElementById('wl-table');
+  if (!table) return;
+  const tbody = table.tBodies[0];
+  const rows = Array.from(tbody.rows).filter(r => r.dataset.owned);  // data rows only (skip edit rows + empty)
+  const headers = Array.from(table.tHead.rows[0].cells);
+  let sortIdx = -1, sortDir = -1;
+
+  function cellVal(row, idx, type) {
+    const cell = row.cells[idx];
+    const raw = cell.dataset.val !== undefined ? cell.dataset.val : cell.textContent.trim();
+    if (type === 'num') { const n = parseFloat(raw); return isNaN(n) ? NaN : n; }
+    return raw.toLowerCase();
+  }
+  function sortBy(idx) {
+    const type = headers[idx].dataset.type || 'text';
+    if (sortIdx === idx) { sortDir = -sortDir; } else { sortIdx = idx; sortDir = (type === 'num') ? -1 : 1; }
+    rows.sort((a, b) => {
+      const va = cellVal(a, idx, type), vb = cellVal(b, idx, type);
+      if (type === 'num') {
+        const an = isNaN(va), bn = isNaN(vb);
+        if (an && bn) return 0; if (an) return 1; if (bn) return -1;
+        return (va - vb) * sortDir;
+      }
+      if (va < vb) return -1 * sortDir; if (va > vb) return 1 * sortDir; return 0;
+    });
+    // re-append each data row followed by its edit row, to keep them paired
+    rows.forEach(r => {
+      tbody.appendChild(r);
+      const er = r.nextEditRow; if (er) tbody.appendChild(er);
+    });
+    headers.forEach((h, i) => {
+      const arrow = h.querySelector('.sort-arrow');
+      if (arrow) arrow.textContent = (i === sortIdx) ? (sortDir === 1 ? '▲' : '▼') : '';
+      h.classList.toggle('sorted', i === sortIdx);
+    });
+    renumber();
+  }
+  // pair each data row with its edit row
+  rows.forEach(r => { const er = r.nextElementSibling; if (er && er.classList.contains('wl-edit-row')) r.nextEditRow = er; });
+
+  headers.forEach((h, i) => {
+    if (h.dataset.sort !== undefined) { h.style.cursor = 'pointer'; h.addEventListener('click', () => sortBy(i)); }
+  });
+
+  let ownedFilter = 'all';
+  const sectorSel = document.getElementById('filter-sector');
+  const ccySel = document.getElementById('filter-ccy');
+  const searchInp = document.getElementById('filter-search');
+  const countEl = document.getElementById('wl-count');
+  const noMatch = document.getElementById('wl-no-match');
+
+  function applyFilters() {
+    const sec = sectorSel.value, ccy = ccySel.value, q = searchInp.value.trim().toLowerCase();
+    let visible = 0;
+    rows.forEach(r => {
+      const ok = (ownedFilter === 'all' || r.dataset.owned === ownedFilter)
+              && (!sec || r.dataset.sector === sec)
+              && (!ccy || r.dataset.ccy === ccy)
+              && (!q || (r.dataset.search || '').indexOf(q) !== -1);
+      r.style.display = ok ? '' : 'none';
+      if (r.nextEditRow && !ok) r.nextEditRow.style.display = 'none';
+      if (ok) visible++;
+    });
+    if (noMatch) noMatch.style.display = (visible === 0 && rows.length) ? '' : 'none';
+    renumber();
+    if (countEl) countEl.textContent = visible + ' ticker' + (visible === 1 ? '' : 's');
+  }
+  function renumber() {
+    let n = 0;
+    rows.forEach(r => { if (r.style.display !== 'none') { n++; r.cells[0].textContent = n; } });
+  }
+
+  document.querySelectorAll('#owned-seg .seg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#owned-seg .seg-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      ownedFilter = btn.dataset.ownedFilter;
+      applyFilters();
+    });
+  });
+  sectorSel.addEventListener('change', applyFilters);
+  ccySel.addEventListener('change', applyFilters);
+  searchInp.addEventListener('input', applyFilters);
+  applyFilters();
+
+  // ── Rebalancer-gaps account filter ──
+  // Rows: all when "All accounts", else the selected one. Summary: only shown
+  // when a single account is selected (above its rows).
+  const gapSel = document.getElementById('gap-account');
+  if (gapSel) {
+    function applyGapFilter() {
+      const a = gapSel.value;
+      document.querySelectorAll('.gap-row').forEach(el => {
+        el.style.display = (!a || el.dataset.account === a) ? '' : 'none';
+      });
+      document.querySelectorAll('.gap-summary').forEach(el => {
+        el.style.display = (a && el.dataset.account === a) ? '' : 'none';
+      });
+    }
+    gapSel.addEventListener('change', applyGapFilter);
+    applyGapFilter();
+  }
+})();
 </script>
 {% endblock %}

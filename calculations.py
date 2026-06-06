@@ -1192,6 +1192,204 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
     }
 
 
+# ── Watchlist ─────────────────────────────────────────────────────────────────
+
+# Curated, well-known ETFs per bucket — research ideas when filling a rebalancer
+# gap (no market screener is available, so individual stocks can't be sourced).
+_SECTOR_ETFS = {
+    'Technology': ['XLK', 'VGT'], 'Financial Services': ['XLF'], 'Healthcare': ['XLV'],
+    'Consumer Cyclical': ['XLY'], 'Consumer Defensive': ['XLP'], 'Industrials': ['XLI'],
+    'Energy': ['XLE'], 'Utilities': ['XLU'], 'Real Estate': ['XLRE', 'VNQ'],
+    'Basic Materials': ['XLB'], 'Communication Services': ['XLC'],
+}
+
+
+def _curated_for_bucket(dimension, bucket):
+    if dimension == 'sector':
+        return _SECTOR_ETFS.get(bucket, [])
+    if dimension == 'asset_type':
+        return {'ETF': ['VTI', 'XEQT'], 'Bond': ['BND', 'AGG']}.get(bucket, [])
+    return []
+
+
+def _fmt_mktcap(mc):
+    if not mc:
+        return None
+    if mc >= 1e12:
+        return f'${mc / 1e12:.1f}T'
+    if mc >= 1e9:
+        return f'${mc / 1e9:.0f}B'
+    if mc >= 1e6:
+        return f'${mc / 1e6:.0f}M'
+    return f'${mc:.0f}'
+
+
+def get_watchlist_data():
+    """Enriched watchlist rows: live + CAD price, day change, classification
+    (sector / asset type / market cap / beta / yield), target distance + hit
+    (direction-aware), and whether the ticker is already held."""
+    from models import WatchlistItem
+    from price_service import get_fx_rate, get_holdings_metadata
+
+    items = WatchlistItem.query.order_by(WatchlistItem.ticker).all()
+    fx = get_fx_rate()
+    metas = get_holdings_metadata([i.ticker for i in items])
+
+    owned = {}
+    for h in get_holdings():
+        owned[h['ticker']] = owned.get(h['ticker'], 0) + (h['market_value_cad'] or 0)
+
+    rows = []
+    for it in items:
+        pc = PriceCache.query.get(it.ticker)
+        live = pc.price if pc else None
+        prev = pc.prev_close if pc else None
+        m = metas.get(it.ticker, {})
+        rate = fx if it.currency == 'USD' else 1.0
+        live_cad = live * rate if live else None
+        day_pct = ((live - prev) / prev * 100) if (live and prev) else None
+
+        ttype = it.target_type or 'below'
+        pct_to_target = ((it.target_price - live) / live * 100) if (live and it.target_price) else None
+        hit = None
+        if live and it.target_price:
+            hit = (live <= it.target_price) if ttype == 'below' else (live >= it.target_price)
+        pct_since_added = ((live - it.added_price) / it.added_price * 100) if (live and it.added_price) else None
+
+        # Dividend yield — prefer forward rate / price (currency-consistent).
+        dr, dy = m.get('dividend_rate'), m.get('dividend_yield')
+        yield_pct = (dr / live * 100) if (dr and live) else (dy if dy else None)
+
+        mv = owned.get(it.ticker, 0)
+        rows.append({
+            'id': it.id, 'ticker': it.ticker,
+            'company': m.get('long_name') or it.company or '',
+            'currency': it.currency,
+            'sector': m.get('sector') or it.sector or '',
+            'asset_type': m.get('asset_type') or '',
+            'market_cap': _fmt_mktcap(m.get('market_cap')),
+            'market_cap_raw': m.get('market_cap') or 0,
+            'beta': round(m['beta'], 2) if m.get('beta') is not None else None,
+            'yield_pct': round(yield_pct, 2) if yield_pct is not None else None,
+            'live_price': live, 'live_price_cad': live_cad, 'day_pct': day_pct,
+            'target_price': it.target_price, 'target_type': ttype,
+            'pct_to_target': pct_to_target, 'target_hit': hit,
+            'added_price': it.added_price, 'pct_since_added': pct_since_added,
+            'owned': mv > 0.005, 'owned_value': round(mv, 2),
+            'notes': it.notes or '',
+        })
+
+    sectors = sorted({r['sector'] for r in rows if r['sector']})
+    currencies = sorted({r['currency'] for r in rows if r['currency']})
+    return {'rows': rows, 'sectors': sectors, 'currencies': currencies}
+
+
+def get_rebalancer_gaps_all():
+    """Every under-target rebalancer bucket across accounts that have targets,
+    each with a few candidate tickers to fill it: watchlist names in the bucket,
+    your own focused holdings there, and curated ETF ideas."""
+    from models import WatchlistItem
+    from price_service import get_holdings_metadata
+
+    all_holdings = [h for h in get_holdings() if (h['market_value_cad'] or 0) > 0]
+    cash_by = get_cash_by_account()
+    accounts = sorted({h['account'] for h in all_holdings} |
+                      {a for a, c in cash_by.items() if abs(c) > 0.005})
+    meta_all = get_holdings_metadata([h['ticker'] for h in all_holdings])
+    wl_tickers = {i.ticker for i in WatchlistItem.query.all()}
+
+    out = []
+    for acc in accounts:
+        for dim in REBAL_DIMENSIONS:
+            if not get_rebal_targets(acc, dim):
+                continue
+            d = get_rebalancer_data(account=acc, dimension=dim)
+            for np in d['new_positions']:
+                bucket = np['bucket']
+                cands, seen = [], set()
+                for s in np['suggestions']:  # watchlist names in this bucket, focused-first
+                    cands.append({'ticker': s['ticker'], 'source': 'watchlist',
+                                  'focused': s['focused'], 'in_wl': True})
+                    seen.add(s['ticker'])
+                for h in all_holdings:  # your own focused holdings in this bucket
+                    if h['account'] != acc or h['ticker'] in seen:
+                        continue
+                    m = meta_all.get(h['ticker'], {})
+                    if (m.get('asset_type') or 'Equity') == 'ETF':
+                        continue
+                    if _bucket_weights(h, m, dim).get(bucket, 0) > 0.5:
+                        cands.append({'ticker': h['ticker'], 'source': 'holding',
+                                      'focused': True, 'in_wl': h['ticker'] in wl_tickers})
+                        seen.add(h['ticker'])
+                for tk in _curated_for_bucket(dim, bucket):  # curated ETF ideas
+                    if tk not in seen:
+                        cands.append({'ticker': tk, 'source': 'idea',
+                                      'focused': True, 'in_wl': tk in wl_tickers})
+                        seen.add(tk)
+                out.append({
+                    'account': acc, 'dimension': dim, 'dimension_label': REBAL_DIM_LABELS[dim],
+                    'bucket': bucket, 'gap_pct': np['gap_pct'], 'amount_cad': np['amount_cad'],
+                    'reason': np['reason'], 'candidates': cands[:6],
+                })
+    out.sort(key=lambda x: x['amount_cad'], reverse=True)
+    return out
+
+
+def get_rebalancer_gap_summary(gaps):
+    """A vague, plain-language 'how to balance everything' line per account,
+    built from the gaps. Uses the sector gaps as the buy list (dollars don't
+    double-count within one dimension) and folds in a size/risk hint from the
+    other dimensions' gaps — e.g. '$3,000 large cap Healthcare'."""
+    by_acct = {}
+    for g in gaps:
+        by_acct.setdefault(g['account'], []).append(g)
+
+    out = []
+    for acct, items in by_acct.items():
+        size = [g['bucket'] for g in items if g['dimension'] == 'market_cap']
+        risk = [g['bucket'] for g in items if g['dimension'] in ('beta', 'blend')]
+        adj = size[0].lower() if len(size) == 1 else None  # single size gap → adjective
+
+        has_sector = any(g['dimension'] == 'sector' for g in items)
+        if has_sector:
+            primary = 'sector'
+        else:
+            tot = {}
+            for g in items:
+                tot[g['dimension']] = tot.get(g['dimension'], 0) + g['amount_cad']
+            primary = max(tot, key=tot.get)
+
+        prim = sorted([g for g in items if g['dimension'] == primary],
+                      key=lambda x: -x['amount_cad'])
+        lines = []
+        for g in prim:
+            label = f'{adj} {g["bucket"]}' if (adj and primary == 'sector') else g['bucket']
+            lines.append({'amount': g['amount_cad'], 'label': label})
+
+        # Secondary "favour" hints from the other dimensions' gaps, largest first.
+        folded_size = adj and primary == 'sector'
+        others = sorted(
+            [g for g in items
+             if g['dimension'] in ('market_cap', 'beta', 'blend')
+             and not (folded_size and g['dimension'] == 'market_cap')],
+            key=lambda x: -x['amount_cad'])
+        bias = []
+        for g in others:
+            lbl = f'{g["bucket"]} risk' if g['dimension'] in ('beta', 'blend') else g['bucket']
+            if lbl not in bias:
+                bias.append(lbl)
+        bias = bias[:3]
+
+        out.append({
+            'account': acct,
+            'primary_label': REBAL_DIM_LABELS.get(primary, primary),
+            'total': round(sum(g['amount_cad'] for g in prim), 2),
+            'lines': lines,
+            'bias': bias,
+        })
+    return out
+
+
 # ── Performance History ───────────────────────────────────────────────────────
 
 def _holdings_acb(txns, fx_rate):

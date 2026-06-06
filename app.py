@@ -35,6 +35,7 @@ with app.app_context():
 
     _add_col('watchlist', 'added_date', 'DATE')
     _add_col('watchlist', 'added_price', 'FLOAT')
+    _add_col('watchlist', 'target_type', "VARCHAR(10) DEFAULT 'below'")
     _add_col('gics', 'institution', 'VARCHAR(100)')
     _add_col('transactions', 'subtype', 'VARCHAR(50) DEFAULT ""')
     _add_col('accounts', 'cash_balance', 'FLOAT DEFAULT 0')
@@ -332,49 +333,97 @@ def dividends():
 
 @app.route('/watchlist')
 def watchlist():
-    from price_service import get_fx_rate
-    items = WatchlistItem.query.order_by(WatchlistItem.ticker).all()
-    fx = get_fx_rate()
-    enriched = []
-    for item in items:
-        cached = PriceCache.query.get(item.ticker)
-        live = cached.price if cached else None
-        pct_to_target = ((item.target_price - live) / live * 100) if (live and item.target_price) else None
-        pct_since_added = ((live - item.added_price) / item.added_price * 100) if (live and item.added_price) else None
-        enriched.append({
-            'id': item.id, 'ticker': item.ticker, 'company': item.company or '',
-            'sector': item.sector or '', 'currency': item.currency,
-            'target_price': item.target_price, 'added_price': item.added_price,
-            'added_date': item.added_date, 'notes': item.notes or '',
-            'live_price': live, 'pct_to_target': pct_to_target, 'pct_since_added': pct_since_added,
-        })
+    from calculations import get_watchlist_data, get_rebalancer_gaps_all, get_rebalancer_gap_summary
+    data = get_watchlist_data()
+    gaps = get_rebalancer_gaps_all()
+    gap_summary = get_rebalancer_gap_summary(gaps)
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
-    return render_template('watchlist.html', items=enriched, last_updated=last_updated, active='watchlist')
+    return render_template('watchlist.html', data=data, gaps=gaps, gap_summary=gap_summary,
+                           last_updated=last_updated, active='watchlist')
+
+
+@app.route('/ticker/<ticker>/review')
+def ticker_review(ticker):
+    """Quick fundamentals + a business-summary blurb for a candidate, shown
+    before it's added to the watchlist."""
+    from price_service import get_holdings_metadata, get_cached_price, refresh_prices
+    from calculations import _fmt_mktcap, get_holdings
+    import yfinance as yf
+    ticker = ticker.strip().upper()
+    m = get_holdings_metadata([ticker]).get(ticker, {})
+    cached = get_cached_price(ticker)
+    if not cached:
+        refresh_prices([ticker])
+        cached = get_cached_price(ticker)
+    summary = ''
+    try:
+        info = yf.Ticker(ticker).info or {}
+        summary = (info.get('longBusinessSummary') or info.get('description') or '')[:500]
+    except Exception:
+        pass
+    price = cached.price if cached else None
+    dr, dy = m.get('dividend_rate'), m.get('dividend_yield')
+    yld = (dr / price * 100) if (dr and price) else (dy if dy else None)
+    owned = any(h['ticker'] == ticker for h in get_holdings())
+    return jsonify({
+        'ticker': ticker, 'name': m.get('long_name') or ticker,
+        'asset_type': m.get('asset_type'), 'sector': m.get('sector'),
+        'market_cap': _fmt_mktcap(m.get('market_cap')),
+        'beta': round(m['beta'], 2) if m.get('beta') is not None else None,
+        'yield': round(yld, 2) if yld is not None else None,
+        'price': round(price, 2) if price else None,
+        'currency': cached.currency if cached else None,
+        'summary': summary, 'owned': owned,
+        'in_wl': WatchlistItem.query.filter_by(ticker=ticker).first() is not None,
+    })
 
 
 @app.route('/watchlist/add', methods=['POST'])
 def watchlist_add():
-    from price_service import get_cached_price, refresh_prices
+    from price_service import get_cached_price, refresh_prices, get_holdings_metadata
     from datetime import date
     try:
         ticker = request.form['ticker'].strip().upper()
+        if not ticker:
+            raise ValueError('Ticker is required.')
+        if WatchlistItem.query.filter_by(ticker=ticker).first():
+            flash(f'{ticker} is already on the watchlist.', 'info')
+            return redirect(url_for('watchlist'))
         cached = get_cached_price(ticker)
         if not cached:
             refresh_prices([ticker])
             cached = get_cached_price(ticker)
+        # Auto-classify: fill any blank fields from cached metadata.
+        meta = get_holdings_metadata([ticker]).get(ticker, {})
         target_raw = request.form.get('target_price', '').strip()
         db.session.add(WatchlistItem(
             ticker=ticker,
-            company=request.form.get('company', '').strip(),
-            sector=request.form.get('sector', '').strip(),
-            currency=request.form.get('currency', 'CAD'),
+            company=request.form.get('company', '').strip() or meta.get('long_name') or '',
+            sector=request.form.get('sector', '').strip() or meta.get('sector') or '',
+            currency=request.form.get('currency', '').strip() or 'CAD',
             target_price=float(target_raw) if target_raw else None,
+            target_type=request.form.get('target_type', 'below'),
             added_price=cached.price if cached else None,
             added_date=date.today(),
             notes=request.form.get('notes', '').strip(),
         ))
         db.session.commit()
         flash(f'Added {ticker} to watchlist.', 'success')
+    except Exception as e:
+        flash(f'Error: {e}', 'error')
+    return redirect(url_for('watchlist'))
+
+
+@app.route('/watchlist/edit/<int:id>', methods=['POST'])
+def watchlist_edit(id):
+    item = WatchlistItem.query.get_or_404(id)
+    try:
+        target_raw = request.form.get('target_price', '').strip()
+        item.target_price = float(target_raw) if target_raw else None
+        item.target_type = request.form.get('target_type', item.target_type or 'below')
+        item.notes = request.form.get('notes', '').strip()
+        db.session.commit()
+        flash(f'Updated {item.ticker}.', 'success')
     except Exception as e:
         flash(f'Error: {e}', 'error')
     return redirect(url_for('watchlist'))

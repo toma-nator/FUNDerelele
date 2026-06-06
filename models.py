@@ -68,6 +68,7 @@ class WatchlistItem(db.Model):
     sector = db.Column(db.String(50))
     currency = db.Column(db.String(5), default='CAD')
     target_price = db.Column(db.Float)
+    target_type = db.Column(db.String(10), default='below')  # 'below' = buy target, 'above' = price objective
     added_price = db.Column(db.Float)
     added_date = db.Column(db.Date)
     notes = db.Column(db.String(300))

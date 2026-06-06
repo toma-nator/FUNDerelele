@@ -576,6 +576,20 @@ body {
 .no-spin::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .no-spin { -moz-appearance: textfield; appearance: textfield; }
 
+/* Watchlist candidate chips (rebalancer gaps) */
+.cand { display: inline-block; padding: 2px 7px; margin: 1px 2px; border-radius: 10px;
+        font-size: .74rem; border: 1px solid var(--border); }
+.cand-wl { background: rgba(0,200,240,.10); color: var(--accent); }
+.cand-add { background: var(--bg-surface); color: var(--text-dim); cursor: pointer; font-family: var(--mono); }
+.cand-add:hover { color: var(--green); border-color: var(--green); }
+
+/* Modal (candidate review) */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 1000;
+                 display: flex; align-items: center; justify-content: center; padding: 20px; }
+.modal-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+             max-width: 520px; width: 100%; padding: 20px; box-shadow: 0 12px 40px rgba(0,0,0,.5); }
+.modal-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 16px; }
+
 .form-row {
   display: flex;
   gap: 16px;
