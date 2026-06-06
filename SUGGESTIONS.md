@@ -81,3 +81,27 @@ Performance chart, so actual vs. goal is visible at a glance.
   naturally with the existing "Avg rate" line.
 - **Effort:** small-to-medium — a setting + input on Settings, and one more
   dataset in the Performance render.
+
+## Cash Flows — Matching / "free money" ratio stat
+
+A headline stat card showing the RDSP efficiency number: free government money
+(grant + bond) earned per $1 of self-contribution — e.g. "$1.50 grant+bond per
+$1 contributed". Complements the composition doughnut's "% free money" by
+framing it as a return on contributions.
+
+- **Compute:** `(grant_total + bond_total) / contribution_total` — both already
+  available in `get_cashflow_stats` (`by_subtype`/`free_money`); just add the
+  ratio to the return dict and a stat card. Respects the active account filter.
+- **Effort:** tiny — one division and one stat card.
+
+## Cash Flows — Cumulative growth line
+
+A cumulative-deposits line chart (running total of contributions over time),
+optionally toggling with or sitting beside the annual bars, to show the
+account's funding building up rather than just per-year amounts.
+
+- **Compute:** sort deposits ascending and accumulate `net_cad`; could also
+  stack cumulative by subtype to show contribution vs. grant vs. bond growth.
+- **Where:** a toggle on the Annual Cash Flows chart, or a second small chart.
+- **Effort:** small — a running-sum series in `get_cashflow_stats` and a line
+  dataset in `cashflows.html`.

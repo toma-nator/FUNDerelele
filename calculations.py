@@ -345,10 +345,19 @@ def get_cashflow_stats(account_filter=None, subtype_filter=None):
     all_time = sum(d.net_cad for d in deposits)
     ytd      = sum(d.net_cad for d in deposits if d.date >= ytd_start)
 
-    known_subtypes = ['Contribution', 'RDSP Grant', 'RDSP Bond']
+    # The three real deposit subtypes; anything else falls into an "Other" bucket
+    # that only appears when such deposits exist (so totals always reconcile).
+    KNOWN = ['Contribution', 'RDSP Grant', 'RDSP Bond']
+
+    def norm_subtype(d):
+        return d.subtype if d.subtype in KNOWN else 'Other'
+
+    has_other = any(norm_subtype(d) == 'Other' for d in deposits)
+    known_subtypes = KNOWN + (['Other'] if has_other else [])
+
     by_subtype = {}
     for st in known_subtypes:
-        rows = [d for d in deposits if d.subtype == st]
+        rows = [d for d in deposits if norm_subtype(d) == st]
         by_subtype[st] = {
             'total': sum(d.net_cad for d in rows),
             'ytd':   sum(d.net_cad for d in rows if d.date >= ytd_start),
@@ -358,12 +367,10 @@ def get_cashflow_stats(account_filter=None, subtype_filter=None):
     # Per-account totals broken down by subtype
     account_totals = {}
     for d in deposits:
-        acc = d.account
-        if acc not in account_totals:
-            account_totals[acc] = {'total': 0.0, 'by_subtype': {st: 0.0 for st in known_subtypes}}
-        account_totals[acc]['total'] += d.net_cad
-        st = d.subtype if d.subtype in known_subtypes else 'Other'
-        account_totals[acc]['by_subtype'][st] = account_totals[acc]['by_subtype'].get(st, 0.0) + d.net_cad
+        rec = account_totals.setdefault(
+            d.account, {'total': 0.0, 'by_subtype': {st: 0.0 for st in known_subtypes}})
+        rec['total'] += d.net_cad
+        rec['by_subtype'][norm_subtype(d)] += d.net_cad
 
     by_year = {}
     for d in deposits:
@@ -373,13 +380,16 @@ def get_cashflow_stats(account_filter=None, subtype_filter=None):
     years = sorted(by_year.keys())
     chart_by_subtype = {}
     for st in known_subtypes:
-        yearly = []
-        for yr in years:
-            yearly.append(round(sum(
-                d.net_cad for d in deposits
-                if d.date.year == yr and d.subtype == st
-            ), 2))
-        chart_by_subtype[st] = yearly
+        chart_by_subtype[st] = [
+            round(sum(d.net_cad for d in deposits
+                      if d.date.year == yr and norm_subtype(d) == st), 2)
+            for yr in years
+        ]
+
+    # Composition pie: free government money (grant + bond) vs self-contribution
+    free_money = by_subtype['RDSP Grant']['total'] + by_subtype['RDSP Bond']['total']
+    free_pct   = round(100 * free_money / all_time, 1) if all_time else 0.0
+    pie_values = [round(by_subtype[st]['total'], 2) for st in known_subtypes]
 
     accounts = [a.name for a in Account.query.order_by(Account.name).all()]
 
@@ -392,6 +402,10 @@ def get_cashflow_stats(account_filter=None, subtype_filter=None):
         'by_year': dict(sorted(by_year.items())),
         'account_totals': dict(sorted(account_totals.items())),
         'known_subtypes': known_subtypes,
+        'filter_subtypes': KNOWN,
+        'free_money': free_money,
+        'free_pct': free_pct,
+        'pie_values': pie_values,
         'chart_years': years,
         'chart_by_subtype': chart_by_subtype,
         'accounts': accounts,

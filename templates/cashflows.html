@@ -4,27 +4,34 @@
 
 {% block content %}
 
-{# ── Filter bar ── #}
+{# ── Account chips ── #}
+{% if data.accounts %}
+<div class="account-selector" style="margin-bottom:12px">
+  <a href="{{ url_for('cashflows', subtype=data.active_subtype or none) }}"
+     class="acct-chip {% if not data.active_account %}active{% endif %}">All Accounts</a>
+  {% for acc in data.accounts %}
+  <a href="{{ url_for('cashflows', account=acc, subtype=data.active_subtype or none) }}"
+     class="acct-chip {% if data.active_account == acc %}active{% endif %}">{{ acc }}</a>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── Type filter ── #}
 <form method="GET" action="{{ url_for('cashflows') }}" class="filter-bar" style="margin-bottom:1.25rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap">
-  <select name="account" class="form-input" style="width:auto" onchange="this.form.submit()">
-    <option value="">All Accounts</option>
-    {% for acc in data.accounts %}
-    <option value="{{ acc }}" {% if data.active_account == acc %}selected{% endif %}>{{ acc }}</option>
-    {% endfor %}
-  </select>
+  {% if data.active_account %}<input type="hidden" name="account" value="{{ data.active_account }}">{% endif %}
   <select name="subtype" class="form-input" style="width:auto" onchange="this.form.submit()">
     <option value="">All Types</option>
-    {% for st in data.known_subtypes %}
+    {% for st in data.filter_subtypes %}
     <option value="{{ st }}" {% if data.active_subtype == st %}selected{% endif %}>{{ st }}</option>
     {% endfor %}
   </select>
-  {% if data.active_account or data.active_subtype %}
-  <a href="{{ url_for('cashflows') }}" class="btn">✕ Clear</a>
+  {% if data.active_subtype %}
+  <a href="{{ url_for('cashflows', account=data.active_account or none) }}" class="btn">✕ Clear type</a>
   {% endif %}
 </form>
 
 {# ── Stat cards ── #}
-<div class="stat-grid" style="grid-template-columns:repeat(5,1fr)">
+<div class="stat-grid" style="grid-template-columns:repeat({{ 2 + data.known_subtypes|length }},1fr)">
   <div class="stat-card">
     <div class="stat-label">All-Time</div>
     <div class="stat-value text-green">{{ data.all_time | cad }}</div>
@@ -44,15 +51,28 @@
   {% endfor %}
 </div>
 
-{# ── Chart ── #}
-<div class="card">
-  <div class="card-header">Annual Cash Flows</div>
-  <div class="chart-wrap" style="max-height:220px;padding:16px 20px">
-    <canvas id="annualChart"></canvas>
+{# ── Charts ── #}
+<div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-bottom:1rem">
+  <div class="card" style="margin:0">
+    <div class="card-header">Annual Cash Flows</div>
+    <div class="chart-wrap" style="max-height:240px;padding:16px 20px">
+      <canvas id="annualChart"></canvas>
+    </div>
+  </div>
+  <div class="card" style="margin:0">
+    <div class="card-header">Composition</div>
+    <div class="chart-wrap" style="max-height:240px;padding:16px 20px;position:relative">
+      <canvas id="pieChart"></canvas>
+      <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">
+        <div style="font-size:1.5rem;font-weight:700;color:var(--green);line-height:1">{{ data.free_pct }}%</div>
+        <div style="font-size:.66rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:.06em;margin-top:2px">free money</div>
+      </div>
+    </div>
   </div>
 </div>
 
-{# ── By Account ── #}
+{# ── By Account (hidden when a single account is selected) ── #}
+{% if not data.active_account %}
 <div class="card">
   <div class="card-header">By Account</div>
   {% if data.account_totals %}
@@ -93,6 +113,7 @@
   <div class="empty-row">No data. Import a CSV file to see cash flows.</div>
   {% endif %}
 </div>
+{% endif %}
 
 {# ── Annual summary ── #}
 {% if data.by_year %}
@@ -182,6 +203,7 @@ const colors = [
   { bg: 'rgba(0,200,240,.25)',   border: '#00c8f0' },
   { bg: 'rgba(0,230,118,.25)',   border: '#00e676' },
   { bg: 'rgba(155,114,245,.25)', border: '#9b72f5' },
+  { bg: 'rgba(90,120,150,.25)',  border: '#5a7896' },
 ];
 new Chart(document.getElementById('annualChart'), {
   type: 'bar',
@@ -206,6 +228,33 @@ new Chart(document.getElementById('annualChart'), {
     scales: {
       x: { stacked: true, grid: { color: '#1a3050' }, ticks: { color: '#5a7a96' } },
       y: { stacked: true, grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: v => '$' + v.toLocaleString() } }
+    }
+  }
+});
+
+const pieValues = {{ data.pie_values | tojson }};
+new Chart(document.getElementById('pieChart'), {
+  type: 'doughnut',
+  data: {
+    labels: subtypes,
+    datasets: [{
+      data: pieValues,
+      backgroundColor: subtypes.map((st, i) => colors[i].border),
+      borderColor: '#101f33',
+      borderWidth: 2,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: '68%',
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: ctx => {
+        const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+        const pct = total ? (ctx.parsed / total * 100).toFixed(1) : 0;
+        return ' ' + ctx.label + ': $' + ctx.parsed.toLocaleString('en-CA', {minimumFractionDigits:2}) + ' (' + pct + '%)';
+      }}}
     }
   }
 });
