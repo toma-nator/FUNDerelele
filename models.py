@@ -30,6 +30,7 @@ class PriceCache(db.Model):
     prev_close = db.Column(db.Float)
     currency = db.Column(db.String(5))
     last_updated = db.Column(db.DateTime)
+    meta_json = db.Column(db.Text)  # cached classification: asset type, sector, market cap, ETF look-through
 
 
 class Account(db.Model):

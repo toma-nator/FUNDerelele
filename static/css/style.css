@@ -329,6 +329,39 @@ body {
 /* ── Tables ── */
 .table-scroll { overflow-x: auto; }
 
+/* Top horizontal scrollbar that mirrors a wide table below it */
+.table-scroll-top {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.table-scroll-top > div { height: 1px; }
+
+/* Bulk delete actions kept next to the Transaction Log title (always reachable) */
+.txn-bulk-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: 4px;
+}
+
+/* Compact Transactions table so every column fits without horizontal scroll */
+#txnTable { font-size: .75rem; }
+#txnTable th,
+#txnTable td { padding: 7px 9px; }
+#txnTable td.acct-cell { max-width: 130px; }
+#txnTable td.acct-cell .acct-badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+#txnTable td.notes-cell {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -567,6 +600,69 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
   gap: 20px;
 }
+/* Single-account detail view — one full-width card instead of the grid */
+.accounts-grid.detail {
+  grid-template-columns: 1fr;
+}
+/* Expanded detail content is hidden in the overview, revealed on selection */
+.account-extra { display: none; }
+.accounts-grid.detail .account-extra { display: block; }
+.accounts-grid.detail .account-holdings-compact { display: none; }
+
+/* Allocation breakdown */
+.account-breakdown { padding: 14px 20px 4px; }
+.breakdown-msg { color: var(--text-dim); font-size: .8rem; padding: 6px 0 12px; }
+.breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px 32px;
+  margin-top: 10px;
+}
+.breakdown-block h4 {
+  font-size: .7rem; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-dim);
+  margin: 0 0 10px;
+}
+.bd-note {
+  font-size: .6rem; color: var(--accent);
+  background: rgba(0,200,240,.1); padding: 1px 6px; border-radius: 8px;
+  letter-spacing: .04em; margin-left: 4px;
+}
+.bd-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 46px;
+  align-items: center; gap: 10px;
+  margin-bottom: 6px; font-size: .74rem;
+}
+.bd-label { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bd-track { background: var(--bg-surface); border-radius: 6px; height: 8px; overflow: hidden; }
+.bd-fill { display: block; height: 100%; background: var(--accent); border-radius: 6px; min-width: 2px; }
+.bd-pct { font-family: var(--mono); color: var(--text-dim); text-align: right; font-size: .72rem; }
+
+/* Account selector (overview vs single-account detail) */
+.account-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.acct-chip {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 6px 14px;
+  border-radius: 16px;
+  font-size: .76rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--sans);
+}
+.acct-chip:hover { color: var(--text); background: var(--bg-hover); }
+.acct-chip.active {
+  background: rgba(0,200,240,.14);
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
 
 .account-header {
   padding: 16px 20px;
@@ -627,6 +723,7 @@ body {
 
 .account-holdings {
   padding: 0;
+  overflow-x: auto;
 }
 
 .account-holdings-label {

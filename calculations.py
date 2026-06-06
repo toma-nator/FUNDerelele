@@ -176,18 +176,43 @@ def get_dashboard_stats(holdings):
 
 
 def get_account_summary():
-    all_holdings = get_holdings()
+    all_holdings = get_holdings(include_closed=True)
     accounts = Account.query.all()
     cash_by_account = get_cash_by_account()
 
+    # Personal contributions vs. free government money (RDSP grants/bonds).
+    # Grants and bonds aren't money the user put in, so they count toward gain.
+    contrib_by_account, grants_by_account = {}, {}
+    for acc, subtype, net in (Transaction.query.filter_by(type='Deposit')
+                              .with_entities(Transaction.account, Transaction.subtype,
+                                             Transaction.net_cad).all()):
+        n = net or 0.0
+        if subtype in ('RDSP Grant', 'RDSP Bond'):
+            grants_by_account[acc] = grants_by_account.get(acc, 0.0) + n
+        else:
+            contrib_by_account[acc] = contrib_by_account.get(acc, 0.0) + n
+
     result = []
     for account in accounts:
-        acct_holdings = [h for h in all_holdings if h['account'] == account.name]
+        acct_all = [h for h in all_holdings if h['account'] == account.name]
+        acct_holdings = [h for h in acct_all if not h.get('closed')]
+        closed_holdings = [h for h in acct_all if h.get('closed')]
         holdings_mv = sum(h['market_value_cad'] or 0 for h in acct_holdings)
         holdings_book = sum(h['book_value_cad'] for h in acct_holdings)
         unrealized = holdings_mv - holdings_book
         day_change = sum(h['day_change'] or 0 for h in acct_holdings)
+        # Dividends and realized G/L span the account's full history (closed too).
+        dividends_total = sum(h['dividends_cad'] for h in acct_all)
+        realized_total = sum(h['realized_gl_cad'] for h in acct_all)
         cash = cash_by_account.get(account.name, 0.0)
+
+        # Hide empty accounts — only show ones holding money or positions.
+        if abs(holdings_mv) < 0.005 and abs(cash) < 0.005:
+            continue
+
+        total_value = holdings_mv + cash
+        net_contributions = contrib_by_account.get(account.name, 0.0)
+        grants_bonds = grants_by_account.get(account.name, 0.0)
 
         result.append({
             'name': account.name,
@@ -196,15 +221,109 @@ def get_account_summary():
             'holdings_mv': holdings_mv,
             'holdings_book': holdings_book,
             'cash_balance': cash,
-            'total_value': holdings_mv + cash,
+            'total_value': total_value,
             'unrealized_gl': unrealized,
             'unrealized_gl_pct': (unrealized / holdings_book * 100) if holdings_book else 0,
             'day_change': day_change,
+            'dividends_total': dividends_total,
+            'realized_total': realized_total,
+            'net_contributions': net_contributions,
+            'grants_bonds': grants_bonds,
+            'all_time_gain': total_value - net_contributions,
             'num_holdings': len(acct_holdings),
             'holdings': acct_holdings,
+            'closed_holdings': closed_holdings,
         })
 
     return result
+
+
+def _cap_bucket(mc):
+    if not mc:
+        return None
+    if mc >= 200e9:
+        return 'Mega cap'
+    if mc >= 10e9:
+        return 'Large cap'
+    if mc >= 2e9:
+        return 'Mid cap'
+    return 'Small cap'
+
+
+def get_account_breakdown(account_name):
+    """Allocation breakdowns for one account's current holdings: by asset type,
+    sector (with ETF look-through), market-cap size, currency, holdings-vs-cash,
+    and position weights. Classification metadata is fetched/cached on demand."""
+    from price_service import get_holdings_metadata
+
+    holdings = [h for h in get_holdings() if h['account'] == account_name]
+    cash = get_cash_by_account().get(account_name, 0.0)
+    total_mv = sum(h['market_value_cad'] or 0 for h in holdings)
+
+    if total_mv <= 0:
+        return {'ok': True, 'total_mv': 0, 'cash': round(cash, 2),
+                'asset_type': [], 'sector': [], 'market_cap': [],
+                'currency': [], 'invested_vs_cash': [], 'positions': []}
+
+    meta = get_holdings_metadata([h['ticker'] for h in holdings])
+    asset_type, sector, market_cap, currency = {}, {}, {}, {}
+    positions = []
+
+    for h in holdings:
+        mv = h['market_value_cad'] or 0
+        if mv <= 0:
+            continue
+        m = meta.get(h['ticker'], {})
+        at = m.get('asset_type') or 'Equity'
+        asset_type[at] = asset_type.get(at, 0) + mv
+        currency[h['currency']] = currency.get(h['currency'], 0) + mv
+
+        # Sector — ETF look-through when available, else the equity's own sector
+        if m.get('fund_sectors'):
+            tot = sum(m['fund_sectors'].values()) or 1
+            for sec, w in m['fund_sectors'].items():
+                sector[sec] = sector.get(sec, 0) + mv * (w / tot)
+        elif m.get('sector'):
+            sector[m['sector']] = sector.get(m['sector'], 0) + mv
+        else:
+            sector['Unclassified'] = sector.get('Unclassified', 0) + mv
+
+        # Market cap — ETFs grouped as Fund; stocks bucketed
+        if at == 'ETF':
+            market_cap['Fund'] = market_cap.get('Fund', 0) + mv
+        else:
+            b = _cap_bucket(m.get('market_cap')) or 'Unclassified'
+            market_cap[b] = market_cap.get(b, 0) + mv
+
+        positions.append({'ticker': h['ticker'], 'label': h['ticker'], 'value': round(mv, 2),
+                          'pct': round(mv / total_mv * 100, 1)})
+
+    def to_list(d):
+        return sorted(
+            [{'label': k, 'value': round(v, 2), 'pct': round(v / total_mv * 100, 1)}
+             for k, v in d.items()],
+            key=lambda x: x['value'], reverse=True)
+
+    account_total = total_mv + cash
+    invested_vs_cash = [
+        {'label': 'Invested', 'value': round(total_mv, 2),
+         'pct': round(total_mv / account_total * 100, 1) if account_total else 0},
+        {'label': 'Cash', 'value': round(cash, 2),
+         'pct': round(cash / account_total * 100, 1) if account_total else 0},
+    ]
+    positions.sort(key=lambda x: x['value'], reverse=True)
+
+    return {
+        'ok': True,
+        'total_mv': round(total_mv, 2),
+        'cash': round(cash, 2),
+        'asset_type': to_list(asset_type),
+        'sector': to_list(sector),
+        'market_cap': to_list(market_cap),
+        'currency': to_list(currency),
+        'invested_vs_cash': invested_vs_cash,
+        'positions': positions,
+    }
 
 
 # ── Cash Flows ────────────────────────────────────────────────────────────────

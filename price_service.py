@@ -1,9 +1,86 @@
 import threading
 import time
 import os
+import json
 from datetime import datetime
 
 import yfinance as yf
+
+
+# yfinance fund sector keys → display labels (aligned with equity .info sectors)
+_FUND_SECTOR_LABELS = {
+    'realestate': 'Real Estate',
+    'consumer_cyclical': 'Consumer Cyclical',
+    'basic_materials': 'Basic Materials',
+    'consumer_defensive': 'Consumer Defensive',
+    'technology': 'Technology',
+    'communication_services': 'Communication Services',
+    'financial_services': 'Financial Services',
+    'utilities': 'Utilities',
+    'industrials': 'Industrials',
+    'energy': 'Energy',
+    'healthcare': 'Healthcare',
+}
+
+
+def _fetch_one_metadata(ticker):
+    """Fetch classification metadata for a single ticker (asset type, sector,
+    market cap, and ETF look-through sector/asset-class weightings)."""
+    meta = {'asset_type': None, 'sector': None, 'market_cap': None,
+            'fund_sectors': None, 'fund_assets': None}
+    try:
+        tk = yf.Ticker(ticker)
+        info = tk.info or {}
+        qt = (info.get('quoteType') or '').upper()
+        meta['asset_type'] = 'ETF' if qt == 'ETF' else ('Equity' if qt in ('EQUITY', '') else qt.title())
+        meta['sector'] = info.get('sector')
+        mc = info.get('marketCap')
+        meta['market_cap'] = float(mc) if mc else None
+        if qt == 'ETF':
+            try:
+                fd = tk.funds_data
+                sw = fd.sector_weightings or {}
+                meta['fund_sectors'] = {
+                    _FUND_SECTOR_LABELS.get(k, k.replace('_', ' ').title()): float(v)
+                    for k, v in sw.items() if v
+                }
+                ac = fd.asset_classes or {}
+                meta['fund_assets'] = {k: float(v) for k, v in ac.items() if v}
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return meta
+
+
+def get_holdings_metadata(tickers, force=False):
+    """Return {ticker: meta}. Reads from price_cache.meta_json; fetches and
+    caches any missing (one-time, since classification rarely changes)."""
+    from models import db, PriceCache
+    result, to_fetch = {}, []
+    for t in set(tickers):
+        if not t or t == 'CASH' or ' ' in t:
+            continue
+        pc = PriceCache.query.get(t)
+        if pc and pc.meta_json and not force:
+            try:
+                result[t] = json.loads(pc.meta_json)
+                continue
+            except Exception:
+                pass
+        to_fetch.append(t)
+
+    for t in to_fetch:
+        meta = _fetch_one_metadata(t)
+        result[t] = meta
+        pc = PriceCache.query.get(t)
+        if pc:
+            pc.meta_json = json.dumps(meta)
+        else:
+            db.session.add(PriceCache(ticker=t, meta_json=json.dumps(meta)))
+    if to_fetch:
+        db.session.commit()
+    return result
 
 
 def get_fx_rate():

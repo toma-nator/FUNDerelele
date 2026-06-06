@@ -22,11 +22,13 @@
         </div>
         <div class="form-group">
           <label>Account</label>
-          <select name="account" required class="form-input">
+          <input type="text" name="account" required class="form-input" list="accountList"
+                 placeholder="Pick or type new…" autocomplete="off" />
+          <datalist id="accountList">
             {% for acc in accounts %}
-            <option value="{{ acc.name }}">{{ acc.name }}</option>
+            <option value="{{ acc.name }}"></option>
             {% endfor %}
-          </select>
+          </datalist>
         </div>
         <div class="form-group">
           <label>Type</label>
@@ -73,9 +75,9 @@
 <!-- Transaction Log -->
 <div class="card">
   <div class="card-header">
-    Transaction Log
+    <span>Transaction Log</span>
     <span class="card-sub" id="rowCount">{{ transactions | length }} total</span>
-    <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <div class="txn-bulk-actions">
       <button type="button" id="deleteSelectedBtn" class="btn btn-danger btn-sm"
               style="display:none" onclick="submitBulkDelete()">
         Delete Selected (<span id="selCount">0</span>)
@@ -112,8 +114,11 @@
     <button class="btn btn-sm" onclick="clearFilters()">Clear</button>
   </div>
 
-  <div class="table-scroll">
-    <table class="data-table">
+  <!-- Top horizontal scrollbar, synced with the table below -->
+  <div class="table-scroll-top" id="txnScrollTop"><div id="txnScrollTopInner"></div></div>
+
+  <div class="table-scroll" id="txnScroll">
+    <table class="data-table" id="txnTable">
       <thead>
         <tr>
           <th style="width:32px;padding-left:16px">
@@ -149,7 +154,7 @@
           <td class="text-dim mono">{{ t.id }}</td>
           <td class="mono">{{ t.date.strftime('%Y-%m-%d') }}</td>
           <td class="mono ticker">{{ t.ticker }}</td>
-          <td><span class="acct-badge acct-{{ t.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ t.account }}</span></td>
+          <td class="acct-cell"><span class="acct-badge acct-{{ t.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}" title="{{ t.account }}">{{ t.account }}</span></td>
           <td><span class="type-badge type-{{ t.type | lower }}">{{ t.type }}</span></td>
           <td class="r mono">{{ t.qty | num(4) }}</td>
           <td class="r mono">${{ '%.4f' % t.price }}</td>
@@ -157,7 +162,7 @@
           <td class="r mono">{{ t.amount_cad | cad }}</td>
           <td class="r mono text-dim">{% if t.fees_cad %}{{ t.fees_cad | cad }}{% else %}—{% endif %}</td>
           <td class="r mono {{ t.net_cad | gl_class }}">{{ t.net_cad | signed_cad }}</td>
-          <td class="text-dim">{{ t.notes or '' }}</td>
+          <td class="text-dim notes-cell" title="{{ t.notes or '' }}">{{ t.notes or '' }}</td>
           <td>
             <form method="POST" action="{{ url_for('delete_transaction', id=t.id) }}"
                   onsubmit="return confirm('Delete this transaction?')">
@@ -270,5 +275,28 @@ function submitBulkDelete() {
   document.getElementById('bulkIds').value = checked.map(cb => cb.value).join(',');
   document.getElementById('bulkDeleteForm').submit();
 }
+
+// ── Top scrollbar synced with the table's horizontal scroll ───────────────────
+(function () {
+  const top = document.getElementById('txnScrollTop');
+  const inner = document.getElementById('txnScrollTopInner');
+  const scroll = document.getElementById('txnScroll');
+  const table = document.getElementById('txnTable');
+  if (!top || !inner || !scroll || !table) return;
+
+  function sizeTop() {
+    inner.style.width = table.scrollWidth + 'px';
+    top.style.display = table.scrollWidth > scroll.clientWidth ? 'block' : 'none';
+  }
+  let lock = false;
+  top.addEventListener('scroll', () => {
+    if (lock) return; lock = true; scroll.scrollLeft = top.scrollLeft; lock = false;
+  });
+  scroll.addEventListener('scroll', () => {
+    if (lock) return; lock = true; top.scrollLeft = scroll.scrollLeft; lock = false;
+  });
+  sizeTop();
+  window.addEventListener('resize', sizeTop);
+})();
 </script>
 {% endblock %}

@@ -3,9 +3,18 @@
 {% block page_title %}Accounts{% endblock %}
 
 {% block content %}
-<div class="accounts-grid">
+{% if accounts %}
+<div class="account-selector" id="accountSelector">
+  <button type="button" class="acct-chip active" data-account="">All Accounts</button>
   {% for acc in accounts %}
-  <div class="card account-card">
+  <button type="button" class="acct-chip" data-account="{{ acc.name }}">{{ acc.name }}</button>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="accounts-grid" id="accountsGrid">
+  {% for acc in accounts %}
+  <div class="card account-card" data-account="{{ acc.name }}">
     <div class="account-header">
       <span class="account-name">{{ acc.name }}</span>
       <form method="post" action="{{ url_for('update_account_type', name=acc.name) }}"
@@ -47,7 +56,7 @@
     </div>
 
     {% if acc.holdings %}
-    <div class="account-holdings">
+    <div class="account-holdings account-holdings-compact">
       <div class="account-holdings-label">{{ acc.num_holdings }} position{% if acc.num_holdings != 1 %}s{% endif %}</div>
       <table class="data-table mini">
         <thead>
@@ -74,12 +83,170 @@
     </div>
     {% endif %}
 
+    <!-- Detail-only: shown when this account is selected from the chips above -->
+    <div class="account-extra">
+      <div class="account-stats account-extra-stats">
+        <div class="account-stat">
+          <div class="stat-label">Book Value</div>
+          <div class="stat-value mono">{{ acc.holdings_book | cad }}</div>
+        </div>
+        <div class="account-stat">
+          <div class="stat-label">Contributions</div>
+          <div class="stat-value mono">{{ acc.net_contributions | cad }}</div>
+        </div>
+        <div class="account-stat">
+          <div class="stat-label">Grants &amp; Bonds</div>
+          <div class="stat-value mono text-green">{{ acc.grants_bonds | cad }}</div>
+        </div>
+        <div class="account-stat">
+          <div class="stat-label">All-Time Gain</div>
+          <div class="stat-value mono {{ acc.all_time_gain | gl_class }}">{{ acc.all_time_gain | signed_cad }}</div>
+        </div>
+        <div class="account-stat">
+          <div class="stat-label">Dividends</div>
+          <div class="stat-value mono text-green">{{ acc.dividends_total | cad }}</div>
+        </div>
+        <div class="account-stat">
+          <div class="stat-label">Realized G/L</div>
+          <div class="stat-value mono {{ acc.realized_total | gl_class }}">{{ acc.realized_total | signed_cad }}</div>
+        </div>
+      </div>
+
+      <div class="account-breakdown" data-account="{{ acc.name }}">
+        <div class="account-holdings-label">Allocation breakdown</div>
+        <div class="breakdown-msg">Loading…</div>
+        <div class="breakdown-grid" style="display:none">
+          <div class="breakdown-block" data-key="asset_type"><h4>By Asset Type</h4><div class="bars"></div></div>
+          <div class="breakdown-block" data-key="sector"><h4>By Sector <span class="bd-note">ETF look-through</span></h4><div class="bars"></div></div>
+          <div class="breakdown-block" data-key="market_cap"><h4>By Market Cap</h4><div class="bars"></div></div>
+          <div class="breakdown-block" data-key="currency"><h4>By Currency</h4><div class="bars"></div></div>
+          <div class="breakdown-block" data-key="invested_vs_cash"><h4>Holdings vs Cash</h4><div class="bars"></div></div>
+          <div class="breakdown-block" data-key="positions"><h4>Position Weights</h4><div class="bars"></div></div>
+        </div>
+      </div>
+
+      {% if acc.holdings or acc.closed_holdings %}
+      <div class="account-holdings">
+        <div class="account-holdings-label">Positions — detailed</div>
+        <table class="data-table mini">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th class="r">Qty</th>
+              <th class="r">Avg Cost</th>
+              <th class="r">Book</th>
+              <th class="r">Mkt Val</th>
+              <th class="r">Unreal $</th>
+              <th class="r">Unreal %</th>
+              <th class="r">Dividends</th>
+              <th class="r">Realized</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for h in acc.holdings %}
+            <tr>
+              <td class="mono ticker">{{ h.ticker }}</td>
+              <td class="r mono">{{ h.qty | num(2) }}</td>
+              <td class="r mono">{{ h.avg_cost_cad | cad }}</td>
+              <td class="r mono">{{ h.book_value_cad | cad }}</td>
+              <td class="r mono">{{ h.market_value_cad | cad }}</td>
+              <td class="r mono {{ h.unrealized_gl | gl_class }}">{{ h.unrealized_gl | signed_cad }}</td>
+              <td class="r mono {{ h.unrealized_gl_pct | gl_class }}">{{ h.unrealized_gl_pct | pct }}</td>
+              <td class="r mono text-green">{{ h.dividends_cad | cad }}</td>
+              <td class="r mono {{ h.realized_gl_cad | gl_class }}">{{ h.realized_gl_cad | signed_cad }}</td>
+            </tr>
+            {% endfor %}
+            {% for h in acc.closed_holdings %}
+            <tr class="closed-row">
+              <td class="mono ticker">{{ h.ticker }} <span class="closed-badge">closed</span></td>
+              <td class="r mono text-dim">—</td>
+              <td class="r mono text-dim">—</td>
+              <td class="r mono text-dim">—</td>
+              <td class="r mono text-dim">—</td>
+              <td class="r mono text-dim">—</td>
+              <td class="r mono text-dim">—</td>
+              <td class="r mono text-green">{{ h.dividends_cad | cad }}</td>
+              <td class="r mono {{ h.realized_gl_cad | gl_class }}">{{ h.realized_gl_cad | signed_cad }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+    </div>
+
     <div style="padding:8px 20px 12px;font-size:.7rem;color:var(--text-muted)">
       Cash = deposits − buys + sells + dividends
     </div>
   </div>
   {% else %}
-  <div class="card"><div class="empty-row">No accounts configured.</div></div>
+  <div class="card"><div class="empty-row">No accounts yet. Import a statement or add a transaction to get started.</div></div>
   {% endfor %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const sel = document.getElementById('accountSelector');
+  const grid = document.getElementById('accountsGrid');
+  if (!sel || !grid) return;
+  const cards = Array.from(grid.querySelectorAll('.account-card'));
+  const breakdownCache = {};
+  const BD_KEYS = ['asset_type', 'sector', 'market_cap', 'currency', 'invested_vs_cash', 'positions'];
+
+  function renderBreakdown(card, data) {
+    const wrap = card.querySelector('.account-breakdown');
+    if (!wrap) return;
+    const msg = wrap.querySelector('.breakdown-msg');
+    const gridEl = wrap.querySelector('.breakdown-grid');
+    if (!data || !data.ok || !data.total_mv) {
+      msg.style.display = ''; msg.textContent = 'No holdings to break down.';
+      gridEl.style.display = 'none';
+      return;
+    }
+    msg.style.display = 'none';
+    gridEl.style.display = '';
+    BD_KEYS.forEach(key => {
+      const bars = gridEl.querySelector('.breakdown-block[data-key="' + key + '"] .bars');
+      const items = data[key] || [];
+      bars.innerHTML = items.map(it => {
+        const pct = it.pct || 0;
+        return '<div class="bd-row"><span class="bd-label" title="' + it.label + '">' + it.label + '</span>'
+          + '<span class="bd-track"><span class="bd-fill" style="width:' + Math.min(100, pct) + '%"></span></span>'
+          + '<span class="bd-pct">' + pct + '%</span></div>';
+      }).join('') || '<div class="bd-pct">—</div>';
+    });
+  }
+
+  function loadBreakdown(name, card) {
+    const wrap = card.querySelector('.account-breakdown');
+    if (!wrap) return;
+    if (breakdownCache[name]) { renderBreakdown(card, breakdownCache[name]); return; }
+    const msg = wrap.querySelector('.breakdown-msg');
+    msg.style.display = ''; msg.textContent = 'Loading classifications… (one-time, may take a few seconds)';
+    wrap.querySelector('.breakdown-grid').style.display = 'none';
+    fetch('/accounts/' + encodeURIComponent(name) + '/breakdown')
+      .then(r => r.json())
+      .then(d => { breakdownCache[name] = d; renderBreakdown(card, d); })
+      .catch(() => { msg.textContent = 'Could not load breakdown.'; });
+  }
+
+  sel.querySelectorAll('.acct-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      sel.querySelectorAll('.acct-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      const name = chip.dataset.account;
+      cards.forEach(card => {
+        card.style.display = (!name || card.dataset.account === name) ? '' : 'none';
+      });
+      grid.classList.toggle('detail', !!name);  // single account → expanded detail
+      if (name) {
+        const card = cards.find(c => c.dataset.account === name);
+        if (card) loadBreakdown(name, card);
+      }
+    });
+  });
+})();
+</script>
 {% endblock %}

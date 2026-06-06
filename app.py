@@ -13,11 +13,8 @@ db.init_app(app)
 with app.app_context():
     db.create_all()
 
-    # Seed default accounts
-    if not Account.query.first():
-        for name, atype in [('TFSA', 'TFSA'), ('RRSP', 'RRSP'), ('FHSA', 'FHSA'), ('Non-Reg', 'Non-Reg')]:
-            db.session.add(Account(name=name, type=atype, cash_balance=0))
-        db.session.commit()
+    # Accounts are created on import (importers._ensure_account). We no longer
+    # seed placeholder accounts, so the app only tracks accounts you actually use.
 
     if not Setting.query.get('fx_usd_cad'):
         db.session.add(Setting(key='fx_usd_cad', value='1.365'))
@@ -41,6 +38,7 @@ with app.app_context():
     _add_col('gics', 'institution', 'VARCHAR(100)')
     _add_col('transactions', 'subtype', 'VARCHAR(50) DEFAULT ""')
     _add_col('accounts', 'cash_balance', 'FLOAT DEFAULT 0')
+    _add_col('price_cache', 'meta_json', 'TEXT')
 
 from price_service import start_price_refresh
 start_price_refresh(app)
@@ -124,7 +122,12 @@ def add_transaction():
     try:
         txn_date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
         ticker = request.form['ticker'].strip().upper()
-        account = request.form['account']
+        account = request.form['account'].strip()
+        if not account:
+            raise ValueError('Account is required.')
+        # Create the account on first use so transactions can be added before any import.
+        if not Account.query.filter_by(name=account).first():
+            db.session.add(Account(name=account, type='Non-Reg', cash_balance=0))
         txn_type = request.form['type']
         qty = float(request.form['qty'])
         price = float(request.form['price'])
@@ -203,6 +206,12 @@ def update_cash(name):
 
 # Account types — registered ones are tax-sheltered (see Tax & ACB tab).
 ACCOUNT_TYPES = ['Non-Reg', 'TFSA', 'RRSP', 'FHSA', 'RDSP', 'RESP', 'LIRA', 'RRIF']
+
+
+@app.route('/accounts/<name>/breakdown')
+def account_breakdown(name):
+    from calculations import get_account_breakdown
+    return jsonify(get_account_breakdown(name))
 
 
 @app.route('/accounts/<name>/type', methods=['POST'])
