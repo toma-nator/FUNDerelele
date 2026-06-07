@@ -696,6 +696,23 @@ def backup_db():
     return send_file(path, as_attachment=True, download_name=f'finance_backup_{stamp}.db')
 
 
+# ── Charts ────────────────────────────────────────────────────────────────────
+
+@app.route('/charts')
+def charts():
+    from charts import catalog_grouped
+    accounts = [a.name for a in Account.query.order_by(Account.name).all()]
+    return render_template('charts.html', active='charts',
+                           groups=catalog_grouped(), accounts=accounts)
+
+
+@app.route('/charts/data/<chart_id>')
+def chart_data(chart_id):
+    from charts import build_chart
+    account = request.args.get('account', '').strip() or None
+    return jsonify(build_chart(chart_id, account))
+
+
 # ── Tax & ACB ─────────────────────────────────────────────────────────────────
 
 @app.route('/tax')

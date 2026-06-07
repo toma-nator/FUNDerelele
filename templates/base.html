@@ -30,6 +30,7 @@
     <div class="nav-section">
       <span class="nav-label">ANALYTICS</span>
       <a href="{{ url_for('performance') }}"  class="nav-item {% if active=='performance'  %}active{% endif %}"><span class="nav-icon">↗</span> Performance</a>
+      <a href="{{ url_for('charts') }}"       class="nav-item {% if active=='charts'       %}active{% endif %}"><span class="nav-icon">◔</span> Charts</a>
       <a href="{{ url_for('dividends') }}"    class="nav-item {% if active=='dividends'    %}active{% endif %}"><span class="nav-icon">◎</span> Dividends</a>
       <a href="{{ url_for('cashflows') }}"   class="nav-item {% if active=='cashflows'   %}active{% endif %}"><span class="nav-icon">⬇</span> Cash Flows</a>
       <a href="{{ url_for('gics') }}"         class="nav-item {% if active=='gics'         %}active{% endif %}"><span class="nav-icon">▤</span> GICs</a>

@@ -2,6 +2,40 @@
 
 Ideas parked for future implementation. Not committed work — just a backlog.
 
+## Charts tab — deferred charts (🟡/🔴)
+
+The Charts tab (`charts.py` + `templates/charts.html`) ships the 🟢 catalog. These
+were parked per the build plan; add a builder in `charts.py` + a `CHART_CATALOG`
+entry to enable any of them:
+
+- **⭐ HIGH VALUE — percent-format support in the renderer.** The chart renderer
+  currently formats every value as CAD (axis ticks + tooltip). Add an optional
+  `unit: 'percent'` (or `'pct'`) field to a chart's payload and have
+  `buildConfig()` in `charts.html` switch the axis/tooltip formatter accordingly.
+  This is a small, one-time change that **unlocks a whole class of charts for
+  near-free**: yield-on-cost & current yield by holding, holding/sector return %,
+  allocation drift %, monthly/cumulative TWR %, dividend-growth %, etc. Do this
+  first — it's the cheapest high-leverage win in the backlog.
+
+- **Asset Class look-through** (stock/bond/cash) — 🟡 `fund_assets` is cached; see
+  the "Asset-class look-through (ETFs)" item below. (Distinct from the shipped
+  "By Asset Type" chart, which is equity/ETF/etc.)
+- **Geographic Exposure** — 🔴 yfinance gives `country` only for individual
+  stocks; ETFs have no country look-through, so this would be mostly "Mixed".
+- **Dividend Snowball (DRIP)** — 🟡 already computed in `get_planning_stats`
+  (`dividend` block: labels/annual_data/cumulative_data); just needs a builder.
+- **Portfolio Value vs USD/CAD** — 🟡 needs a stored historical FX series.
+- **FX Impact — Gain/Loss vs Rate** — 🟡 needs FX attribution math.
+- **Efficient Frontier (Risk vs Return)** — 🔴 needs the Optimizer (covariance +
+  solver); see the "Portfolio Optimizer" item below.
+- **Forward 12-Month Dividend Calendar** — 🟡 needs a pay-schedule heuristic; see
+  the "Dividends — Income projection" item.
+- **Max Drawdown / underwater** — 🟡 see the "Performance — Max drawdown" item.
+- **Target vs Actual Allocation** — 🟢 but config-dependent: it needs per-account
+  saved Rebalancer targets and an account/dimension selector, so it fits the
+  Rebalancer tab better than a generic catalog chart. Deferred pending a way to
+  pick the account/dimension within a pane.
+
 ## Asset-class look-through (ETFs)
 
 Decompose each ETF's market value into its underlying **asset classes**

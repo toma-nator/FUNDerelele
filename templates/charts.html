@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+{% block title %}Charts — Portfolio Tracker{% endblock %}
+{% block page_title %}Charts{% endblock %}
+
+{% block content %}
+<div class="charts-toolbar">
+  <span class="charts-toolbar-label">Layout</span>
+  <div class="layout-btns">
+    <button type="button" class="layout-btn" data-cols="1" title="1 chart">1</button>
+    <button type="button" class="layout-btn" data-cols="2" title="2 charts">2</button>
+    <button type="button" class="layout-btn" data-cols="3" title="3 charts (wide on top)">3</button>
+    <button type="button" class="layout-btn" data-cols="4" title="4 charts">4</button>
+  </div>
+  <span class="charts-toolbar-hint">Pick any chart per pane — your layout &amp; choices are remembered.</span>
+</div>
+
+<div class="charts-grid cols-3" id="chartsGrid"></div>
+
+<!-- One pane, cloned per layout slot -->
+<template id="paneTemplate">
+  <div class="chart-pane">
+    <div class="chart-pane-head">
+      <select class="chart-select">
+        {% for cat, items in groups %}
+        <optgroup label="{{ cat }}">
+          {% for it in items %}
+          <option value="{{ it.id }}" data-size="{{ it.size }}">{{ it.name }} · {{ it.size }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+      <select class="chart-account" title="Filter by account">
+        <option value="">All Accounts</option>
+        {% for a in accounts %}
+        <option value="{{ a }}">{{ a }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="chart-canvas-wrap"><canvas></canvas></div>
+    <div class="chart-empty" style="display:none"></div>
+  </div>
+</template>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const grid = document.getElementById('chartsGrid');
+  const tpl = document.getElementById('paneTemplate');
+  const layoutBtns = document.querySelectorAll('.layout-btn');
+  const LS_LAYOUT = 'chartsLayout', LS_SEL = 'chartsSelections';
+  const DEFAULTS = ['value_vs_contrib', 'alloc_account', 'top_holdings', 'alloc_sector'];
+  const money = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD', maximumFractionDigits: 0 });
+  const TICK = '#5a7a96', GRID = 'rgba(120,160,200,.10)', TITLE = '#9fc0dc';
+
+  let layout = parseInt(localStorage.getItem(LS_LAYOUT) || '3', 10);
+  // selections: [{c: chartId, a: accountName}]. Migrate the old string-only format.
+  let selections = (JSON.parse(localStorage.getItem(LS_SEL) || 'null') || [])
+    .map(s => (typeof s === 'string' ? { c: s, a: '' } : s));
+  const charts = [];
+
+  function defSel(i) { return { c: DEFAULTS[i % DEFAULTS.length], a: '' }; }
+
+  function save() {
+    localStorage.setItem(LS_LAYOUT, layout);
+    localStorage.setItem(LS_SEL, JSON.stringify(selections));
+  }
+
+  function hexA(hex, a) {
+    if (!hex || hex[0] !== '#') return hex;
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  function buildConfig(d) {
+    const common = {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        title: { display: !!d.title, text: d.title, color: TITLE, font: { size: 12.5, weight: '600' }, padding: { bottom: 10 } },
+        legend: { display: false, labels: { color: TICK, boxWidth: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: (c) => {
+              const p = c.parsed;
+              // Horizontal bars put the value on x; vertical bars/lines on y.
+              const horiz = c.chart.options.indexAxis === 'y';
+              const v = (typeof p === 'number') ? p : (horiz ? p.x : p.y);
+              return (c.dataset.label ? c.dataset.label + ': ' : '') + money.format(v);
+            }
+          }
+        }
+      }
+    };
+
+    if (d.type === 'pie' || d.type === 'doughnut') {
+      return {
+        type: d.type,
+        data: { labels: d.labels, datasets: [{ data: d.datasets[0].data, backgroundColor: d.datasets[0].colors, borderColor: '#0c1929', borderWidth: 1 }] },
+        options: {
+          ...common,
+          plugins: {
+            ...common.plugins,
+            legend: { display: true, position: 'right', labels: { color: TICK, boxWidth: 12, font: { size: 11 } } },
+            tooltip: { callbacks: { label: (c) => c.label + ': ' + money.format(c.parsed) } }
+          }
+        }
+      };
+    }
+
+    const horiz = (d.type === 'hbar' || d.type === 'divergingBar');
+    const stacked = (d.type === 'stackedBar');
+    const cjtype = (d.type === 'line') ? 'line' : 'bar';
+    const multi = d.datasets.length > 1;
+
+    const datasets = d.datasets.map(s => {
+      if (cjtype === 'line') {
+        return { label: s.label || '', data: s.data, borderColor: s.color, backgroundColor: hexA(s.color, .14),
+                 fill: !!s.fill, tension: .25, pointRadius: 0, borderWidth: 2 };
+      }
+      return { label: s.label || '', data: s.data, backgroundColor: s.colors || s.color, borderWidth: 0, borderRadius: 3 };
+    });
+
+    const moneyAxis = { ticks: { color: TICK, callback: (v) => money.format(v) }, grid: { color: GRID } };
+    const catAxis = { ticks: { color: TICK, maxRotation: 0, autoSkip: true }, grid: { display: false } };
+    const scales = horiz
+      ? { x: { ...moneyAxis }, y: { ...catAxis, grid: { display: false } } }
+      : { x: { ...catAxis, stacked }, y: { ...moneyAxis, stacked } };
+
+    return {
+      type: cjtype,
+      data: { labels: d.labels, datasets },
+      options: {
+        ...common, indexAxis: horiz ? 'y' : 'x',
+        plugins: { ...common.plugins, legend: { display: multi, labels: { color: TICK, boxWidth: 12, font: { size: 11 } } } },
+        scales
+      }
+    };
+  }
+
+  function loadPane(i) {
+    const pane = grid.children[i];
+    if (!pane) return;
+    const sel = pane.querySelector('.chart-select');
+    const acc = pane.querySelector('.chart-account');
+    const canvas = pane.querySelector('canvas');
+    const emptyEl = pane.querySelector('.chart-empty');
+    fetch('/charts/data/' + sel.value + '?account=' + encodeURIComponent(acc.value))
+      .then(r => r.json())
+      .then(d => {
+        if (charts[i]) { charts[i].destroy(); charts[i] = null; }
+        if (!d.ok) { emptyEl.style.display = ''; emptyEl.textContent = d.error || 'Could not load chart.'; canvas.style.display = 'none'; return; }
+        if (d.empty || !d.datasets.length) { emptyEl.style.display = ''; emptyEl.textContent = d.empty || 'No data.'; canvas.style.display = 'none'; return; }
+        emptyEl.style.display = 'none'; canvas.style.display = '';
+        charts[i] = new Chart(canvas.getContext('2d'), buildConfig(d));
+      })
+      .catch(() => { emptyEl.style.display = ''; emptyEl.textContent = 'Could not load chart.'; });
+  }
+
+  function render() {
+    grid.className = 'charts-grid cols-' + layout;
+    grid.innerHTML = '';
+    charts.length = 0;
+    for (let i = 0; i < layout; i++) {
+      const node = tpl.content.firstElementChild.cloneNode(true);
+      grid.appendChild(node);
+      const sel = node.querySelector('.chart-select');
+      const acc = node.querySelector('.chart-account');
+      const want = selections[i] || defSel(i);
+      if ([...sel.options].some(o => o.value === want.c)) sel.value = want.c;
+      if ([...acc.options].some(o => o.value === want.a)) acc.value = want.a;
+      selections[i] = { c: sel.value, a: acc.value };
+      const onChange = () => { selections[i] = { c: sel.value, a: acc.value }; save(); loadPane(i); };
+      sel.addEventListener('change', onChange);
+      acc.addEventListener('change', onChange);
+      charts.push(null);
+      loadPane(i);
+    }
+    layoutBtns.forEach(b => b.classList.toggle('active', parseInt(b.dataset.cols, 10) === layout));
+    save();
+  }
+
+  layoutBtns.forEach(b => b.addEventListener('click', () => { layout = parseInt(b.dataset.cols, 10); render(); }));
+  render();
+})();
+</script>
+{% endblock %}
