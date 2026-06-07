@@ -1,0 +1,15 @@
+<div class="room-widget">
+  {% for r in rows %}
+  <div class="room-widget-row">
+    <div class="room-widget-head">
+      <span class="mono">{{ r.type }}</span>
+      <span class="mono">{{ r.remaining }}{% if r.cap %} <span class="text-dim">/ {{ r.cap }}</span>{% endif %} left</span>
+    </div>
+    {% if r.pct is not none %}
+    <div class="room-bar"><span class="room-bar-fill" style="width:{{ r.pct }}%"></span></div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="empty-row">No registered accounts. Set them up on the Accounts tab.</div>
+  {% endfor %}
+</div>

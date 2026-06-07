@@ -1,0 +1,16 @@
+<table class="data-table mini">
+  <thead>
+    <tr><th>Account</th><th class="r">To Buy</th><th>Toward</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="mono">{{ r.account }}</td>
+      <td class="r mono">{{ r.total }}</td>
+      <td class="text-dim">{{ r.detail }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" class="empty-row">No drift — set account targets on the Rebalancer tab.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

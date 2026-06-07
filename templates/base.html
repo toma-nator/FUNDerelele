@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
   <script>if(localStorage.getItem('sidebarCollapsed')==='1')document.documentElement.classList.add('sidebar-collapsed');</script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="{{ url_for('static', filename='js/chart_render.js') }}"></script>
 </head>
 <body class="{% block body_class %}{% endblock %}">
 
@@ -58,6 +59,7 @@
         <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
       </div>
       <div class="topbar-right">
+        {% block topbar_actions %}{% endblock %}
         {% if last_updated %}
           <span class="updated-at">prices updated {{ last_updated.last_updated.strftime('%H:%M') if last_updated.last_updated else '—' }}</span>
         {% endif %}

@@ -1,0 +1,17 @@
+<table class="data-table mini">
+  <thead>
+    <tr><th>Ticker</th><th class="r">Price</th><th class="r">Target</th><th class="r">vs Target</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="mono ticker">{{ r.ticker }}</td>
+      <td class="r mono">{{ r.price }}</td>
+      <td class="r mono text-dim">{{ r.target }}</td>
+      <td class="r mono {{ r.dist_cls }}">{{ r.dist }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="empty-row">Watchlist is empty.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

@@ -1,0 +1,17 @@
+<table class="data-table mini">
+  <thead>
+    <tr><th>GIC</th><th>Matures</th><th class="r">Days</th><th class="r">At Maturity</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.name }}</td>
+      <td class="text-dim">{{ r.maturity }}</td>
+      <td class="r mono">{{ r.days }}</td>
+      <td class="r mono">{{ r.value }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="empty-row">No active GICs. Add one on the GICs tab.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

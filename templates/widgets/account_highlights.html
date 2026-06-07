@@ -1,0 +1,33 @@
+<div class="wgt-subhead">
+  Overall =
+  <a href="#" class="basis-toggle" data-basis="{{ 'unrealized' if basis == 'contrib' else 'contrib' }}">{{ 'return on contributions' if basis == 'contrib' else 'unrealized %' }}</a>
+  <span class="text-muted">(click to switch)</span>
+  <span class="ah-addcol-wrap">
+    <select class="ah-addcol">
+      <option value="">+ Column…</option>
+      {% for cid, label in available %}<option value="{{ cid }}">{{ label }}</option>{% endfor %}
+    </select>
+  </span>
+</div>
+<table class="data-table mini">
+  <thead>
+    <tr>
+      <th>Account</th>
+      {% for cid, label in cols %}
+      <th class="r">{{ label }}<button class="col-remove" data-col="{{ cid }}" title="Remove column">×</button></th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for a in accounts %}
+    <tr>
+      <td class="mono">{{ a.name }}{% if a.type %} <span class="text-dim">· {{ a.type }}</span>{% endif %}</td>
+      {% for cid, label in cols %}
+      <td class="r mono {{ a.cells[cid].cls }}">{{ a.cells[cid].val }}</td>
+      {% endfor %}
+    </tr>
+    {% else %}
+    <tr><td colspan="{{ cols | length + 1 }}" class="empty-row">No accounts yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

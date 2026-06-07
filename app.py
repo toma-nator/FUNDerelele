@@ -139,15 +139,37 @@ def num_filter(v, decimals=4):
 
 @app.route('/')
 def dashboard():
-    from calculations import get_holdings, get_dashboard_stats
-    holdings = get_holdings()
-    stats = get_dashboard_stats(holdings)
-    last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
+    import dashboard as dash
+    overview = dash.build_overview()
     return render_template('dashboard.html',
-                           stats=stats,
-                           holdings=holdings[:10],
-                           last_updated=last_updated,
+                           hero=overview['hero'],
+                           kpis=overview['kpis'],
+                           kpi_catalog=dash.KPI_CATALOG,
+                           widget_groups=dash.widget_catalog_grouped(),
                            active='dashboard')
+
+
+@app.route('/dashboard/sparkline')
+def dashboard_sparkline():
+    import dashboard as dash
+    return jsonify(dash.sparkline())
+
+
+@app.route('/dashboard/widget')
+def dashboard_widget():
+    import dashboard as dash
+    wid = request.args.get('id', '')
+    account = request.args.get('account', '').strip() or None
+    if wid.startswith('chart:'):
+        from charts import build_chart
+        return jsonify({'kind': 'chart', 'data': build_chart(wid[6:], account)})
+    fn = dash.HTML_WIDGET_FNS.get(wid)
+    if not fn:
+        return jsonify({'kind': 'error', 'error': 'Unknown widget'})
+    ctx = (fn(request.args.get('basis', 'contrib'), request.args.get('cols', ''))
+           if wid == 'account_highlights' else fn())
+    html = render_template(f'widgets/{wid}.html', **ctx)
+    return jsonify({'kind': 'html', 'title': dash.HTML_WIDGET_NAMES.get(wid, wid), 'html': html})
 
 
 @app.route('/holdings')

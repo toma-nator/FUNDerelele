@@ -2,6 +2,14 @@
 
 Ideas parked for future implementation. Not committed work — just a backlog.
 
+## Dashboard — hero sparkline visual polish
+
+The hero strip's 12-month sparkline (`loadSparkline()` in `dashboard.html`) works
+but still looks a bit off. Ideas to make it nicer: trend-color the line green/red
+by net change over the window; smooth/normalize the y-scale so flat-ish periods
+don't look jagged; a faint baseline or a "vs contributions" ghost line; possibly
+a small area-gradient tweak or a wider/taller footprint. Parked for a later pass.
+
 ## Charts tab — deferred charts (🟡/🔴)
 
 The Charts tab (`charts.py` + `templates/charts.html`) ships the 🟢 catalog. These

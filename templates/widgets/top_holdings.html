@@ -1,0 +1,18 @@
+<table class="data-table mini">
+  <thead>
+    <tr><th>Ticker</th><th>Account</th><th class="r">Mkt Value</th><th class="r">G/L</th><th class="r">% Port</th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td class="mono ticker">{{ r.ticker }}</td>
+      <td class="text-dim">{{ r.account }}</td>
+      <td class="r mono">{{ r.mv }}</td>
+      <td class="r mono {{ r.gl_cls }}">{{ r.gl }}</td>
+      <td class="r mono">{{ r.pct }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="empty-row">No holdings yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
