@@ -3,18 +3,36 @@
 {% block page_title %}Tax &amp; ACB{% endblock %}
 
 {% block content %}
-<div style="display:flex;align-items:center;gap:16px;margin-bottom:20px">
-  <span style="font-size:.75rem;color:var(--text-dim);font-weight:600;letter-spacing:.08em;text-transform:uppercase">Tax Year</span>
-  {% for y in available_years %}
-  <a href="{{ url_for('tax', year=y) }}"
-     class="btn btn-sm {% if y == year %}btn-primary{% endif %}"
-     style="font-family:var(--mono)">{{ y }}</a>
-  {% endfor %}
-  {% if not available_years %}
-  <span class="text-dim" style="font-size:.82rem">No sell transactions recorded yet.</span>
-  {% endif %}
+
+{# ── Year selector + editable rates ── #}
+<div style="display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px;flex-wrap:wrap">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="font-size:.75rem;color:var(--text-dim);font-weight:600;letter-spacing:.08em;text-transform:uppercase">Tax Year</span>
+    {% for y in available_years %}
+    <a href="{{ url_for('tax', year=y) }}" class="btn btn-sm {% if y == year %}btn-primary{% endif %}" style="font-family:var(--mono)">{{ y }}</a>
+    {% endfor %}
+  </div>
+  <form method="POST" action="{{ url_for('tax_rates') }}" style="display:flex;gap:.5rem;align-items:center">
+    <input type="hidden" name="year" value="{{ year }}">
+    <span class="text-dim" style="font-size:.78rem">Inclusion %</span>
+    <input class="form-input mono no-spin" name="inclusion" type="number" step="0.5" min="0" max="100" value="{{ inclusion_pct }}" style="width:64px;padding:4px 6px">
+    <span class="text-dim" style="font-size:.78rem">Marginal %</span>
+    <input class="form-input mono no-spin" name="marginal" type="number" step="0.5" min="0" max="60" value="{{ marginal_pct }}" style="width:64px;padding:4px 6px">
+    <button type="submit" class="btn">Save</button>
+  </form>
 </div>
 
+{# ── Account filter ── #}
+{% if accounts %}
+<div class="account-selector" style="margin-bottom:16px">
+  <button type="button" class="acct-chip active" data-acct="">All Accounts</button>
+  {% for a in accounts %}
+  <button type="button" class="acct-chip" data-acct="{{ a }}">{{ a }}</button>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── Realized stats (selected year) ── #}
 <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
   <div class="stat-card">
     <div class="stat-label">Realized G/L {{ year }}</div>
@@ -24,53 +42,86 @@
   <div class="stat-card">
     <div class="stat-label">Taxable Net G/L</div>
     <div class="stat-value {{ total_gl | gl_class }}">{{ total_gl | signed_cad }}</div>
-    <div class="stat-sub text-dim">non-registered only</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-label">Sheltered (Registered)</div>
-    <div class="stat-value {{ registered_realized | gl_class }}">{{ registered_realized | signed_cad }}</div>
-    <div class="stat-sub text-dim">not taxable</div>
+    <div class="stat-sub text-dim">gains {{ total_gains | cad }} · losses {{ total_losses | cad }}</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Taxable Capital Gain</div>
     <div class="stat-value">{{ taxable_gain | cad }}</div>
-    <div class="stat-sub text-dim">50% inclusion rate</div>
+    <div class="stat-sub text-dim">{{ inclusion_pct }}% inclusion</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Est. Tax on Realized</div>
+    <div class="stat-value text-red">{{ realized_tax | cad }}</div>
+    <div class="stat-sub text-dim">@ {{ marginal_pct }}% marginal</div>
   </div>
 </div>
 
-{% if registered_names %}
+{# ── If sold today (unrealized) — current year only ── #}
+{% if is_current_year %}
+<div class="card" style="margin-top:4px">
+  <div class="card-header">If You Sold Everything Today <span class="card-sub">estimate only · tax on non-registered gains</span></div>
+  <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin:0">
+    <div class="stat-card">
+      <div class="stat-label">Unrealized G/L</div>
+      <div class="stat-value {{ unrealized_gl | gl_class }}">{{ unrealized_gl | signed_cad }}</div>
+      <div class="stat-sub text-dim">all accounts</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Taxable Gain</div>
+      <div class="stat-value">{{ unrealized_taxable | cad }}</div>
+      <div class="stat-sub text-dim">non-registered</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Tax Owing</div>
+      <div class="stat-value text-red">{{ unrealized_tax_owing | cad }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Net After Tax</div>
+      <div class="stat-value text-green">{{ unrealized_net_after_tax | signed_cad }}</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if registered_accounts %}
 <div class="card" style="margin-bottom:18px;padding:11px 16px;font-size:.8rem;color:var(--text-dim)">
   <strong style="color:var(--text)">Note:</strong> Gains in registered accounts
-  ({{ registered_names | join(', ') }}) are tax-sheltered — shown below for tracking but
-  excluded from the taxable totals. Set an account's type on the
+  ({{ registered_accounts | join(', ') }}) are tax-sheltered — shown for tracking but
+  excluded from taxable totals. Not tax advice — consult a CPA. Set account types on the
   <a href="{{ url_for('accounts') }}">Accounts</a> page.
 </div>
 {% endif %}
 
+{# ── Realized G/L by year ── #}
+{% if yearly_realized | length > 1 %}
+<div class="card">
+  <div class="card-header">Taxable Realized G/L by Year <span class="card-sub">non-registered</span></div>
+  <div class="chart-wrap" style="max-height:180px;padding:14px 20px">
+    <canvas id="taxYearChart"></canvas>
+  </div>
+</div>
+{% endif %}
+
+{# ── Realized table ── #}
 <div class="card">
   <div class="card-header">
     Realized Gains &amp; Losses — {{ year }}
-    <span class="card-sub">Non-registered accounts only; consult a tax professional</span>
+    <span class="card-sub">consult a tax professional</span>
   </div>
   <div class="table-scroll">
     <table class="data-table">
       <thead>
         <tr>
-          <th>Date</th>
-          <th>Ticker</th>
-          <th>Account</th>
-          <th class="r">Qty</th>
-          <th class="r">Proceeds (CAD)</th>
-          <th class="r">ACB (CAD)</th>
-          <th class="r">Realized G/L</th>
-          <th class="r">Taxable?</th>
+          <th>Date</th><th>Ticker</th><th>Account</th>
+          <th class="r">Qty</th><th class="r">Proceeds</th><th class="r">ACB</th>
+          <th class="r">Realized G/L</th><th class="r">Taxable?</th>
         </tr>
       </thead>
       <tbody>
         {% for row in rows %}
-        <tr>
+        <tr class="tax-row" data-account="{{ row.account }}">
           <td class="mono text-dim">{{ row.date }}</td>
-          <td class="mono ticker">{{ row.ticker }}</td>
+          <td class="mono ticker">{{ row.ticker }}{% if row.superficial %} <span class="closed-badge" style="background:rgba(255,215,64,.12);color:var(--yellow)" title="Possible superficial loss — same security bought within 30 days; loss may be denied">superficial?</span>{% endif %}</td>
           <td><span class="acct-badge acct-{{ row.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ row.account }}</span></td>
           <td class="r mono">{{ row.qty | num(4) }}</td>
           <td class="r mono">{{ row.proceeds_cad | cad }}</td>
@@ -94,4 +145,113 @@
     </table>
   </div>
 </div>
+
+{# ── Unrealized ACB (current holdings) — current year only ── #}
+{% if is_current_year %}
+<div class="card">
+  <div class="card-header">Adjusted Cost Base — Current Holdings <span class="card-sub">click a row for its ACB log</span></div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th></th><th>Ticker</th><th>Account</th>
+          <th class="r">Qty</th><th class="r">ACB Total</th><th class="r">ACB / Share</th>
+          <th class="r">Market Value</th><th class="r">Unreal G/L</th><th class="r">G/L %</th>
+          <th class="r">Taxable if Sold</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in unrealized_rows %}
+        <tr class="acb-row" data-account="{{ h.account }}" style="cursor:pointer" onclick="toggleAcb('{{ loop.index }}')">
+          <td class="text-dim mono" id="acb-arrow-{{ loop.index }}" style="width:18px">▸</td>
+          <td class="mono ticker">{{ h.ticker }}</td>
+          <td><span class="acct-badge acct-{{ h.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ h.account }}</span></td>
+          <td class="r mono">{{ h.qty | num(4) }}</td>
+          <td class="r mono">{{ h.acb_total | cad }}</td>
+          <td class="r mono text-dim">{{ h.acb_per_share | cad }}</td>
+          <td class="r mono">{{ h.market_value | cad }}</td>
+          <td class="r mono {{ h.unrealized_gl | gl_class }}">{{ h.unrealized_gl | signed_cad }}</td>
+          <td class="r mono {{ h.unrealized_gl_pct | gl_class }}">{{ h.unrealized_gl_pct | pct }}</td>
+          <td class="r mono">{% if h.registered %}<span class="text-dim">sheltered</span>{% else %}{{ h.taxable_if_sold | cad }}{% endif %}</td>
+        </tr>
+        <tr class="acb-detail" id="acb-detail-{{ loop.index }}" data-account="{{ h.account }}" style="display:none">
+          <td></td>
+          <td colspan="9" style="padding:0 14px 10px">
+            <table class="data-table mini" style="margin:0">
+              <thead><tr><th>Date</th><th>Type</th><th class="r">Qty</th><th class="r">Price</th><th class="r">ACB Total</th><th class="r">ACB/Sh</th><th class="r">Shares</th><th class="r">Realized</th><th>Note</th></tr></thead>
+              <tbody>
+                {% for e in acb_log[h.log_key] %}
+                <tr>
+                  <td class="mono text-dim">{{ e.date }}</td>
+                  <td>{{ e.type }}</td>
+                  <td class="r mono">{{ e.qty | num(2) }}</td>
+                  <td class="r mono">{{ '%.2f' % e.price }} {{ e.currency }}</td>
+                  <td class="r mono">{{ e.acb_total | cad }}</td>
+                  <td class="r mono text-dim">{{ e.acb_per_share | cad }}</td>
+                  <td class="r mono">{{ e.shares | num(2) }}</td>
+                  <td class="r mono {{ e.realized | gl_class }}">{% if e.realized %}{{ e.realized | signed_cad }}{% else %}—{% endif %}</td>
+                  <td class="text-dim" style="font-size:.76rem">{{ e.note }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty-row">No current holdings.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleAcb(i) {
+  const row = document.getElementById('acb-detail-' + i);
+  const arrow = document.getElementById('acb-arrow-' + i);
+  const open = row.style.display === 'none';
+  row.style.display = open ? '' : 'none';
+  if (arrow) arrow.textContent = open ? '▾' : '▸';
+}
+
+// Account filter — both tables
+document.querySelectorAll('.account-selector .acct-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.account-selector .acct-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    const a = chip.dataset.acct;
+    document.querySelectorAll('.tax-row, .acb-row, .acb-detail').forEach(el => {
+      const match = !a || el.dataset.account === a;
+      if (el.classList.contains('acb-detail')) { if (!match) el.style.display = 'none'; }
+      else el.style.display = match ? '' : 'none';
+    });
+  });
+});
+
+{% if yearly_realized | length > 1 %}
+new Chart(document.getElementById('taxYearChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ yearly_realized | map(attribute='year') | list | tojson }},
+    datasets: [{
+      data: {{ yearly_realized | map(attribute='gl') | list | tojson }},
+      backgroundColor: ctx => (ctx.raw >= 0 ? 'rgba(0,230,118,.35)' : 'rgba(255,77,77,.35)'),
+      borderColor: ctx => (ctx.raw >= 0 ? '#00e676' : '#ff4d4d'),
+      borderWidth: 1, borderRadius: 3,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' $' + ctx.raw.toLocaleString('en-CA', {minimumFractionDigits:2}) } } },
+    scales: {
+      x: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96' } },
+      y: { grid: { color: '#1a3050' }, ticks: { color: '#5a7a96', callback: v => '$' + v.toLocaleString() } }
+    }
+  }
+});
+{% endif %}
+</script>
 {% endblock %}

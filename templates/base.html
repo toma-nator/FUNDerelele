@@ -45,7 +45,7 @@
 
     <div class="nav-section">
       <span class="nav-label">TOOLS</span>
-      <a href="{{ url_for('import_page') }}"  class="nav-item {% if active=='import'       %}active{% endif %}"><span class="nav-icon">↑</span> Import</a>
+      <a href="{{ url_for('import_page') }}"  class="nav-item {% if active=='import'       %}active{% endif %}"><span class="nav-icon">↑</span> Import{% if unmapped_count %} <span class="nav-badge">{{ unmapped_count }}</span>{% endif %}</a>
       <a href="{{ url_for('settings') }}"     class="nav-item {% if active=='settings'     %}active{% endif %}"><span class="nav-icon">≡</span> Settings</a>
     </div>
   </nav>

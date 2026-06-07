@@ -8,9 +8,8 @@
     <div class="card-header">Upload Broker File</div>
     <div class="import-body">
       <p class="text-dim">
-        Upload a TD Direct Investing or CIBC Investor's Edge export.
-        Accepts CSV files (both brokers) or PDF account statements (TD only).
-        Duplicate transactions are automatically skipped.
+        Upload a TD Direct Investing or CIBC Investor's Edge export (CSV both brokers,
+        PDF statements TD only). Duplicate transactions are skipped automatically.
       </p>
 
       <form method="POST" action="{{ url_for('import_upload') }}" enctype="multipart/form-data" class="import-form">
@@ -23,164 +22,201 @@
           </select>
         </div>
         <div class="form-group">
+          <label>Import into account</label>
+          <select class="form-input" name="account" id="acctSelect" onchange="toggleNewAcct()">
+            <option value="">Auto-detect from file</option>
+            {% for a in accounts %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+            <option value="__new__">+ New account…</option>
+          </select>
+          <input class="form-input" name="account_new" id="acctNew" placeholder="New account name"
+                 autocomplete="off" style="display:none;margin-top:6px">
+          <div class="text-dim" style="font-size:.72rem;margin-top:3px">Auto-detect uses the account in the file. Choosing one forces every row into it.</div>
+        </div>
+        <div class="form-group">
           <label>File (CSV or PDF)</label>
-          <input type="file" name="file" accept=".csv,.txt,.pdf" required class="form-input file-input" />
+          <label id="dropzone" class="dropzone">
+            <input type="file" name="file" accept=".csv,.txt,.pdf" required class="dropzone-input">
+            <span id="dropzone-text">Drag a file here, or click to browse</span>
+          </label>
         </div>
         <button type="submit" class="btn btn-primary">Upload &amp; Import</button>
       </form>
 
+      {# Auto-import folder #}
+      <div class="import-help" style="margin-top:1.5rem;border-top:1px solid var(--border);padding-top:1rem">
+        <div class="help-title">Auto-import folder</div>
+        <p class="text-dim" style="font-size:.8rem">Files dropped here are imported on app start or when you click Scan; each is then moved to a <span class="mono">processed/</span> subfolder.</p>
+        <form method="POST" action="{{ url_for('import_folder') }}" style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
+          <input class="form-input mono" name="folder" value="{{ folder }}" placeholder="C:\path\to\import\folder" style="flex:1;min-width:220px">
+          <button type="submit" class="btn">Save</button>
+        </form>
+        <form method="POST" action="{{ url_for('import_scan') }}">
+          <button type="submit" class="btn btn-primary" {% if not folder %}disabled title="Set a folder first"{% endif %}>Scan now</button>
+        </form>
+      </div>
+
       <div class="import-help">
-        <div class="help-title">How to export from TD Direct Investing (CSV — 2 years)</div>
+        <div class="help-title" style="margin-top:1.5rem">Exporting</div>
         <ol class="help-list">
-          <li>Log in → Accounts → Account Activity</li>
-          <li>Set your date range, then click <strong>Download</strong></li>
-          <li>Choose <strong>CSV</strong> format and save the file</li>
-          <li>Upload the file above</li>
+          <li><strong>TD CSV:</strong> Accounts → Account Activity → set range → Download → CSV</li>
+          <li><strong>TD PDF:</strong> Accounts → Statements &amp; Documents → download monthly/quarterly</li>
+          <li><strong>CIBC:</strong> My Portfolio → Transaction History → set range → Export → CSV</li>
         </ol>
-
-        <div class="help-title" style="margin-top:1.5rem">TD account statements (PDF — full history)</div>
-        <ol class="help-list">
-          <li>Log in → Accounts → Statements &amp; Documents</li>
-          <li>Download monthly or quarterly PDF statements</li>
-          <li>Upload each PDF above (select TD Direct Investing or Auto-detect)</li>
-        </ol>
-
-        <div class="help-title" style="margin-top:1.5rem">How to export from CIBC Investor's Edge</div>
-        <ol class="help-list">
-          <li>Log in → My Portfolio → Transaction History</li>
-          <li>Set your date range and click <strong>Export</strong></li>
-          <li>Choose <strong>CSV</strong> and save</li>
-          <li>Upload the file above</li>
-        </ol>
+        <div style="margin-top:1rem">
+          <a href="{{ url_for('import_template') }}" class="btn">⬇ Download blank import template (CSV)</a>
+          <div class="text-dim" style="font-size:.72rem;margin-top:4px">
+            No broker file? Fill this in Excel and import it directly. Activity Type is Buy / Sell / Dividend;
+            Net Amount is negative for buys. Replace or delete the example row.
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <div class="card">
+  {# Ticker Mappings — beside the upload, stretches to match its height, scrolls inside #}
+  <div class="card" style="display:flex;flex-direction:column">
     <div class="card-header">
-      Recent Imports
-      <span class="card-sub">{{ log | length }} shown</span>
+      Ticker Mappings
+      <span class="card-sub">broker descriptions → real symbols · set once, applied to all imports</span>
     </div>
+    <div style="flex:1;min-height:0;overflow-y:auto">
+      {% if unmapped %}
+      <div style="padding:1rem 1.25rem 0">
+        <div class="help-title" style="color:var(--yellow);margin-bottom:.75rem">
+          ⚠ {{ unmapped | length }} unmapped ticker{{ 's' if unmapped | length != 1 }} — prices won't load until mapped
+        </div>
+        <table class="data-table" style="margin-bottom:1rem">
+          <thead><tr><th>Broker Description</th><th>Real Ticker <span class="text-dim" style="font-weight:400">(guess pre-filled)</span></th></tr></thead>
+          <tbody>
+            {% for u in unmapped %}
+            <tr>
+              <td class="mono">{{ u.desc }}</td>
+              <td>
+                <form method="POST" action="{{ url_for('ticker_map_add') }}" class="inline-map-form">
+                  <input type="hidden" name="description" value="{{ u.desc }}">
+                  <input type="text" name="ticker" required class="form-input mono"
+                         value="{{ u.guess }}" placeholder="e.g. AAPL.NE" style="width:120px;display:inline">
+                  <button type="submit" class="btn btn-primary" style="padding:.25rem .65rem">Map</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      {% if mappings %}
+      <div style="padding:{% if unmapped %}0{% else %}1rem{% endif %} 1.25rem 1rem">
+        {% if unmapped %}<div style="border-top:1px solid var(--border);margin-bottom:1rem"></div>{% endif %}
+        <div class="text-dim" style="font-size:.8rem;margin-bottom:.5rem">SAVED MAPPINGS</div>
+        <table class="data-table">
+          <thead><tr><th>Broker Description</th><th>Ticker</th><th></th></tr></thead>
+          <tbody>
+            {% for m in mappings %}
+            <tr>
+              <td class="mono text-dim">{{ m.description }}</td>
+              <td>
+                <form method="POST" action="{{ url_for('ticker_map_add') }}" class="inline-map-form">
+                  <input type="hidden" name="description" value="{{ m.description }}">
+                  <input type="text" name="ticker" value="{{ m.ticker }}" required class="form-input mono" style="width:120px;display:inline">
+                  <button type="submit" class="btn" style="padding:.25rem .65rem">Update</button>
+                </form>
+              </td>
+              <td>
+                <form method="POST" action="{{ url_for('ticker_map_delete') }}" onsubmit="return confirm('Remove this mapping?')">
+                  <input type="hidden" name="description" value="{{ m.description }}">
+                  <button type="submit" class="btn-delete" title="Remove">✕</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% elif not unmapped %}
+      <div class="empty-row">No mappings yet. Import a file to get started.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# Recent transactions — full width, collapsed to start #}
+<div class="card" style="margin-top:1.5rem">
+  <div class="card-header toggle-header" onclick="togglePanel('recentImports','recentArrow')">
+    Recent Transactions
+    <span class="card-sub">{{ log | length }} from the last import</span>
+    <span class="toggle-arrow" id="recentArrow">▼</span>
+  </div>
+  <div id="recentImports" style="display:none">
     {% if log %}
+    <div style="padding:8px 16px">
+      <form method="POST" action="{{ url_for('import_undo') }}" onsubmit="return confirm('Remove all {{ log | length }} transactions from the last import?')">
+        <input type="hidden" name="batch" value="{{ latest_batch }}">
+        <button type="submit" class="btn btn-sm">↩ Undo last import</button>
+      </form>
+    </div>
     <div class="table-scroll">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Date</th>
-          <th>Ticker</th>
-          <th>Account</th>
-          <th>Type</th>
-          <th class="r">Qty</th>
-          <th class="r">Price</th>
-          <th class="r">Amount (CAD)</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for t in log %}
-        <tr>
-          <td class="mono">{{ t.date.strftime('%Y-%m-%d') }}</td>
-          <td class="mono ticker">{{ t.ticker }}</td>
-          <td><span class="acct-badge acct-{{ t.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ t.account }}</span></td>
-          <td><span class="type-badge type-{{ t.type | lower }}">{{ t.type }}</span></td>
-          <td class="r mono">{{ t.qty | num(2) }}</td>
-          <td class="r mono">${{ '%.2f' % t.price }}</td>
-          <td class="r mono">{{ t.amount_cad | cad }}</td>
-          <td>
-            <form method="POST" action="{{ url_for('delete_transaction', id=t.id, next='import_page') }}"
-                  onsubmit="return confirm('Delete this transaction? This will affect your holdings and totals.')">
-              <button type="submit" class="btn-delete" title="Delete">✕</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+      <table class="data-table">
+        <thead>
+          <tr><th>Date</th><th>Ticker</th><th>Account</th><th>Type</th><th class="r">Qty</th><th class="r">Price</th><th class="r">Amount</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for t in log %}
+          <tr>
+            <td class="mono">{{ t.date.strftime('%Y-%m-%d') }}</td>
+            <td class="mono ticker">{{ t.ticker }}</td>
+            <td><span class="acct-badge acct-{{ t.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ t.account }}</span></td>
+            <td><span class="type-badge type-{{ t.type | lower }}">{{ t.type }}</span></td>
+            <td class="r mono">{{ t.qty | num(2) }}</td>
+            <td class="r mono">${{ '%.2f' % t.price }}</td>
+            <td class="r mono">{{ t.amount_cad | cad }}</td>
+            <td>
+              <form method="POST" action="{{ url_for('delete_transaction', id=t.id, next='import_page') }}"
+                    onsubmit="return confirm('Delete this transaction?')">
+                <button type="submit" class="btn-delete" title="Delete">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
     {% else %}
     <div class="empty-row">No imports yet.</div>
     {% endif %}
   </div>
 </div>
+{% endblock %}
 
-<!-- Ticker Mappings -->
-<div class="card" style="margin-top:1.5rem">
-  <div class="card-header">
-    Ticker Mappings
-    <span class="card-sub">maps broker descriptions to real ticker symbols — set once, applied to all future imports</span>
-  </div>
+{% block scripts %}
+<script>
+function togglePanel(id, arrowId) {
+  const el = document.getElementById(id);
+  const arrow = document.getElementById(arrowId);
+  const open = el.style.display === 'none';
+  el.style.display = open ? 'block' : 'none';
+  if (arrow) arrow.textContent = open ? '▲' : '▼';
+}
+function toggleNewAcct() {
+  const sel = document.getElementById('acctSelect');
+  const inp = document.getElementById('acctNew');
+  const show = sel.value === '__new__';
+  inp.style.display = show ? 'block' : 'none';
+  if (show) inp.focus(); else inp.value = '';
+}
 
-  {% if unmapped %}
-  <div style="padding:1rem 1.25rem 0">
-    <div class="help-title" style="color:var(--yellow);margin-bottom:.75rem">
-      ⚠ {{ unmapped | length }} unmapped ticker{{ 's' if unmapped | length != 1 }} — prices won't load until mapped
-    </div>
-    <table class="data-table" style="margin-bottom:1rem">
-      <thead>
-        <tr>
-          <th>Broker Description</th>
-          <th>Real Ticker</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for desc in unmapped %}
-        <tr>
-          <td class="mono">{{ desc }}</td>
-          <td>
-            <form method="POST" action="{{ url_for('ticker_map_add') }}" class="inline-map-form">
-              <input type="hidden" name="description" value="{{ desc }}" />
-              <input type="text" name="ticker" required class="form-input mono"
-                     placeholder="e.g. AAPL.NE" style="width:130px;display:inline" />
-              <button type="submit" class="btn btn-primary" style="padding:.25rem .75rem">Map</button>
-            </form>
-          </td>
-          <td></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-
-  {% if mappings %}
-  <div style="padding:{% if unmapped %}0{% else %}1rem{% endif %} 1.25rem 1rem">
-    {% if unmapped %}<div style="border-top:1px solid var(--border);margin-bottom:1rem"></div>{% endif %}
-    <div class="text-dim" style="font-size:.8rem;margin-bottom:.5rem">SAVED MAPPINGS</div>
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>Broker Description</th>
-          <th>Ticker</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for m in mappings %}
-        <tr>
-          <td class="mono text-dim">{{ m.description }}</td>
-          <td>
-            <form method="POST" action="{{ url_for('ticker_map_add') }}" class="inline-map-form">
-              <input type="hidden" name="description" value="{{ m.description }}" />
-              <input type="text" name="ticker" value="{{ m.ticker }}" required
-                     class="form-input mono" style="width:130px;display:inline" />
-              <button type="submit" class="btn" style="padding:.25rem .75rem">Update</button>
-            </form>
-          </td>
-          <td>
-            <form method="POST" action="{{ url_for('ticker_map_delete') }}"
-                  onsubmit="return confirm('Remove this mapping?')">
-              <input type="hidden" name="description" value="{{ m.description }}" />
-              <button type="submit" class="btn-delete" title="Remove">✕</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% elif not unmapped %}
-  <div class="empty-row">No mappings yet. Import a file to get started.</div>
-  {% endif %}
-</div>
+// Drag-and-drop + filename display
+(function () {
+  const zone = document.getElementById('dropzone');
+  const input = zone ? zone.querySelector('.dropzone-input') : null;
+  const text = document.getElementById('dropzone-text');
+  if (!zone || !input) return;
+  const show = () => { if (input.files.length) text.textContent = input.files[0].name; };
+  input.addEventListener('change', show);
+  ['dragenter', 'dragover'].forEach(e => zone.addEventListener(e, ev => { ev.preventDefault(); zone.classList.add('drag'); }));
+  ['dragleave', 'drop'].forEach(e => zone.addEventListener(e, ev => { ev.preventDefault(); zone.classList.remove('drag'); }));
+  zone.addEventListener('drop', ev => { if (ev.dataTransfer.files.length) { input.files = ev.dataTransfer.files; show(); } });
+})();
+</script>
 {% endblock %}

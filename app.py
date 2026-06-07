@@ -38,11 +38,52 @@ with app.app_context():
     _add_col('watchlist', 'target_type', "VARCHAR(10) DEFAULT 'below'")
     _add_col('gics', 'institution', 'VARCHAR(100)')
     _add_col('transactions', 'subtype', 'VARCHAR(50) DEFAULT ""')
+    _add_col('transactions', 'import_batch', 'VARCHAR(40)')
     _add_col('accounts', 'cash_balance', 'FLOAT DEFAULT 0')
     _add_col('price_cache', 'meta_json', 'TEXT')
 
 from price_service import start_price_refresh
 start_price_refresh(app)
+
+# One-time scan of the auto-import folder on startup (no-op unless configured).
+with app.app_context():
+    _f = Setting.query.get('auto_import_folder')
+    if _f and _f.value:
+        try:
+            from importers import scan_import_folder
+            scan_import_folder(_f.value)
+        except Exception:
+            pass
+
+
+# Best-effort ticker guess for an unmapped broker description (cached, non-fatal).
+_ticker_guess_cache = {}
+
+
+def _guess_ticker(desc):
+    if desc in _ticker_guess_cache:
+        return _ticker_guess_cache[desc]
+    guess = ''
+    try:
+        import yfinance as yf
+        res = yf.Search(desc, max_results=1)
+        quotes = getattr(res, 'quotes', None) or []
+        if quotes:
+            guess = quotes[0].get('symbol', '') or ''
+    except Exception:
+        guess = ''
+    _ticker_guess_cache[desc] = guess
+    return guess
+
+
+@app.context_processor
+def inject_unmapped_count():
+    try:
+        n = (db.session.query(Transaction.ticker)
+             .filter(Transaction.ticker.like('% %')).distinct().count())
+    except Exception:
+        n = 0
+    return {'unmapped_count': n}
 
 
 # ── Template filters ──────────────────────────────────────────────────────────
@@ -228,19 +269,27 @@ def update_account_type(name):
 
 @app.route('/import')
 def import_page():
-    log = Transaction.query.order_by(Transaction.created_at.desc(), Transaction.id.desc()).all()
     mappings = TickerMap.query.order_by(TickerMap.description).all()
-    # Tickers with spaces are unresolved broker descriptions, not real ticker symbols
-    unmapped = (
-        db.session.query(Transaction.ticker)
-        .filter(Transaction.ticker.like('% %'))
-        .distinct()
-        .order_by(Transaction.ticker)
-        .all()
-    )
-    unmapped = [row[0] for row in unmapped]
-    return render_template('import.html', active='import', log=log,
-                           mappings=mappings, unmapped=unmapped)
+    # Tickers with spaces are unresolved broker descriptions, not real symbols.
+    unmapped_descs = [r[0] for r in db.session.query(Transaction.ticker)
+                      .filter(Transaction.ticker.like('% %')).distinct()
+                      .order_by(Transaction.ticker).all()]
+    unmapped = [{'desc': d, 'guess': _guess_ticker(d)} for d in unmapped_descs]
+
+    # "Recent Imports" = just the most recent import batch.
+    latest = (db.session.query(Transaction.import_batch)
+              .filter(Transaction.import_batch.isnot(None))
+              .order_by(Transaction.import_batch.desc()).first())
+    latest_batch = latest[0] if latest else None
+    log = (Transaction.query.filter_by(import_batch=latest_batch)
+           .order_by(Transaction.date.desc(), Transaction.id.desc()).all()) if latest_batch else []
+
+    accounts = [a.name for a in Account.query.order_by(Account.name).all()]
+    folder_setting = Setting.query.get('auto_import_folder')
+    folder = folder_setting.value if folder_setting else ''
+    return render_template('import.html', active='import', log=log, mappings=mappings,
+                           unmapped=unmapped, accounts=accounts, folder=folder,
+                           latest_batch=latest_batch)
 
 
 @app.route('/import/ticker-map/add', methods=['POST'])
@@ -289,14 +338,77 @@ def import_upload():
     from importers import parse_upload
     file = request.files.get('file')
     broker = request.form.get('broker', 'auto')
+    account_override = request.form.get('account', '').strip()
+    if account_override == '__new__':
+        account_override = request.form.get('account_new', '').strip()
+    account_override = account_override or None
     if not file or file.filename == '':
         flash('No file selected.', 'error')
         return redirect(url_for('import_page'))
     try:
-        count = parse_upload(file, broker)
-        flash(f'Imported {count} transactions.', 'success')
+        r = parse_upload(file, broker, account_override=account_override)
+        msg = f"Imported {r['imported']} transaction(s)"
+        if r['skipped']:
+            msg += f", skipped {r['skipped']} duplicate(s)"
+        if r['accounts']:
+            msg += f" · {', '.join(r['accounts'])}"
+        if r['date_min'] and r['date_max']:
+            msg += f" ({r['date_min']} → {r['date_max']})"
+        flash(msg + '.', 'success' if r['imported'] else 'info')
     except Exception as e:
         flash(f'Import error: {e}', 'error')
+    return redirect(url_for('import_page'))
+
+
+@app.route('/import/undo', methods=['POST'])
+def import_undo():
+    batch = request.form.get('batch', '').strip()
+    if batch:
+        n = Transaction.query.filter_by(import_batch=batch).delete()
+        db.session.commit()
+        flash(f'Undid last import — removed {n} transaction(s).', 'info')
+    return redirect(url_for('import_page'))
+
+
+@app.route('/import/folder', methods=['POST'])
+def import_folder():
+    path = request.form.get('folder', '').strip()
+    s = Setting.query.get('auto_import_folder')
+    if s:
+        s.value = path
+    else:
+        db.session.add(Setting(key='auto_import_folder', value=path))
+    db.session.commit()
+    flash('Import folder saved.', 'success')
+    return redirect(url_for('import_page'))
+
+
+@app.route('/import/template')
+def import_template():
+    from flask import Response
+    headers = ('Transaction Date,Settlement Date,Activity Type,Symbol,Description,'
+               'Quantity,Price,Commission,Net Amount,Currency,Account Number,Account Type')
+    example = '2024-01-15,2024-01-17,Buy,AAPL,Apple Inc,10,185.00,9.99,-1859.99,USD,12345,Non-Reg'
+    csv_text = headers + '\n' + example + '\n'
+    return Response(csv_text, mimetype='text/csv',
+                    headers={'Content-Disposition': 'attachment; filename=portfolio_import_template.csv'})
+
+
+@app.route('/import/scan', methods=['POST'])
+def import_scan():
+    from importers import scan_import_folder
+    folder_setting = Setting.query.get('auto_import_folder')
+    folder = folder_setting.value if folder_setting else ''
+    if not folder:
+        flash('Set an import folder first.', 'info')
+        return redirect(url_for('import_page'))
+    s = scan_import_folder(folder)
+    if s['files']:
+        flash(f"Scanned folder: imported {s['imported']}, skipped {s['skipped']} across {s['files']} file(s).", 'success')
+    else:
+        flash('No new files found in the import folder.', 'info')
+    if s['errors']:
+        flash('Some files could not be imported: ' + '; '.join(s['errors']), 'error')
     return redirect(url_for('import_page'))
 
 
@@ -538,6 +650,28 @@ def tax():
     data = get_tax_summary(year)
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
     return render_template('tax.html', **data, last_updated=last_updated, active='tax')
+
+
+@app.route('/tax/rates', methods=['POST'])
+def tax_rates():
+    from models import Setting
+    def _save(key, val):
+        s = Setting.query.get(key)
+        if s:
+            s.value = str(val)
+        else:
+            db.session.add(Setting(key=key, value=str(val)))
+    try:
+        inclusion = float(request.form.get('inclusion', 50)) / 100
+        marginal = float(request.form.get('marginal', 25)) / 100
+        _save('tax_inclusion_rate', inclusion)
+        _save('tax_marginal_rate', marginal)
+        db.session.commit()
+        flash('Tax rates updated.', 'success')
+    except Exception as e:
+        flash(f'Error: {e}', 'error')
+    year = request.form.get('year', type=int)
+    return redirect(url_for('tax', year=year) if year else url_for('tax'))
 
 
 # ── Rebalancer ────────────────────────────────────────────────────────────────

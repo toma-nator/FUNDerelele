@@ -624,96 +624,174 @@ def get_gic_stats(account_filter=None, show_matured=False):
 REGISTERED_TYPES = {'TFSA', 'RRSP', 'FHSA', 'RDSP', 'RESP', 'LIRA', 'LRSP', 'RRIF'}
 
 
-def get_tax_summary(year=None):
-    from datetime import date
+def _tax_rate(key, default):
+    from models import Setting
+    s = Setting.query.get(key)
+    try:
+        return float(s.value) if s else default
+    except (TypeError, ValueError):
+        return default
 
-    if year is None:
-        year = date.today().year
+
+def get_tax_summary(year=None, inclusion_rate=None, marginal_rate=None):
+    from datetime import date, timedelta
+
+    if inclusion_rate is None:
+        inclusion_rate = _tax_rate('tax_inclusion_rate', 0.5)
+    if marginal_rate is None:
+        marginal_rate = _tax_rate('tax_marginal_rate', 0.25)
 
     all_txns = Transaction.query.order_by(Transaction.date.asc(), Transaction.id.asc()).all()
     fx_rate = get_fx_rate()
 
-    # Map account name -> registered? Gains in registered accounts are tax-sheltered.
+    # Selectable years: every year from first activity to now, even with no sells.
+    today = date.today()
+    txn_years = [t.date.year for t in all_txns]
+    first_year = min(txn_years) if txn_years else today.year
+    available_years = list(range(today.year, first_year - 1, -1))
+    if year is None:
+        year = today.year
+
     acct_type = {a.name: (a.type or 'Non-Reg') for a in Account.query.all()}
 
     def is_registered(account_name):
         return acct_type.get(account_name, 'Non-Reg').strip().upper() in REGISTERED_TYPES
 
+    # Buy dates per ticker — for the superficial-loss check (±30 days).
+    buys_by_ticker = {}
+    for t in all_txns:
+        if t.type == 'Buy':
+            buys_by_ticker.setdefault(t.ticker, []).append(t.date)
+
     positions_running = {}
     tax_rows = []
+    acb_log = {}            # 'ticker|account' -> list of build-up rows
+    yearly = {}             # year -> taxable (non-reg) realized G/L
 
     for t in all_txns:
         key = (t.ticker, t.account)
-        if key not in positions_running:
-            positions_running[key] = {'qty': 0.0, 'total_cost_cad': 0.0, 'avg_cost_cad': 0.0}
-        pos = positions_running[key]
+        pos = positions_running.setdefault(key, {'qty': 0.0, 'total_cost_cad': 0.0, 'avg_cost_cad': 0.0})
+        realized = 0.0
+        note = ''
 
         if t.type == 'Buy':
-            # Use recorded CAD cost (historical FX), consistent with get_holdings.
             buy_cost = (t.amount_cad or t.qty * t.price) + (t.fees_cad or 0)
             new_qty = pos['qty'] + t.qty
-            new_cost = pos['total_cost_cad'] + buy_cost
-            pos['avg_cost_cad'] = new_cost / new_qty if new_qty > 0 else 0
-            pos['total_cost_cad'] = new_cost
+            pos['total_cost_cad'] += buy_cost
+            pos['avg_cost_cad'] = pos['total_cost_cad'] / new_qty if new_qty > 0 else 0
             pos['qty'] = new_qty
+            note = f'Buy {t.qty:g} @ {t.price:g} {t.currency}'
 
         elif t.type == 'Split':
             pos['qty'] = max(0.0, pos['qty'] + t.qty)
             pos['avg_cost_cad'] = pos['total_cost_cad'] / pos['qty'] if pos['qty'] > 0 else 0.0
+            note = f'Split {t.qty:+g} sh'
 
         elif t.type == 'Sell':
-            # Proceeds = actual recorded cash; ACB capped at shares actually held so
-            # corporate-action chains don't remove the same cost basis twice.
             sell_qty = min(t.qty, pos['qty']) if pos['qty'] > 0 else 0.0
             rate = fx_rate if t.currency == 'USD' else 1.0
             proceeds_cad = t.net_cad if t.net_cad is not None else (t.qty * t.price * rate - (t.fees_cad or 0))
             acb = pos['avg_cost_cad'] * sell_qty
-            gl = proceeds_cad - acb
+            gl = realized = proceeds_cad - acb
+            reg = is_registered(t.account)
+
+            superficial = False
+            if gl < 0 and not reg:
+                superficial = any(abs((bd - t.date).days) <= 30 for bd in buys_by_ticker.get(t.ticker, []))
+
+            if not reg:
+                yearly[t.date.year] = yearly.get(t.date.year, 0.0) + gl
 
             if t.date.year == year:
                 tax_rows.append({
-                    'date': t.date,
-                    'ticker': t.ticker,
-                    'account': t.account,
-                    'registered': is_registered(t.account),
-                    'qty': t.qty,
-                    'proceeds_cad': proceeds_cad,
-                    'acb': acb,
-                    'gl': gl,
+                    'date': t.date, 'ticker': t.ticker, 'account': t.account,
+                    'registered': reg, 'qty': t.qty, 'proceeds_cad': proceeds_cad,
+                    'acb': acb, 'gl': gl, 'superficial': superficial,
                 })
 
             pos['qty'] = max(0.0, pos['qty'] - t.qty)
             pos['total_cost_cad'] = pos['avg_cost_cad'] * pos['qty']
+            note = f'Sell {t.qty:g} sh'
 
-    # Realized G/L across all accounts (performance tracking)
+        elif t.type == 'Dividend':
+            note = 'Cash dividend (no ACB change)'
+
+        if t.type in ('Buy', 'Sell', 'Split', 'Dividend'):
+            acb_log.setdefault(f'{t.ticker}|{t.account}', []).append({
+                'date': t.date, 'type': t.type, 'qty': t.qty, 'price': t.price,
+                'currency': t.currency, 'acb_total': round(pos['total_cost_cad'], 2),
+                'acb_per_share': round(pos['avg_cost_cad'], 4), 'shares': round(pos['qty'], 4),
+                'realized': round(realized, 2), 'note': note,
+            })
+
+    # ── Realized (this year) ──
     total_realized = sum(r['gl'] for r in tax_rows)
-
-    # Taxable figures come from non-registered accounts only
     taxable_rows = [r for r in tax_rows if not r['registered']]
     total_gl = sum(r['gl'] for r in taxable_rows)
     total_gains = sum(r['gl'] for r in taxable_rows if r['gl'] > 0)
     total_losses = sum(r['gl'] for r in taxable_rows if r['gl'] < 0)
-    taxable_gain = max(0, total_gl) * 0.5  # 50% inclusion rate
-
+    taxable_gain = max(0.0, total_gl) * inclusion_rate
+    realized_tax = taxable_gain * marginal_rate
     registered_realized = total_realized - total_gl
     registered_names = sorted({r['account'] for r in tax_rows if r['registered']})
 
-    sell_years = sorted(set(
-        t.date.year for t in all_txns if t.type == 'Sell'
-    ), reverse=True)
+    # ── Unrealized ACB (current holdings) + "if sold today" ──
+    # Headline G/L is the full economic gain (all accounts); the taxable/owing
+    # figures are non-registered only (registered accounts are sheltered).
+    unrealized_rows = []
+    u_gl_total = 0.0
+    u_gl_nonreg = 0.0
+    for h in get_holdings():
+        reg = is_registered(h['account'])
+        gl = h['unrealized_gl'] or 0.0
+        u_gl_total += gl
+        if not reg:
+            u_gl_nonreg += gl
+        unrealized_rows.append({
+            'ticker': h['ticker'], 'account': h['account'], 'registered': reg,
+            'qty': h['qty'], 'acb_total': h['book_value_cad'],
+            'acb_per_share': h['avg_cost_cad'], 'market_value': h['market_value_cad'],
+            'unrealized_gl': gl, 'unrealized_gl_pct': h['unrealized_gl_pct'],
+            'taxable_if_sold': (max(0.0, gl) * inclusion_rate) if not reg else None,
+            'log_key': f'{h["ticker"]}|{h["account"]}',
+        })
+    unrealized_rows.sort(key=lambda r: (r['registered'], -(r['market_value'] or 0)))
+    u_taxable = max(0.0, u_gl_nonreg) * inclusion_rate
+    u_tax_owing = u_taxable * marginal_rate
+
+    yearly_realized = [{'year': y, 'gl': round(yearly.get(y, 0.0), 2)}
+                       for y in range(first_year, today.year + 1)]
+    accounts = sorted({r['account'] for r in tax_rows} | {r['account'] for r in unrealized_rows})
+    # Registered accounts in use — for the always-on sheltering note.
+    txn_accounts = {t.account for t in all_txns}
+    registered_accounts = sorted(a for a in txn_accounts if is_registered(a))
 
     return {
         'year': year,
+        'is_current_year': year == today.year,
         'rows': sorted(tax_rows, key=lambda r: r['date']),
         'total_realized': total_realized,
         'total_gl': total_gl,
         'total_gains': total_gains,
         'total_losses': total_losses,
         'taxable_gain': taxable_gain,
+        'realized_tax': realized_tax,
         'registered_realized': registered_realized,
         'registered_names': registered_names,
         'has_taxable': len(taxable_rows) > 0,
-        'available_years': sell_years,
+        'available_years': available_years,
+        'inclusion_pct': round(inclusion_rate * 100, 1),
+        'marginal_pct': round(marginal_rate * 100, 1),
+        'unrealized_rows': unrealized_rows,
+        'unrealized_gl': round(u_gl_total, 2),
+        'unrealized_gl_nonreg': round(u_gl_nonreg, 2),
+        'unrealized_taxable': round(u_taxable, 2),
+        'unrealized_tax_owing': round(u_tax_owing, 2),
+        'unrealized_net_after_tax': round(u_gl_total - u_tax_owing, 2),
+        'acb_log': acb_log,
+        'yearly_realized': yearly_realized,
+        'accounts': accounts,
+        'registered_accounts': registered_accounts,
     }
 
 

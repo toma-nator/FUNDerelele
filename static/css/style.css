@@ -583,6 +583,20 @@ body {
 .cand-add { background: var(--bg-surface); color: var(--text-dim); cursor: pointer; font-family: var(--mono); }
 .cand-add:hover { color: var(--green); border-color: var(--green); }
 
+/* Import drag-and-drop zone */
+.dropzone { display: flex; align-items: center; justify-content: center; gap: 8px;
+            padding: 22px 16px; border: 1.5px dashed var(--border); border-radius: var(--radius-sm);
+            background: var(--bg-surface); color: var(--text-dim); cursor: pointer;
+            font-size: .84rem; text-align: center; transition: border-color .15s, color .15s; }
+.dropzone:hover { border-color: var(--accent-dim); color: var(--text); }
+.dropzone.drag { border-color: var(--accent); color: var(--accent); background: rgba(0,200,240,.06); }
+.dropzone-input { position: absolute; width: 0; height: 0; opacity: 0; }
+
+/* Nav unmapped-ticker badge */
+.nav-badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 4px;
+             background: var(--yellow); color: #1a1200; border-radius: 9px;
+             font-size: .68rem; font-weight: 700; text-align: center; line-height: 16px; }
+
 /* Permanent inline callouts (not auto-dismissed like .flash) */
 .callout { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius-sm);
            font-size: .82rem; line-height: 1.4; border: 1px solid var(--border); }

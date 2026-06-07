@@ -211,6 +211,20 @@ created and tracked.
 - **Effort:** small–medium — one route + a textarea; reuses the existing add and
   auto-classify logic.
 
+## Import — accept more file types
+
+Broaden the importer beyond TD/CIBC CSV + TD PDF:
+
+- **Excel (.xlsx/.xls):** read with openpyxl in `parse_upload` (xlsx branch),
+  convert the sheet to CSV-style rows, feed the existing `_parse_content`. Would
+  let the downloadable template be a true `.xlsx` and import directly.
+- **OFX/QFX** (the bank-standard download many brokers offer) — a generic parser
+  that covers more institutions than per-broker CSV.
+- **More brokers' CSVs** (Questrade, Wealthsimple, RBC DI, etc.) — add detectors
+  + per-broker column maps alongside `_detect_broker`.
+- **Effort:** medium — one parser per format; the normalise-to-Transaction step
+  is shared.
+
 ## Projections — TFSA room projector
 
 Track and project TFSA contribution room (the V6 Excel had this on the

@@ -3,27 +3,89 @@ CSV and PDF importers for TD Direct Investing and CIBC Investor's Edge exports.
 Each parser normalises rows into Transaction objects.
 """
 import io
+import os
 import re
 import csv
+import shutil
 from datetime import datetime
+from sqlalchemy import event
 from models import db, Transaction, Account
 
 
-def parse_file_path(filepath, broker='auto'):
+def scan_import_folder(folder):
+    """Import every CSV/PDF in `folder`, then move each into a processed/
+    subfolder so it isn't re-imported. Returns a summary dict."""
+    summary = {'files': 0, 'imported': 0, 'skipped': 0, 'errors': []}
+    if not folder or not os.path.isdir(folder):
+        return summary
+    processed_dir = os.path.join(folder, 'processed')
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path) or not name.lower().endswith(('.csv', '.pdf', '.txt')):
+            continue
+        try:
+            res = parse_file_path(path)
+            summary['files'] += 1
+            summary['imported'] += res.get('imported', 0)
+            summary['skipped'] += res.get('skipped', 0)
+            os.makedirs(processed_dir, exist_ok=True)
+            dest = os.path.join(processed_dir, name)
+            if os.path.exists(dest):
+                base, ext = os.path.splitext(name)
+                dest = os.path.join(processed_dir, f'{base}_{datetime.now().strftime("%H%M%S")}{ext}')
+            shutil.move(path, dest)
+        except Exception as e:
+            summary['errors'].append(f'{name}: {e}')
+    return summary
+
+
+def _run_import(parse_fn):
+    """Run an import, stamping every new transaction with one batch id and
+    returning a summary: {batch, imported, skipped, accounts, date_min, date_max}."""
+    batch = datetime.now().strftime('%Y%m%d%H%M%S%f')
+
+    def _stamp(mapper, connection, target):
+        if getattr(target, 'import_batch', None) is None:
+            target.import_batch = batch
+
+    event.listen(Transaction, 'before_insert', _stamp)
+    try:
+        res = parse_fn() or {}
+    finally:
+        event.remove(Transaction, 'before_insert', _stamp)
+
+    txns = Transaction.query.filter_by(import_batch=batch).all()
+    dates = [t.date for t in txns if t.date]
+    return {
+        'batch': batch,
+        'imported': res.get('imported', len(txns)),
+        'skipped': res.get('skipped', 0),
+        'accounts': sorted({t.account for t in txns}),
+        'date_min': min(dates) if dates else None,
+        'date_max': max(dates) if dates else None,
+    }
+
+
+def parse_file_path(filepath, broker='auto', account_override=None):
+    if filepath.lower().endswith('.pdf'):
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        return _run_import(lambda: _import_td_pdf(data, account_override=account_override))
     with open(filepath, 'r', encoding='utf-8-sig', errors='replace') as f:
         content = f.read()
-    return _parse_content(content, broker)
+    return _run_import(lambda: _parse_content(content, broker, account_override=account_override))
 
 
-def parse_upload(file_storage, broker='auto'):
+def parse_upload(file_storage, broker='auto', account_override=None):
     filename = (file_storage.filename or '').lower()
     if filename.endswith('.pdf'):
-        return _import_td_pdf(file_storage.read())
+        data = file_storage.read()
+        return _run_import(lambda: _import_td_pdf(data, account_override=account_override))
     content = file_storage.read().decode('utf-8-sig', errors='replace')
-    return _parse_content(content, broker)
+    return _run_import(lambda: _parse_content(content, broker, account_override=account_override))
 
 
-def _parse_content(content, broker='auto'):
+def _parse_content(content, broker='auto', account_override=None):
     lines = content.splitlines()
 
     # TD Direct Investing files have 3 metadata rows before the real headers.
@@ -43,7 +105,7 @@ def _parse_content(content, broker='auto'):
         rows = list(csv.DictReader(io.StringIO(real_content)))
         if not rows:
             raise ValueError('TD file has a header but no data rows.')
-        return _import_td(rows, account_name=td_account_name)
+        return _import_td(rows, account_name=td_account_name, account_override=account_override)
 
     # Standard path for CIBC and any future brokers
     rows = list(csv.DictReader(io.StringIO(content)))
@@ -54,9 +116,9 @@ def _parse_content(content, broker='auto'):
         broker = _detect_broker(rows[0])
 
     if broker == 'td':
-        return _import_td(rows)
+        return _import_td(rows, account_override=account_override)
     elif broker == 'cibc':
-        return _import_cibc(rows)
+        return _import_cibc(rows, account_override=account_override)
     else:
         raise ValueError(f'Unknown broker format: {broker}. Please select TD or CIBC manually.')
 
@@ -105,7 +167,7 @@ def _td_ticker_from_desc(desc):
     return mapping.ticker if mapping else cleaned
 
 
-def _import_td(rows, account_name=None):
+def _import_td(rows, account_name=None, account_override=None):
     """
     TD Direct Investing CSV export.
     Columns: Trade Date, Settle Date, Description, Action, Quantity, Price,
@@ -113,6 +175,7 @@ def _import_td(rows, account_name=None):
     The account name is parsed from the metadata header, not a column.
     """
     count = 0
+    skipped = 0
     date_fmts = ['%Y-%m-%d', '%m/%d/%Y', '%d-%b-%Y', '%d-%b-%y']
 
     action_map = {
@@ -138,7 +201,7 @@ def _import_td(rows, account_name=None):
     # (ROC/CXLROC and CXLDIV/CXLWHTX02 are handled below as real cash events.)
     skip_actions = {'tfr', 'tfri', 'tfro'}
 
-    default_account = account_name or 'TD Direct Investing'
+    default_account = account_override or account_name or 'TD Direct Investing'
     _ensure_account(default_account)
 
     for row in rows:
@@ -162,6 +225,7 @@ def _import_td(rows, account_name=None):
                     date=txn_date, type='Fee', net_cad=-amount
                 ).first()
                 if existing:
+                    skipped += 1
                     continue
                 db.session.add(Transaction(
                     date=txn_date, ticker='CASH', account=default_account,
@@ -188,6 +252,7 @@ def _import_td(rows, account_name=None):
                     date=txn_date, type='Deposit', net_cad=amount
                 ).first()
                 if existing:
+                    skipped += 1
                     continue
                 db.session.add(Transaction(
                     date=txn_date, ticker='CASH', account=default_account,
@@ -218,6 +283,7 @@ def _import_td(rows, account_name=None):
                     date=txn_date, type='ReturnOfCapital', net_cad=amount
                 ).first()
                 if existing:
+                    skipped += 1
                     continue
                 db.session.add(Transaction(
                     date=txn_date, ticker='CASH', account=default_account,
@@ -258,6 +324,7 @@ def _import_td(rows, account_name=None):
                     date=txn_date, ticker=ticker, type=rtype, qty=qty, price=0, net_cad=ncad
                 ).first()
                 if existing:
+                    skipped += 1
                     continue
                 db.session.add(Transaction(
                     date=txn_date, ticker=ticker, account=default_account,
@@ -319,6 +386,7 @@ def _import_td(rows, account_name=None):
                     date=txn_date, ticker=ticker, type='Split', qty=qty, price=0
                 ).first()
                 if existing:
+                    skipped += 1
                     continue
                 db.session.add(Transaction(
                     date=txn_date, ticker=ticker, account=default_account,
@@ -339,6 +407,7 @@ def _import_td(rows, account_name=None):
                     date=txn_date, ticker=ticker, type='Dividend', qty=qty, price=0, net_cad=amount
                 ).first()
                 if existing:
+                    skipped += 1
                     continue
                 db.session.add(Transaction(
                     date=txn_date, ticker=ticker, account=default_account,
@@ -358,6 +427,7 @@ def _import_td(rows, account_name=None):
                     date=txn_date, ticker=ticker, type='WithholdingTax', qty=qty, price=0, net_cad=-amount
                 ).first()
                 if existing:
+                    skipped += 1
                     continue
                 db.session.add(Transaction(
                     date=txn_date, ticker=ticker, account=default_account,
@@ -399,6 +469,7 @@ def _import_td(rows, account_name=None):
                     date=txn_date, ticker=ticker, type=txn_type, qty=qty, price=price
                 ).first()
                 if existing:
+                    skipped += 1
                     continue
 
                 db.session.add(Transaction(
@@ -413,7 +484,7 @@ def _import_td(rows, account_name=None):
             continue
 
     db.session.commit()
-    return count
+    return {'imported': count, 'skipped': skipped}
 
 
 # ── PDF importer ───────────────────────────────────────────────────────────────
@@ -459,7 +530,7 @@ _PDF_ACCT_TYPES = {
 }
 
 
-def _import_td_pdf(file_bytes, account_name=None):
+def _import_td_pdf(file_bytes, account_name=None, account_override=None):
     """
     Parse a TD Direct Investing monthly account statement PDF.
     Requires pdfplumber: pip install pdfplumber
@@ -643,16 +714,17 @@ def _import_td_pdf(file_bytes, account_name=None):
             'Make sure this is a TD Direct Investing account statement.'
         )
 
-    return _import_td(all_rows, account_name=account_name)
+    return _import_td(all_rows, account_name=account_name, account_override=account_override)
 
 
-def _import_cibc(rows):
+def _import_cibc(rows, account_override=None):
     """
     CIBC Investor's Edge CSV export format.
     Columns: Transaction Date, Settlement Date, Activity Type, Symbol, Description,
              Quantity, Price, Commission, Net Amount, Currency, Account Number, Account Type
     """
     count = 0
+    skipped = 0
     date_fmts = ['%Y-%m-%d', '%m/%d/%Y', '%B %d, %Y']
     action_map = {
         'Buy': 'Buy', 'Sell': 'Sell',
@@ -679,7 +751,7 @@ def _import_cibc(rows):
             fees = abs(float((row.get('Commission', '') or '0').replace(',', '')))
             account_num = (row.get('Account Number', '') or '').strip()
             account_type = (row.get('Account Type', 'Non-Reg') or 'Non-Reg').strip()
-            account_name = f'{account_type} ({account_num})' if account_num else account_type
+            account_name = account_override or (f'{account_type} ({account_num})' if account_num else account_type)
 
             _ensure_account(account_name)
 
@@ -691,6 +763,7 @@ def _import_cibc(rows):
                 date=txn_date, ticker=ticker, type=txn_type, qty=qty, price=price
             ).first()
             if existing:
+                skipped += 1
                 continue
 
             db.session.add(Transaction(
@@ -704,4 +777,4 @@ def _import_cibc(rows):
             continue
 
     db.session.commit()
-    return count
+    return {'imported': count, 'skipped': skipped}

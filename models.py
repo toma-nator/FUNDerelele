@@ -20,6 +20,7 @@ class Transaction(db.Model):
     net_cad = db.Column(db.Float, default=0)
     notes = db.Column(db.String(300), default='')
     subtype = db.Column(db.String(50), default='')   # e.g. Contribution, RDSP Grant, RDSP Bond
+    import_batch = db.Column(db.String(40))          # stamps rows from one import (for "recent" + undo)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
