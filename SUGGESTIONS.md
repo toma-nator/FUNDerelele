@@ -2,6 +2,43 @@
 
 Ideas parked for future implementation. Not committed work — just a backlog.
 
+## New tab — Time Horizon / Liquidity
+
+Promote the "By Time Horizon" widget into a dedicated tab. The widget gives the
+breakdown (cash = Immediate; GICs bucketed by maturity; holdings by account via a
+per-account horizon assignment; RDSP = Long; FHSA = Medium; TFSA/Non-Reg =
+Flexible/overridable). The tab adds depth:
+
+- **Per-bucket drill-down** — list the accounts / holdings / GICs in each bucket.
+- **GIC maturity ladder** — a timeline of upcoming maturities.
+- **RDSP holdback countdown** — compute the real years-until-withdrawable from the
+  last RDSP contribution date (10-yr rule) instead of a flat "Long". Ties into the
+  parked RDSP tracker tab.
+- **Liquidity timeline view** — a single ordered Immediate→Long visualization.
+- Reuses the per-account horizon assignment (default from account type, overridable
+  on the Accounts page) and the widget's bucketing engine.
+- **Effort:** medium — new template/route + drill-down + ladder; the bucketing
+  logic comes from the widget.
+
+## FX Sensitivity — multi-currency
+
+The shipped FX Sensitivity chart (`charts._b_fx_sensitivity`) only models USD/CAD
+(the portfolio's USD holdings vs the CAD base). Extend it to other currencies the
+holdings actually use: detect the distinct non-CAD currencies from holdings,
+compute each one's native exposure, and either let the user pick which currency
+pair to stress (a dropdown like the per-pane account filter) or show a small
+multi-series chart. Would also pair with a true historical FX overlay (the parked
+"Portfolio Value vs USD/CAD" idea).
+
+## Sidebar — drag to reorder tabs
+
+Let the user drag the nav items in the sidebar (`base.html`) into whatever order
+they prefer, persisted in localStorage (per browser, like the dashboard/charts
+layouts). Each `.nav-item` becomes draggable; on drop, reorder within its section
+and save the order; restore on load. Keep the section grouping (MAIN / ANALYTICS /
+ADVANCED / TOOLS) or allow free reordering — decide during design. Effort: small–
+medium (HTML5 drag-and-drop or a tiny up/down control in an "edit nav" mode).
+
 ## Dashboard — hero sparkline visual polish
 
 The hero strip's 12-month sparkline (`loadSparkline()` in `dashboard.html`) works

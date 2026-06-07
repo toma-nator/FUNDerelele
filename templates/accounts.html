@@ -17,15 +17,26 @@
   <div class="card account-card" data-account="{{ acc.name }}">
     <div class="account-header">
       <span class="account-name">{{ acc.name }}</span>
-      <form method="post" action="{{ url_for('update_account_type', name=acc.name) }}"
-            style="margin:0">
-        <select name="type" onchange="this.form.submit()" class="account-type-select"
-                title="Registered accounts are tax-sheltered">
-          {% for t in account_types %}
-          <option value="{{ t }}" {% if t == acc.type %}selected{% endif %}>{{ t }}</option>
-          {% endfor %}
-        </select>
-      </form>
+      <div class="account-header-selects">
+        <form method="post" action="{{ url_for('update_account_type', name=acc.name) }}"
+              style="margin:0">
+          <select name="type" onchange="this.form.submit()" class="account-type-select"
+                  title="Registered accounts are tax-sheltered">
+            {% for t in account_types %}
+            <option value="{{ t }}" {% if t == acc.type %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+          </select>
+        </form>
+        <form method="post" action="{{ url_for('update_account_horizon', name=acc.name) }}"
+              style="margin:0">
+          <select name="horizon" onchange="this.form.submit()" class="account-horizon-select"
+                  title="Time horizon for this account's holdings (cash & GICs bucket automatically)">
+            {% for h in horizon_buckets %}
+            <option value="{{ h }}" {% if h == acc.horizon %}selected{% endif %}>{{ h }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </div>
     </div>
 
     <div class="account-stats">

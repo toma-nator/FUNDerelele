@@ -10,37 +10,50 @@ app.secret_key = 'midnight-terminal-2024'
 from models import db, Transaction, PriceCache, Account, Setting, GIC, WatchlistItem, PortfolioSnapshot, TickerMap
 db.init_app(app)
 
-with app.app_context():
-    db.create_all()
-
-    # Accounts are created on import (importers._ensure_account). We no longer
-    # seed placeholder accounts, so the app only tracks accounts you actually use.
-
-    if not Setting.query.get('fx_usd_cad'):
-        db.session.add(Setting(key='fx_usd_cad', value='1.365'))
-        db.session.commit()
-
-    # Migrate existing tables with columns added after initial release
+def run_migrations():
+    """Create tables, seed the FX default, and add columns introduced after the
+    initial release. Safe to run repeatedly (startup, and after a DB restore)."""
     from sqlalchemy import text, inspect as sa_inspect
-    _insp = sa_inspect(db.engine)
+    with app.app_context():
+        db.create_all()
+        if not Setting.query.get('fx_usd_cad'):
+            db.session.add(Setting(key='fx_usd_cad', value='1.365'))
+            db.session.commit()
 
-    def _add_col(table, col, typedef):
-        try:
-            existing = [c['name'] for c in _insp.get_columns(table)]
-            if col not in existing:
-                db.session.execute(text(f'ALTER TABLE {table} ADD COLUMN {col} {typedef}'))
-                db.session.commit()
-        except Exception:
-            db.session.rollback()
+        insp = sa_inspect(db.engine)
 
-    _add_col('watchlist', 'added_date', 'DATE')
-    _add_col('watchlist', 'added_price', 'FLOAT')
-    _add_col('watchlist', 'target_type', "VARCHAR(10) DEFAULT 'below'")
-    _add_col('gics', 'institution', 'VARCHAR(100)')
-    _add_col('transactions', 'subtype', 'VARCHAR(50) DEFAULT ""')
-    _add_col('transactions', 'import_batch', 'VARCHAR(40)')
-    _add_col('accounts', 'cash_balance', 'FLOAT DEFAULT 0')
-    _add_col('price_cache', 'meta_json', 'TEXT')
+        def _add_col(table, col, typedef):
+            try:
+                existing = [c['name'] for c in insp.get_columns(table)]
+                if col not in existing:
+                    db.session.execute(text(f'ALTER TABLE {table} ADD COLUMN {col} {typedef}'))
+                    db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+        _add_col('watchlist', 'added_date', 'DATE')
+        _add_col('watchlist', 'added_price', 'FLOAT')
+        _add_col('watchlist', 'target_type', "VARCHAR(10) DEFAULT 'below'")
+        _add_col('gics', 'institution', 'VARCHAR(100)')
+        _add_col('transactions', 'subtype', 'VARCHAR(50) DEFAULT ""')
+        _add_col('transactions', 'import_batch', 'VARCHAR(40)')
+        _add_col('accounts', 'cash_balance', 'FLOAT DEFAULT 0')
+        _add_col('accounts', 'horizon', 'VARCHAR(20)')
+        _add_col('price_cache', 'meta_json', 'TEXT')
+
+
+def resolve_db_path():
+    """Absolute path to the live SQLite file, wherever Flask put it."""
+    path = db.engine.url.database
+    if path and not os.path.isabs(path):
+        for cand in (os.path.join(app.instance_path, path),
+                     os.path.join(app.root_path, path), os.path.abspath(path)):
+            if os.path.exists(cand):
+                return cand
+    return path
+
+
+run_migrations()
 
 from price_service import start_price_refresh
 start_price_refresh(app)
@@ -260,10 +273,10 @@ def delete_all_transactions():
 
 @app.route('/accounts')
 def accounts():
-    from calculations import get_account_summary
+    from calculations import get_account_summary, HORIZON_BUCKETS
     data = get_account_summary()
     return render_template('accounts.html', accounts=data, active='accounts',
-                           account_types=ACCOUNT_TYPES)
+                           account_types=ACCOUNT_TYPES, horizon_buckets=HORIZON_BUCKETS)
 
 
 @app.route('/accounts/<name>/cash', methods=['POST'])
@@ -296,6 +309,15 @@ def update_account_type(name):
         account.type = new_type
         db.session.commit()
         flash(f'Account type for {name} set to {new_type}.', 'success')
+    return redirect(url_for('accounts'))
+
+
+@app.route('/accounts/<name>/horizon', methods=['POST'])
+def update_account_horizon(name):
+    account = Account.query.filter_by(name=name).first_or_404()
+    account.horizon = request.form.get('horizon', '').strip()
+    db.session.commit()
+    flash(f'Time horizon for {name} set to {account.horizon}.', 'success')
     return redirect(url_for('accounts'))
 
 
@@ -684,16 +706,18 @@ def settings():
 def export_transactions():
     import csv, io
     from flask import Response
-    cols = ['date', 'type', 'subtype', 'ticker', 'account', 'qty', 'price',
+    cols = ['date', 'type', 'subtype', 'ticker', 'account', 'account_type', 'qty', 'price',
             'currency', 'amount_native', 'amount_cad', 'fees_cad', 'net_cad', 'notes']
+    acct_types = {a.name: (a.type or '') for a in Account.query.all()}
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(cols)
     for t in Transaction.query.order_by(Transaction.date.asc(), Transaction.id.asc()).all():
         writer.writerow([
             t.date.isoformat() if t.date else '', t.type, t.subtype or '', t.ticker,
-            t.account, t.qty, t.price, t.currency, t.amount_native, t.amount_cad,
-            t.fees_cad, t.net_cad, (t.notes or '').replace('\n', ' '),
+            t.account, acct_types.get(t.account, ''), t.qty, t.price, t.currency,
+            t.amount_native, t.amount_cad, t.fees_cad, t.net_cad,
+            (t.notes or '').replace('\n', ' '),
         ])
     stamp = datetime.now().strftime('%Y%m%d')
     return Response(buf.getvalue(), mimetype='text/csv',
@@ -703,19 +727,71 @@ def export_transactions():
 @app.route('/backup/db')
 def backup_db():
     from flask import send_file
-    # Resolve the live SQLite file regardless of where Flask put it.
-    path = db.engine.url.database
-    if path and not os.path.isabs(path):
-        for cand in (os.path.join(app.instance_path, path),
-                     os.path.join(app.root_path, path), os.path.abspath(path)):
-            if os.path.exists(cand):
-                path = cand
-                break
+    path = resolve_db_path()
     if not path or not os.path.exists(path):
         flash('Could not locate the database file.', 'error')
         return redirect(url_for('settings'))
     stamp = datetime.now().strftime('%Y%m%d_%H%M')
     return send_file(path, as_attachment=True, download_name=f'finance_backup_{stamp}.db')
+
+
+@app.route('/settings/restore', methods=['POST'])
+def restore_database():
+    import sqlite3, tempfile
+    f = request.files.get('backup')
+    if not f or not f.filename:
+        flash('Choose a backup .db file to restore.', 'error')
+        return redirect(url_for('settings'))
+    data = f.read()
+    if not data.startswith(b'SQLite format 3\x00'):
+        flash('That file is not a SQLite database.', 'error')
+        return redirect(url_for('settings'))
+
+    # Validate it looks like one of our backups (has a transactions table).
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+    try:
+        tmp.write(data)
+        tmp.close()
+        con = sqlite3.connect(tmp.name)
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        con.close()
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+    if 'transactions' not in tables:
+        flash("That database doesn't look like a Portfolio Tracker backup.", 'error')
+        return redirect(url_for('settings'))
+
+    path = resolve_db_path()
+    if not path:
+        flash('Could not locate the database file.', 'error')
+        return redirect(url_for('settings'))
+    try:
+        db.session.remove()
+        db.engine.dispose()              # release the file handle before overwriting
+        with open(path, 'wb') as out:
+            out.write(data)
+        run_migrations()                 # bring an older backup up to the current schema
+        flash('Database restored from backup.', 'success')
+    except Exception as e:
+        flash(f'Restore failed: {e}', 'error')
+    return redirect(url_for('settings'))
+
+
+@app.route('/settings/reset', methods=['POST'])
+def reset_database():
+    # Full wipe back to first-run state. Destructive; guarded by JS confirms.
+    for model in (Transaction, GIC, WatchlistItem, TickerMap,
+                  PortfolioSnapshot, PriceCache, Account, Setting):
+        model.query.delete()
+    db.session.commit()
+    # Re-seed the FX default so prices/FX keep working after the wipe.
+    db.session.add(Setting(key='fx_usd_cad', value='1.365'))
+    db.session.commit()
+    flash('Database reset — all data deleted. Starting fresh.', 'success')
+    return redirect(url_for('settings'))
 
 
 # ── Charts ────────────────────────────────────────────────────────────────────

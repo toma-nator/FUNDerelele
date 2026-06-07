@@ -48,6 +48,7 @@ CHART_CATALOG = [
     ('alloc_asset_type',        'By Asset Type',              'Allocation',           'compact'),
     ('alloc_currency',          'By Currency',                'Allocation',           'compact'),
     ('alloc_market_cap',        'By Market Cap',              'Allocation',           'compact'),
+    ('time_horizon',            'By Time Horizon',            'Allocation',           'compact'),
 
     ('top_holdings',            'Top Holdings',               'Holdings',             'compact'),
     ('unrealized_by_holding',   'Unrealized G/L by Holding',  'Holdings',             'wide'),
@@ -59,6 +60,7 @@ CHART_CATALOG = [
     ('retirement_goal',         'Retirement Goal Progress',   'Planning',             'compact'),
     ('contribution_needed',     'Contribution Needed',        'Planning',             'compact'),
 
+    ('fx_sensitivity',          'FX Sensitivity (USD/CAD)',   'Other',                'compact'),
     ('gic_values',              'GICs — Value Growth',        'Other',                'compact'),
 ]
 
@@ -260,6 +262,18 @@ def _b_alloc_market_cap(account=None):
     return _alloc('market_cap', 'Allocation by Market Cap', 'hbar', account)
 
 
+def _b_time_horizon(account=None):
+    from calculations import get_horizon_breakdown, HORIZON_BUCKETS, HORIZON_COLORS
+    buckets = get_horizon_breakdown(account)
+    items = [(b, buckets[b]) for b in HORIZON_BUCKETS if buckets[b] > 0.005]
+    if not items:
+        return _empty('hbar', 'By Time Horizon', 'Nothing to bucket yet.')
+    return {'ok': True, 'type': 'hbar', 'title': 'Portfolio by Time Horizon',
+            'labels': [b for b, _ in items],
+            'datasets': [{'data': [round(v, 2) for _, v in items],
+                          'colors': [HORIZON_COLORS[b] for b, _ in items]}]}
+
+
 def _b_alloc_account(account=None):
     # Inherently a cross-account view — always shows every account.
     ab = get_dashboard_stats(get_holdings())['account_breakdown']
@@ -390,6 +404,27 @@ def _b_contribution_needed(account=None):
             'datasets': [{'data': [x['pmt'] for x in g], 'color': ACCENT}]}
 
 
+def _b_fx_sensitivity(account=None):
+    """How the portfolio's CAD value moves as USD/CAD changes. USD holdings'
+    CAD value scales linearly with the rate, so gain/loss = USD exposure ×
+    (scenario rate − current rate)."""
+    from calculations import get_fx_rate
+    fx = get_fx_rate()
+    usd_native = sum((h['market_value_cad'] or 0) / fx
+                     for h in _holdings(account) if h['currency'] == 'USD')
+    if usd_native <= 0 or fx <= 0:
+        return _empty('bar', 'FX Sensitivity (USD/CAD)', 'No USD holdings — nothing FX-sensitive.')
+    labels, data = [], []
+    for s in (-0.10, -0.05, -0.02, 0.02, 0.05, 0.10):
+        r = fx * (1 + s)
+        labels.append(f'{r:.2f} ({s * 100:+.0f}%)')
+        data.append(round(usd_native * (r - fx), 2))
+    return {'ok': True, 'type': 'bar',
+            'title': f'FX Sensitivity — USD/CAD (now {fx:.4f})',
+            'labels': labels,
+            'datasets': [{'data': data, 'colors': [GREEN if v >= 0 else RED for v in data]}]}
+
+
 def _b_gic_values(account=None):
     gics = get_gic_stats(account_filter=account, show_matured=False)['gics']
     if not gics:
@@ -422,6 +457,7 @@ _BUILDERS = {
     'alloc_asset_type': _b_alloc_asset_type,
     'alloc_currency': _b_alloc_currency,
     'alloc_market_cap': _b_alloc_market_cap,
+    'time_horizon': _b_time_horizon,
     'top_holdings': _b_top_holdings,
     'unrealized_by_holding': _b_unrealized_by_holding,
     'realized_by_year': _b_realized_by_year,
@@ -429,6 +465,7 @@ _BUILDERS = {
     'contribution_composition': _b_contribution_composition,
     'retirement_goal': _b_retirement_goal,
     'contribution_needed': _b_contribution_needed,
+    'fx_sensitivity': _b_fx_sensitivity,
     'gic_values': _b_gic_values,
 }
 

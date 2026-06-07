@@ -119,12 +119,17 @@ def _parse_content(content, broker='auto', account_override=None):
         return _import_td(rows, account_override=account_override)
     elif broker == 'cibc':
         return _import_cibc(rows, account_override=account_override)
+    elif broker == 'native':
+        return _import_native(rows, account_override=account_override)
     else:
         raise ValueError(f'Unknown broker format: {broker}. Please select TD or CIBC manually.')
 
 
 def _detect_broker(first_row):
     keys = {k.lower().strip() for k in first_row.keys()}
+    # The app's own transaction export (lossless re-import).
+    if {'date', 'type', 'ticker', 'net_cad'} <= keys:
+        return 'native'
     if 'settle date' in keys or 'settlement date' in keys:
         if 'action' in keys:
             return 'td'
@@ -771,6 +776,68 @@ def _import_cibc(rows, account_override=None):
                 type=txn_type, qty=qty, price=price, currency=currency,
                 amount_native=amount_native, amount_cad=amount_cad,
                 fees_cad=fees, net_cad=net_cad,
+            ))
+            count += 1
+        except Exception:
+            continue
+
+    db.session.commit()
+    return {'imported': count, 'skipped': skipped}
+
+
+def _import_native(rows, account_override=None):
+    """Re-import the app's own transaction CSV export — a lossless round-trip.
+    Unlike the broker parsers this writes every field verbatim (subtype, the
+    historical CAD amounts, fees) and does NOT re-derive anything via live FX.
+    Columns: date, type, subtype, ticker, account, qty, price, currency,
+             amount_native, amount_cad, fees_cad, net_cad, notes."""
+    count = skipped = 0
+    date_fmts = ['%Y-%m-%d', '%m/%d/%Y']
+
+    def num(v):
+        try:
+            return float((v or '0').replace(',', '').strip())
+        except (TypeError, ValueError):
+            return 0.0
+
+    for row in rows:
+        try:
+            ttype = (row.get('type', '') or '').strip()
+            if not ttype:
+                continue
+            txn_date = _parse_date(row.get('date', ''), date_fmts)
+            ticker = (row.get('ticker', '') or '').strip()
+            account = account_override or (row.get('account', '') or '').strip()
+            if not account:
+                continue
+            _ensure_account(account)
+            # Restore the account's registration type (TFSA/RDSP/…) — it lives on
+            # the account, not the transaction, so carry it for a faithful restore.
+            atype = (row.get('account_type', '') or '').strip()
+            if atype:
+                acct = Account.query.filter_by(name=account).first()
+                if acct and (acct.type or '') != atype:
+                    acct.type = atype
+
+            net_cad = num(row.get('net_cad'))
+            # Amount-aware dedup so re-importing into the same DB is idempotent.
+            existing = Transaction.query.filter_by(
+                date=txn_date, account=account, ticker=ticker, type=ttype, net_cad=net_cad
+            ).first()
+            if existing:
+                skipped += 1
+                continue
+
+            db.session.add(Transaction(
+                date=txn_date, ticker=ticker, account=account, type=ttype,
+                subtype=(row.get('subtype', '') or '').strip(),
+                qty=num(row.get('qty')), price=num(row.get('price')),
+                currency=(row.get('currency', 'CAD') or 'CAD').strip().upper(),
+                amount_native=num(row.get('amount_native')),
+                amount_cad=num(row.get('amount_cad')),
+                fees_cad=num(row.get('fees_cad')),
+                net_cad=net_cad,
+                notes=(row.get('notes', '') or '').strip(),
             ))
             count += 1
         except Exception:

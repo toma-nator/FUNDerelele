@@ -102,20 +102,33 @@
       </div>
     </div>
 
-    <div class="settings-section">
-      <div class="settings-section-title">Data &amp; Backup</div>
-      <p style="font-size:.75rem;color:var(--text-muted);margin-bottom:14px">Export your full transaction history, or download a copy of the database file as a backup.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <a class="btn btn-sm" href="{{ url_for('export_transactions') }}">↓ Export transactions (CSV)</a>
-        <a class="btn btn-sm" href="{{ url_for('backup_db') }}">↓ Download database backup</a>
-      </div>
-    </div>
-
     <div style="padding:16px 20px">
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>
   </div>
 </form>
+
+<!-- Data & Backup lives outside the settings form (restore is its own upload form) -->
+<div class="card" style="margin-bottom:20px">
+  <div class="settings-section">
+    <div class="settings-section-title">Data &amp; Backup</div>
+    <p style="font-size:.75rem;color:var(--text-muted);margin-bottom:14px">
+      Export your transaction history, back up or restore the database, or reset everything to a clean state.
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <a class="btn btn-sm" href="{{ url_for('export_transactions') }}">↓ Export transactions (CSV)</a>
+      <a class="btn btn-sm" href="{{ url_for('backup_db') }}">↓ Download database backup</a>
+      <button type="button" class="btn btn-sm btn-danger" onclick="resetDatabase()">Reset Database</button>
+    </div>
+    <form method="POST" action="{{ url_for('restore_database') }}" enctype="multipart/form-data"
+          onsubmit="return confirmRestore()"
+          style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px">
+      <input type="file" name="backup" accept=".db" class="form-input" style="max-width:320px;font-size:.75rem">
+      <button type="submit" class="btn btn-sm">↑ Restore from backup</button>
+    </form>
+    <p style="font-size:.72rem;color:var(--text-muted);margin-top:8px">Restore replaces <strong>all</strong> current data with the uploaded backup file.</p>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -128,6 +141,18 @@ function toggleRoomMethod() {
   const anchor = document.getElementById('roomMethod').value === 'anchor';
   document.getElementById('anchorFields').style.display = anchor ? 'block' : 'none';
   document.getElementById('reconstructFields').style.display = anchor ? 'none' : 'block';
+}
+function resetDatabase() {
+  if (!confirm('This PERMANENTLY deletes ALL data — transactions, accounts, GICs, watchlist, ticker mappings, snapshots and settings.\n\nHave you downloaded a backup? Click Cancel to back up first.')) return;
+  if (!confirm('Are you absolutely sure? This cannot be undone.')) return;
+  const f = document.createElement('form');
+  f.method = 'POST';
+  f.action = '{{ url_for("reset_database") }}';
+  document.body.appendChild(f);
+  f.submit();
+}
+function confirmRestore() {
+  return confirm('Restore will replace ALL current data with the uploaded backup. Continue?');
 }
 </script>
 {% endblock %}

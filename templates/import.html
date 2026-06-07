@@ -10,6 +10,8 @@
       <p class="text-dim">
         Upload a TD Direct Investing or CIBC Investor's Edge export (CSV both brokers,
         PDF statements TD only). Duplicate transactions are skipped automatically.
+        Auto-detect also accepts this app's own <strong>Export transactions (CSV)</strong>
+        from Settings — re-imported losslessly with every field preserved.
       </p>
 
       <form method="POST" action="{{ url_for('import_upload') }}" enctype="multipart/form-data" class="import-form">

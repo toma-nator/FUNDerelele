@@ -371,6 +371,69 @@ def get_contribution_room(account_name, account_type):
             'note': f'Eligible since {start_year}; assumes Canadian residency throughout.'}
 
 
+# ── Time-horizon (liquidity) buckets ────────────────────────────────────────
+# Ordered most-liquid → most-locked. Cash is always Immediate and GICs bucket by
+# maturity; account holdings use the account's horizon (override, else by type).
+HORIZON_BUCKETS = ['Immediate', 'Short (1-3y)', 'Medium (3-10y)', 'Long (10+y)', 'Flexible']
+HORIZON_COLORS = {
+    'Immediate':     '#00e676',   # green — liquid
+    'Short (1-3y)':  '#00c8f0',   # cyan
+    'Medium (3-10y)': '#7986cb',  # indigo
+    'Long (10+y)':   '#9b72f5',   # purple — locked
+    'Flexible':      '#90a4ae',   # grey — no lock-in
+}
+
+
+def _default_horizon(account_type):
+    t = (account_type or '').upper()
+    if t == 'RDSP':
+        return 'Long (10+y)'
+    if t == 'FHSA':
+        return 'Medium (3-10y)'
+    return 'Flexible'
+
+
+def _gic_horizon(days_remaining):
+    y = (days_remaining or 0) / 365.0
+    if y < 1:
+        return 'Immediate'
+    if y < 3:
+        return 'Short (1-3y)'
+    if y < 10:
+        return 'Medium (3-10y)'
+    return 'Long (10+y)'
+
+
+def get_horizon_breakdown(account=None):
+    """Portfolio value split by time horizon. Cash → Immediate; GICs → by
+    maturity; account holdings → the account's horizon (override or type default).
+    Includes GIC value, so the total can exceed the holdings+cash total elsewhere.
+    Returns an ordered dict {bucket: cad_value}."""
+    from models import Account
+    horizons = {a.name: (a.horizon or _default_horizon(a.type)) for a in Account.query.all()}
+    buckets = {b: 0.0 for b in HORIZON_BUCKETS}
+
+    for name, cash in get_cash_by_account().items():
+        if account and name != account:
+            continue
+        if cash:
+            buckets['Immediate'] += cash
+
+    for h in get_holdings():
+        if account and h['account'] != account:
+            continue
+        mv = h['market_value_cad'] or 0
+        if mv <= 0:
+            continue
+        b = horizons.get(h['account'], 'Flexible')
+        buckets[b if b in buckets else 'Flexible'] += mv
+
+    for g in get_gic_stats(account_filter=account, show_matured=False)['gics']:
+        buckets[_gic_horizon(g['days_remaining'])] += g['current_value']
+
+    return {b: round(buckets[b], 2) for b in HORIZON_BUCKETS}
+
+
 def get_account_summary():
     all_holdings = get_holdings(include_closed=True)
     accounts = Account.query.all()
@@ -427,6 +490,7 @@ def get_account_summary():
             'grants_bonds': grants_bonds,
             'all_time_gain': total_value - net_contributions,
             'room': get_contribution_room(account.name, account.type),
+            'horizon': account.horizon or _default_horizon(account.type),
             'num_holdings': len(acct_holdings),
             'holdings': acct_holdings,
             'closed_holdings': closed_holdings,

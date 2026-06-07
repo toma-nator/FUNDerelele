@@ -40,6 +40,7 @@ class Account(db.Model):
     name = db.Column(db.String(50), unique=True, nullable=False)
     type = db.Column(db.String(20))
     cash_balance = db.Column(db.Float, default=0)
+    horizon = db.Column(db.String(20))  # time-horizon bucket override; None = derive from type
 
 
 class Setting(db.Model):
