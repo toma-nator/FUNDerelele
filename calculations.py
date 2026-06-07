@@ -175,6 +175,202 @@ def get_dashboard_stats(holdings):
     }
 
 
+# ── Contribution room (TFSA / FHSA / RDSP) ──────────────────────────────────────
+# CRA-set annual TFSA dollar limits. Beyond the table we fall back to the last
+# known value; the current year can be overridden in Settings (it's indexed).
+TFSA_ANNUAL_LIMITS = {
+    2009: 5000, 2010: 5000, 2011: 5000, 2012: 5000,
+    2013: 5500, 2014: 5500, 2015: 10000,
+    2016: 5500, 2017: 5500, 2018: 5500,
+    2019: 6000, 2020: 6000, 2021: 6000, 2022: 6000,
+    2023: 6500, 2024: 7000, 2025: 7000, 2026: 7000,
+}
+TFSA_FALLBACK_LIMIT = 7000      # years past the table (until updated)
+FHSA_ANNUAL_LIMIT = 8000        # per year once the account is opened
+FHSA_CARRYFORWARD_CAP = 8000    # max unused room carried into the next year
+FHSA_LIFETIME_CAP = 40000
+RDSP_LIFETIME_CAP = 200000
+RDSP_GRANT_LIFETIME_MAX = 70000   # CDSG lifetime maximum
+RDSP_BOND_LIFETIME_MAX = 20000    # CDSB lifetime maximum
+ROOM_TYPES = ('TFSA', 'FHSA', 'RDSP')
+
+
+def _to_float(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_int(v):
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_tfsa_overrides(raw):
+    """Parse a 'year=amount, year=amount' string into {year: limit}. Lets the
+    user correct the CRA-indexed limit for the current OR any past year."""
+    out = {}
+    for chunk in (raw or '').replace(';', ',').split(','):
+        if '=' not in chunk:
+            continue
+        y, _, amt = chunk.partition('=')
+        yi, ai = _to_int(y), _to_float(amt)
+        if yi and ai is not None:
+            out[yi] = ai
+    return out
+
+
+def _tfsa_limit(year, overrides=None):
+    """TFSA dollar limit for a year. User overrides win, then the built-in CRA
+    table, then the last-known fallback for years past the table."""
+    if overrides and year in overrides:
+        return overrides[year]
+    return TFSA_ANNUAL_LIMITS.get(year, TFSA_FALLBACK_LIMIT)
+
+
+def _deposits_by_year(account_names):
+    """Split deposits across the given accounts into personal contributions vs
+    withdrawals (negative deposits) per year, plus grants and bonds separately.
+    Takes a list of accounts because contribution room is a per-person limit
+    pooled across every account of the same registration type."""
+    if not account_names:
+        return {}, {}, 0.0, 0.0
+    rows = (Transaction.query
+            .filter(Transaction.account.in_(account_names), Transaction.type == 'Deposit')
+            .with_entities(Transaction.date, Transaction.subtype, Transaction.net_cad).all())
+    contribs, withdrawals, grants, bonds = {}, {}, 0.0, 0.0
+    for d, subtype, net in rows:
+        n = net or 0.0
+        if subtype == 'RDSP Grant':
+            grants += n
+        elif subtype == 'RDSP Bond':
+            bonds += n
+        elif n >= 0:
+            contribs[d.year] = contribs.get(d.year, 0.0) + n
+        else:
+            withdrawals[d.year] = withdrawals.get(d.year, 0.0) + (-n)
+    return contribs, withdrawals, grants, bonds
+
+
+def get_contribution_room(account_name, account_type):
+    """Contribution room for a registered account, derived from its deposit
+    transactions. Returns None for account types that don't track room.
+
+    TFSA/FHSA honour Settings → room_method:
+      - 'reconstruct': rebuild room from CRA annual limits + full history
+        (TFSA needs birth year; FHSA infers the open year from contributions)
+      - 'anchor': start from a CRA-reported figure as of Jan 1 of a year and
+        roll forward (no birth year / full history needed — for a friend's use)
+    RDSP is always the $200,000 lifetime cap minus personal contributions.
+    """
+    from models import Setting, Account
+    from datetime import date
+
+    atype = (account_type or '').upper()
+    if atype not in ROOM_TYPES:
+        return None
+
+    year = date.today().year
+    # Pool every account of this registration type — room is a per-person limit,
+    # so all TFSAs (or all FHSAs) share one running total and show the same room.
+    names = [a.name for a in Account.query.all() if (a.type or '').upper() == atype]
+    contribs, withdrawals, grants, bonds = _deposits_by_year(names)
+    total_contrib = sum(contribs.values())
+
+    def gs(key, default=None):
+        s = Setting.query.get(key)
+        return s.value if (s and s.value not in (None, '')) else default
+
+    if atype == 'RDSP':
+        return {
+            'type': 'RDSP', 'ready': True, 'method': None,
+            'total_remaining': round(RDSP_LIFETIME_CAP - total_contrib, 2),
+            'year_remaining': None,
+            'lifetime_cap': RDSP_LIFETIME_CAP,
+            'contributed_total': round(total_contrib, 2),
+            'grant_remaining': round(max(0.0, RDSP_GRANT_LIFETIME_MAX - grants), 2),
+            'grant_cap': RDSP_GRANT_LIFETIME_MAX,
+            'bond_remaining': round(max(0.0, RDSP_BOND_LIFETIME_MAX - bonds), 2),
+            'bond_cap': RDSP_BOND_LIFETIME_MAX,
+            'note': 'Grants/bonds are government money — they don\'t count toward the $200,000 cap.',
+        }
+
+    method = (gs('room_method', 'reconstruct') or 'reconstruct').lower()
+    overrides = _parse_tfsa_overrides(gs('tfsa_limit_overrides'))
+    annual_limit = (_tfsa_limit(year, overrides) if atype == 'TFSA'
+                    else FHSA_ANNUAL_LIMIT)
+    year_remaining = round(annual_limit - contribs.get(year, 0.0), 2)
+
+    base = {'type': atype, 'method': method, 'contributed_total': round(total_contrib, 2),
+            'grants_bonds': 0.0}
+
+    if method == 'anchor':
+        anchor_year = _to_int(gs('room_anchor_year'))
+        anchor_val = _to_float(gs('room_anchor_tfsa' if atype == 'TFSA' else 'room_anchor_fhsa'))
+        if anchor_year is None or anchor_val is None:
+            return {**base, 'ready': False,
+                    'note': f'Set the {atype} anchor figure and year in Settings.'}
+        # Roll the anchor forward: add each later year's limit, subtract
+        # contributions since the anchor date, add back prior-year withdrawals.
+        if atype == 'TFSA':
+            added = sum(_tfsa_limit(y, overrides) for y in range(anchor_year + 1, year + 1))
+        else:
+            added = FHSA_ANNUAL_LIMIT * max(0, year - anchor_year)
+        contrib_since = sum(v for y, v in contribs.items() if y >= anchor_year)
+        wd_added_back = sum(v for y, v in withdrawals.items() if anchor_year <= y < year)
+        total_remaining = anchor_val + added - contrib_since + wd_added_back
+        if atype == 'FHSA':
+            total_remaining = min(total_remaining, FHSA_LIFETIME_CAP - total_contrib)
+        return {**base, 'ready': True,
+                'total_remaining': round(total_remaining, 2),
+                'year_remaining': year_remaining,
+                'total_cap': FHSA_LIFETIME_CAP if atype == 'FHSA' else None,
+                'carry_over': None,
+                'note': f'Rolled forward from your Jan 1 {anchor_year} figure.'}
+
+    # ── reconstruct ──
+    if atype == 'FHSA':
+        opened = [y for y, v in contribs.items() if v]
+        if not opened:
+            return {**base, 'ready': False,
+                    'note': 'FHSA room starts the year of your first contribution — none recorded yet.'}
+        open_year = min(opened)
+        carry, part_room, carry_in = 0.0, 0.0, 0.0
+        for y in range(open_year, year + 1):
+            carry_in_this = min(carry, FHSA_CARRYFORWARD_CAP)  # capped carry-forward
+            part_room = carry_in_this + FHSA_ANNUAL_LIMIT
+            if y == year:
+                carry_in = carry_in_this
+            carry = max(0.0, part_room - contribs.get(y, 0.0))
+        year_remaining = round(max(0.0, part_room - contribs.get(year, 0.0)), 2)
+        lifetime_remaining = max(0.0, FHSA_LIFETIME_CAP - total_contrib)
+        return {**base, 'ready': True,
+                'total_remaining': round(lifetime_remaining, 2),
+                'year_remaining': min(year_remaining, lifetime_remaining),
+                'total_cap': FHSA_LIFETIME_CAP,
+                'carry_over': round(carry_in, 2),
+                'note': f'Opened {open_year}; ${FHSA_CARRYFORWARD_CAP:,.0f}/yr carry-forward cap.'}
+
+    # TFSA reconstruct
+    birth_year = _to_int(gs('birth_year'))
+    if not birth_year:
+        return {**base, 'ready': False,
+                'note': 'Set your birth year in Settings to compute TFSA room.'}
+    start_year = max(2009, birth_year + 18)
+    cumulative = sum(_tfsa_limit(y, overrides) for y in range(start_year, year + 1))
+    wd_prior = sum(v for y, v in withdrawals.items() if y < year)
+    total_remaining = cumulative - total_contrib + wd_prior
+    return {**base, 'ready': True,
+            'total_remaining': round(total_remaining, 2),
+            'year_remaining': year_remaining,
+            'total_cap': round(cumulative, 2),
+            'carry_over': None,
+            'note': f'Eligible since {start_year}; assumes Canadian residency throughout.'}
+
+
 def get_account_summary():
     all_holdings = get_holdings(include_closed=True)
     accounts = Account.query.all()
@@ -230,6 +426,7 @@ def get_account_summary():
             'net_contributions': net_contributions,
             'grants_bonds': grants_bonds,
             'all_time_gain': total_value - net_contributions,
+            'room': get_contribution_room(account.name, account.type),
             'num_holdings': len(acct_holdings),
             'holdings': acct_holdings,
             'closed_holdings': closed_holdings,

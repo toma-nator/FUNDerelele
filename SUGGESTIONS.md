@@ -37,6 +37,35 @@ deployed." Pairs with the existing total-account TWR (which includes cash).
   (instead of `market_value + cash`) and use the net buy/sell cash as the
   per-month flow rather than deposits.
 
+## Tax — Province-based marginal rate helper
+
+The Tax tab already takes a manual Marginal % (+ Inclusion %) and estimates tax
+owed. Optional nicety: a province dropdown + estimated taxable income that looks
+up the 2025 **combined federal+provincial** marginal rate and the correct
+capital-gains / eligible-dividend effective rates, prefilling the Tax tab inputs.
+
+- **How:** per-province bracket tables (13 jurisdictions) + a lookup; store
+  `tax_province` and the income, derive the rate. Dividend tax credit + gross-up
+  for the eligible-dividend effective rate.
+- **Effort:** medium — mostly the bracket data + a small lookup; UI is a dropdown
+  and one number. Deferred (manual rate is sufficient for now).
+
+## Dividends — Default US withholding rate (setting)
+
+A configurable default US dividend withholding rate (15% treaty) on the Settings
+tab, applied to the **Dividends** tab's forward-income / net-yield estimates so
+they reflect the haircut on US dividends even before `WithholdingTax` rows are
+imported. Today withholding is only known from imported transactions, so forward
+estimates on US names overstate net income.
+
+- **How:** a `us_withholding_rate` setting (default 15%); in `get_dividend_stats`
+  forward-income, multiply the expected dividend of USD-currency holdings by
+  `(1 − rate)`. Keep actual received net-of-withholding as-is (it's from real
+  rows) — this only affects the *forward* projection.
+- **Note:** registered accounts differ (RRSP is treaty-exempt for US dividends;
+  TFSA is not) — could refine by account type later.
+- **Effort:** small–medium — one setting + a tweak to the forward-income calc.
+
 ## Dividends — Per-ticker payment drill-down
 
 Click a ticker row in the "By Ticker" table to expand its individual dividend
@@ -235,6 +264,10 @@ limit, project the account value year by year assuming room is filled each year.
   value, room remaining, and annual room added (e.g. $7,000); compound at the
   expected return while adding the yearly room. Could read the actual TFSA
   account value from holdings if an account is flagged as TFSA.
+- **Now available:** `calculations.get_contribution_room(account, type)` already
+  computes current TFSA/FHSA room (total + this-year) and the RDSP $200k cap from
+  transactions (Settings → reconstruct or anchor) — surfaced on the account page.
+  The projector can seed its "room remaining" / "annual room" inputs from it.
 - **Effort:** small — one calculator + a card; reuses the FV helper in
   `get_planning_stats`.
 
@@ -279,6 +312,11 @@ Frontier" tab reading `EF_POINTS`, `EF_MIN_W`, `EF_MAX_W`, `RISK_FREE_RATE`,
 A dedicated RDSP planner (the imported account is an RDSP). Beyond the
 accumulation projection, model the **withdrawal / decumulation phase**: how the
 portfolio draws down over time once payments start.
+
+_Already done (account page):_ grants/bonds total and contribution room remaining
+(of the $200k lifetime cap) now show on the RDSP account detail via
+`get_contribution_room`. What's still parked is the **grant/bond entitlement +
+carry-forward** math and the two-phase accumulate→decumulate / LDAP projection.
 
 - **Accumulation:** project contributions + government grants (CDSG, up to
   $3,500/yr matched) and bonds (CDSB) growing to the withdrawal age, honouring

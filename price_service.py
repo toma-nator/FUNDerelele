@@ -237,18 +237,25 @@ def start_price_refresh(app):
     def refresh_loop():
         time.sleep(5)
         while True:
+            interval = 300  # default 5 min; overridden by the price_refresh_mins setting
             try:
                 with app.app_context():
-                    from models import Transaction, WatchlistItem
+                    from models import Transaction, WatchlistItem, Setting
                     txn_tickers = [r[0] for r in Transaction.query.with_entities(Transaction.ticker).distinct()]
                     watch_tickers = [r[0] for r in WatchlistItem.query.with_entities(WatchlistItem.ticker).distinct() if r[0]]
                     all_tickers = list(set(txn_tickers + watch_tickers))
                     if all_tickers:
                         refresh_prices(all_tickers)
                     _check_auto_import(app)
+                    s = Setting.query.get('price_refresh_mins')
+                    if s and s.value:
+                        try:
+                            interval = max(60, int(round(float(s.value) * 60)))  # floor at 1 min
+                        except (TypeError, ValueError):
+                            pass
             except Exception as e:
                 print(f'[price refresh] {e}')
-            time.sleep(300)
+            time.sleep(interval)
 
     thread = threading.Thread(target=refresh_loop, daemon=True)
     thread.start()

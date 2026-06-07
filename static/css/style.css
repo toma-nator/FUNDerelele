@@ -649,6 +649,19 @@ body {
 .accounts-grid.detail .account-extra { display: block; }
 .accounts-grid.detail .account-holdings-compact { display: none; }
 
+/* Contribution room (TFSA / FHSA / RDSP) */
+.account-room { padding: 6px 20px 10px; border-top: 1px solid var(--border-sub); }
+.account-room .account-holdings-label { padding: 8px 0; border-bottom: none; }
+.room-note { font-size: .72rem; color: var(--text-muted); margin: 6px 0 0; }
+.room-note a { color: var(--accent); text-decoration: none; }
+.stat-cap { display: block; font-size: .68rem; color: var(--text-muted); margin-top: 2px; }
+.room-reminder {
+  font-size: .75rem; color: var(--text-dim);
+  background: rgba(255, 200, 0, .06);
+  border: 1px solid rgba(255, 200, 0, .25);
+  border-radius: 6px; padding: 8px 12px; margin: 0 0 10px;
+}
+
 /* Allocation breakdown */
 .account-breakdown { padding: 14px 20px 4px; }
 .breakdown-msg { color: var(--text-dim); font-size: .8rem; padding: 6px 0 12px; }

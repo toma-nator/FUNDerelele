@@ -86,6 +86,16 @@ def inject_unmapped_count():
     return {'unmapped_count': n}
 
 
+@app.context_processor
+def inject_last_updated():
+    # Powers the "prices updated HH:MM" stamp in the topbar on every page.
+    try:
+        lu = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
+    except Exception:
+        lu = None
+    return {'last_updated': lu}
+
+
 # ── Template filters ──────────────────────────────────────────────────────────
 
 @app.template_filter('cad')
@@ -603,9 +613,9 @@ def gics_delete(id):
 def settings():
     if request.method == 'POST':
         keys = [
-            'room_tfsa', 'room_rrsp', 'room_fhsa',
-            'target_alloc_tfsa', 'target_alloc_rrsp', 'target_alloc_fhsa', 'target_alloc_non_reg',
-            'auto_import_folder', 'fx_manual', 'fx_manual_rate',
+            'fx_manual', 'fx_manual_rate', 'price_refresh_mins',
+            'room_method', 'birth_year', 'tfsa_limit_overrides',
+            'room_anchor_year', 'room_anchor_tfsa', 'room_anchor_fhsa',
         ]
         for key in keys:
             val = request.form.get(key, '').strip()
@@ -622,23 +632,68 @@ def settings():
         s = Setting.query.get(key)
         return s.value if s else default
 
-    accounts = Account.query.order_by(Account.name).all()
-    last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
+    # Self-triggering reminder: flag when CRA's limit for the current year isn't
+    # built in yet and hasn't been overridden, so the room math is just guessing.
+    from datetime import date
+    from calculations import TFSA_ANNUAL_LIMITS, _parse_tfsa_overrides, _tfsa_limit
+    cy = date.today().year
+    overrides = _parse_tfsa_overrides(gs('tfsa_limit_overrides', ''))
+    tfsa_limit_known = (cy in TFSA_ANNUAL_LIMITS) or (cy in overrides)
+
     return render_template('settings.html',
                            fx_rate=gs('fx_usd_cad', '1.365'),
                            fx_manual=gs('fx_manual', '0'),
                            fx_manual_rate=gs('fx_manual_rate', ''),
-                           room_tfsa=gs('room_tfsa', ''),
-                           room_rrsp=gs('room_rrsp', ''),
-                           room_fhsa=gs('room_fhsa', ''),
-                           target_alloc_tfsa=gs('target_alloc_tfsa', ''),
-                           target_alloc_rrsp=gs('target_alloc_rrsp', ''),
-                           target_alloc_fhsa=gs('target_alloc_fhsa', ''),
-                           target_alloc_non_reg=gs('target_alloc_non_reg', ''),
-                           auto_import_folder=gs('auto_import_folder', ''),
-                           accounts=accounts,
-                           last_updated=last_updated,
+                           price_refresh_mins=gs('price_refresh_mins', '5'),
+                           room_method=gs('room_method', 'reconstruct'),
+                           birth_year=gs('birth_year', ''),
+                           tfsa_limit_overrides=gs('tfsa_limit_overrides', ''),
+                           current_year=cy,
+                           current_tfsa_limit=_tfsa_limit(cy, overrides),
+                           tfsa_limit_known=tfsa_limit_known,
+                           tfsa_builtin_through=max(TFSA_ANNUAL_LIMITS),
+                           room_anchor_year=gs('room_anchor_year', ''),
+                           room_anchor_tfsa=gs('room_anchor_tfsa', ''),
+                           room_anchor_fhsa=gs('room_anchor_fhsa', ''),
                            active='settings')
+
+
+@app.route('/export/transactions.csv')
+def export_transactions():
+    import csv, io
+    from flask import Response
+    cols = ['date', 'type', 'subtype', 'ticker', 'account', 'qty', 'price',
+            'currency', 'amount_native', 'amount_cad', 'fees_cad', 'net_cad', 'notes']
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(cols)
+    for t in Transaction.query.order_by(Transaction.date.asc(), Transaction.id.asc()).all():
+        writer.writerow([
+            t.date.isoformat() if t.date else '', t.type, t.subtype or '', t.ticker,
+            t.account, t.qty, t.price, t.currency, t.amount_native, t.amount_cad,
+            t.fees_cad, t.net_cad, (t.notes or '').replace('\n', ' '),
+        ])
+    stamp = datetime.now().strftime('%Y%m%d')
+    return Response(buf.getvalue(), mimetype='text/csv',
+                    headers={'Content-Disposition': f'attachment; filename=transactions_{stamp}.csv'})
+
+
+@app.route('/backup/db')
+def backup_db():
+    from flask import send_file
+    # Resolve the live SQLite file regardless of where Flask put it.
+    path = db.engine.url.database
+    if path and not os.path.isabs(path):
+        for cand in (os.path.join(app.instance_path, path),
+                     os.path.join(app.root_path, path), os.path.abspath(path)):
+            if os.path.exists(cand):
+                path = cand
+                break
+    if not path or not os.path.exists(path):
+        flash('Could not locate the database file.', 'error')
+        return redirect(url_for('settings'))
+    stamp = datetime.now().strftime('%Y%m%d_%H%M')
+    return send_file(path, as_attachment=True, download_name=f'finance_backup_{stamp}.db')
 
 
 # ── Tax & ACB ─────────────────────────────────────────────────────────────────

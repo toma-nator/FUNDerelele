@@ -29,50 +29,85 @@
     </div>
 
     <div class="settings-section">
+      <div class="settings-section-title">Prices</div>
+      <div class="form-row" style="padding:0">
+        <div class="form-group" style="min-width:200px">
+          <label>Refresh prices every (minutes)</label>
+          <input class="form-input mono" name="price_refresh_mins" type="number" step="1" min="1" placeholder="5" value="{{ price_refresh_mins }}">
+        </div>
+      </div>
+      <p style="font-size:.75rem;color:var(--text-muted)">How often the background thread pulls live prices and FX from yfinance. Default 5 minutes; minimum 1 (takes effect on the next cycle).</p>
+    </div>
+
+    <div class="settings-section">
       <div class="settings-section-title">Contribution Room</div>
-      <div class="form-row" style="padding:0">
+      <p style="font-size:.75rem;color:var(--text-muted);margin-bottom:14px">
+        Room is calculated automatically from your contribution transactions and shown on each TFSA / FHSA / RDSP account page.
+        RDSP needs no input — it tracks the $200,000 lifetime cap from your contributions.
+      </p>
+
+      <div class="form-row" style="padding:0;margin-bottom:14px">
         <div class="form-group">
-          <label>TFSA Room ($)</label>
-          <input class="form-input mono" name="room_tfsa" type="number" step="0.01" placeholder="0.00" value="{{ room_tfsa }}">
+          <label>Calculation method</label>
+          <select class="form-input" name="room_method" id="roomMethod" onchange="toggleRoomMethod()">
+            <option value="reconstruct" {% if room_method != 'anchor' %}selected{% endif %}>Reconstruct from history</option>
+            <option value="anchor" {% if room_method == 'anchor' %}selected{% endif %}>Anchor (CRA figure)</option>
+          </select>
         </div>
-        <div class="form-group">
-          <label>RRSP Deduction Limit ($)</label>
-          <input class="form-input mono" name="room_rrsp" type="number" step="0.01" placeholder="0.00" value="{{ room_rrsp }}">
+      </div>
+
+      <!-- Reconstruct: rebuild from CRA annual limits + full contribution history -->
+      <div id="reconstructFields" style="{% if room_method == 'anchor' %}display:none{% endif %}">
+        <div class="form-row" style="padding:0;margin-bottom:10px">
+          <div class="form-group" style="min-width:150px">
+            <label>Birth year</label>
+            <input class="form-input mono" name="birth_year" type="number" step="1" min="1900" max="2030" placeholder="1990" value="{{ birth_year }}">
+          </div>
+          <div class="form-group" style="min-width:280px">
+            <label>TFSA limit overrides (year=amount)</label>
+            <input class="form-input mono" name="tfsa_limit_overrides" placeholder="2027=7500, 2028=7500" value="{{ tfsa_limit_overrides }}" style="font-size:.78rem">
+          </div>
         </div>
-        <div class="form-group">
-          <label>FHSA Room ($)</label>
-          <input class="form-input mono" name="room_fhsa" type="number" step="0.01" placeholder="0.00" value="{{ room_fhsa }}">
+        {% if not tfsa_limit_known %}
+        <div class="room-reminder">
+          ⚠ CRA hasn't been built in for <strong>{{ current_year }}</strong> yet — room is using a fallback of
+          {{ current_tfsa_limit | cad }}. Add <span class="mono">{{ current_year }}=AMOUNT</span> to the overrides above once CRA announces the {{ current_year }} limit.
         </div>
+        {% endif %}
+        <p style="font-size:.72rem;color:var(--text-muted)">
+          Birth year sets when your TFSA room started accruing (year you turned 18, earliest 2009). FHSA infers its open year from your first contribution.
+          Limits for 2009–{{ tfsa_builtin_through }} are built in — you only need an override for a brand-new year (or to correct a past year). Comma-separate multiple, e.g. <span class="mono">2027=7500</span>.
+        </p>
+      </div>
+
+      <!-- Anchor: start from a CRA-reported figure and roll forward (for a friend) -->
+      <div id="anchorFields" style="{% if room_method != 'anchor' %}display:none{% endif %}">
+        <div class="form-row" style="padding:0;margin-bottom:10px">
+          <div class="form-group" style="min-width:130px">
+            <label>Figures as of Jan 1</label>
+            <input class="form-input mono" name="room_anchor_year" type="number" step="1" min="2009" max="2035" placeholder="2026" value="{{ room_anchor_year }}">
+          </div>
+          <div class="form-group" style="min-width:150px">
+            <label>TFSA room ($)</label>
+            <input class="form-input mono" name="room_anchor_tfsa" type="number" step="0.01" placeholder="0.00" value="{{ room_anchor_tfsa }}">
+          </div>
+          <div class="form-group" style="min-width:150px">
+            <label>FHSA room ($)</label>
+            <input class="form-input mono" name="room_anchor_fhsa" type="number" step="0.01" placeholder="0.00" value="{{ room_anchor_fhsa }}">
+          </div>
+        </div>
+        <p style="font-size:.72rem;color:var(--text-muted)">
+          Enter the room CRA reports in My Account as of Jan 1 of that year. The app rolls it forward — adding later years' limits and subtracting contributions since — so update it each January.
+        </p>
       </div>
     </div>
 
     <div class="settings-section">
-      <div class="settings-section-title">Target Allocations — Rebalancer</div>
-      <p style="font-size:.75rem;color:var(--text-muted);margin-bottom:14px">Set the % of your total portfolio you want in each account. These power the Rebalancer. They should sum to 100%.</p>
-      <div class="form-row" style="padding:0">
-        {% set alloc_map = [
-          ('target_alloc_tfsa', 'TFSA %', target_alloc_tfsa),
-          ('target_alloc_rrsp', 'RRSP %', target_alloc_rrsp),
-          ('target_alloc_fhsa', 'FHSA %', target_alloc_fhsa),
-          ('target_alloc_non_reg', 'Non-Reg %', target_alloc_non_reg),
-        ] %}
-        {% for key, label, val in alloc_map %}
-        <div class="form-group" style="min-width:110px">
-          <label>{{ label }}</label>
-          <input class="form-input mono" name="{{ key }}" type="number" step="0.1" min="0" max="100" placeholder="0" value="{{ val }}">
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-
-    <div class="settings-section">
-      <div class="settings-section-title">Auto-Import</div>
-      <p style="font-size:.75rem;color:var(--text-muted);margin-bottom:14px">Point to a folder and any new TD/CIBC CSV files dropped in will be imported automatically every 5 minutes.</p>
-      <div class="form-row" style="padding:0">
-        <div class="form-group" style="min-width:360px">
-          <label>Watch Folder (full path)</label>
-          <input class="form-input mono" name="auto_import_folder" placeholder="C:\Users\you\Downloads\broker-exports" value="{{ auto_import_folder }}" style="font-size:.75rem">
-        </div>
+      <div class="settings-section-title">Data &amp; Backup</div>
+      <p style="font-size:.75rem;color:var(--text-muted);margin-bottom:14px">Export your full transaction history, or download a copy of the database file as a backup.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <a class="btn btn-sm" href="{{ url_for('export_transactions') }}">↓ Export transactions (CSV)</a>
+        <a class="btn btn-sm" href="{{ url_for('backup_db') }}">↓ Download database backup</a>
       </div>
     </div>
 
@@ -88,6 +123,11 @@
 function toggleManual() {
   const manual = document.getElementById('fxManualToggle').value === '1';
   document.getElementById('manualRateField').style.display = manual ? 'block' : 'none';
+}
+function toggleRoomMethod() {
+  const anchor = document.getElementById('roomMethod').value === 'anchor';
+  document.getElementById('anchorFields').style.display = anchor ? 'block' : 'none';
+  document.getElementById('reconstructFields').style.display = anchor ? 'none' : 'block';
 }
 </script>
 {% endblock %}

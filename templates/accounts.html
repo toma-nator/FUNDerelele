@@ -112,6 +112,48 @@
         </div>
       </div>
 
+      {% if acc.room %}
+      <div class="account-room">
+        <div class="account-holdings-label">Contribution Room — {{ acc.room.type }}</div>
+        {% if acc.room.ready %}
+        <div class="account-stats account-extra-stats">
+          {% if acc.room.type == 'RDSP' %}
+          <div class="account-stat">
+            <div class="stat-label">Grant Remaining</div>
+            <div class="stat-value mono">{{ acc.room.grant_remaining | cad }}<span class="stat-cap">of {{ acc.room.grant_cap | cad }}</span></div>
+          </div>
+          <div class="account-stat">
+            <div class="stat-label">Bond Remaining</div>
+            <div class="stat-value mono">{{ acc.room.bond_remaining | cad }}<span class="stat-cap">of {{ acc.room.bond_cap | cad }}</span></div>
+          </div>
+          <div class="account-stat">
+            <div class="stat-label">Contribution Room Left</div>
+            <div class="stat-value mono">{{ acc.room.total_remaining | cad }}<span class="stat-cap">of {{ acc.room.lifetime_cap | cad }}</span></div>
+          </div>
+          {% else %}
+          <div class="account-stat">
+            <div class="stat-label">Total Room Left</div>
+            <div class="stat-value mono">{{ acc.room.total_remaining | cad }}{% if acc.room.total_cap %}<span class="stat-cap">of {{ acc.room.total_cap | cad }}</span>{% endif %}</div>
+          </div>
+          <div class="account-stat">
+            <div class="stat-label">This Year's Room Left</div>
+            <div class="stat-value mono">{{ acc.room.year_remaining | cad }}</div>
+          </div>
+          {% if acc.room.carry_over is not none %}
+          <div class="account-stat">
+            <div class="stat-label">Carry-Over From Last Year</div>
+            <div class="stat-value mono">{{ acc.room.carry_over | cad }}</div>
+          </div>
+          {% endif %}
+          {% endif %}
+        </div>
+        {% if acc.room.note %}<p class="room-note">{{ acc.room.note }}</p>{% endif %}
+        {% else %}
+        <p class="room-note">{{ acc.room.note }} <a href="{{ url_for('settings') }}">Open Settings →</a></p>
+        {% endif %}
+      </div>
+      {% endif %}
+
       <div class="account-breakdown" data-account="{{ acc.name }}">
         <div class="account-holdings-label">Allocation breakdown</div>
         <div class="breakdown-msg">Loading…</div>
