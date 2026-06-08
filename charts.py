@@ -53,6 +53,7 @@ CHART_CATALOG = [
 
     ('top_holdings',            'Top Holdings',               'Holdings',             'compact'),
     ('unrealized_by_holding',   'Unrealized G/L by Holding',  'Holdings',             'wide'),
+    ('unrealized_pct_by_holding', 'Unrealized Return %',      'Holdings',             'wide'),
     ('realized_by_year',        'Realized G/L by Year',       'Holdings',             'compact'),
     ('top_movers',              'Top Movers Today',           'Holdings',             'compact'),
 
@@ -325,6 +326,14 @@ def _b_unrealized_by_holding(account=None):
     return _diverging('unrealized_gl', 'Unrealized G/L by Holding', account)
 
 
+def _b_unrealized_pct_by_holding(account=None):
+    # Same diverging layout, but values are return % — flags the renderer's
+    # percent unit so the axis/tooltip format as "%" instead of CAD.
+    d = _diverging('unrealized_gl_pct', 'Unrealized Return % by Holding', account)
+    d['unit'] = 'percent'
+    return d
+
+
 def _realized_by_year(account):
     """Realized capital gain/loss per year (CAD), average-cost — across all
     account types (registered included) so it's not empty for sheltered accounts."""
@@ -477,6 +486,7 @@ _BUILDERS = {
     'time_horizon': _b_time_horizon,
     'top_holdings': _b_top_holdings,
     'unrealized_by_holding': _b_unrealized_by_holding,
+    'unrealized_pct_by_holding': _b_unrealized_pct_by_holding,
     'realized_by_year': _b_realized_by_year,
     'top_movers': _b_top_movers,
     'contribution_composition': _b_contribution_composition,

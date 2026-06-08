@@ -5,6 +5,15 @@
   const money = new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD', maximumFractionDigits: 0 });
   const TICK = '#5a7a96', GRID = 'rgba(120,160,200,.10)', TITLE = '#9fc0dc';
 
+  // A payload may declare unit: 'percent' (values already in percent units, e.g.
+  // 7.5 → "7.5%"); anything else formats as CAD. Returns the value formatter.
+  function formatter(d) {
+    if (d.unit === 'percent' || d.unit === 'pct') {
+      return (v) => (v == null || isNaN(v)) ? '' : v.toFixed(1) + '%';
+    }
+    return (v) => money.format(v);
+  }
+
   function hexA(hex, a) {
     if (!hex || hex[0] !== '#') return hex;
     const n = parseInt(hex.slice(1), 16);
@@ -12,6 +21,7 @@
   }
 
   function buildChartConfig(d) {
+    const fmt = formatter(d);
     const common = {
       responsive: true, maintainAspectRatio: false,
       plugins: {
@@ -23,7 +33,7 @@
               const p = c.parsed;
               const horiz = c.chart.options.indexAxis === 'y';
               const v = (typeof p === 'number') ? p : (horiz ? p.x : p.y);
-              return (c.dataset.label ? c.dataset.label + ': ' : '') + money.format(v);
+              return (c.dataset.label ? c.dataset.label + ': ' : '') + fmt(v);
             }
           }
         }
@@ -39,7 +49,7 @@
           plugins: {
             ...common.plugins,
             legend: { display: true, position: 'right', labels: { color: TICK, boxWidth: 12, font: { size: 11 } } },
-            tooltip: { callbacks: { label: (c) => c.label + ': ' + money.format(c.parsed) } }
+            tooltip: { callbacks: { label: (c) => c.label + ': ' + fmt(c.parsed) } }
           }
         }
       };
@@ -58,11 +68,11 @@
       return { label: s.label || '', data: s.data, backgroundColor: s.colors || s.color, borderWidth: 0, borderRadius: 3 };
     });
 
-    const moneyAxis = { ticks: { color: TICK, callback: (v) => money.format(v) }, grid: { color: GRID } };
+    const valueAxis = { ticks: { color: TICK, callback: (v) => fmt(v) }, grid: { color: GRID } };
     const catAxis = { ticks: { color: TICK, maxRotation: 0, autoSkip: true }, grid: { display: false } };
     const scales = horiz
-      ? { x: { ...moneyAxis }, y: { ...catAxis, grid: { display: false } } }
-      : { x: { ...catAxis, stacked }, y: { ...moneyAxis, stacked } };
+      ? { x: { ...valueAxis }, y: { ...catAxis, grid: { display: false } } }
+      : { x: { ...catAxis, stacked }, y: { ...valueAxis, stacked } };
 
     return {
       type: cjtype,
