@@ -118,8 +118,14 @@
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <a class="btn btn-sm" href="{{ url_for('export_transactions') }}">↓ Export transactions (CSV)</a>
       <a class="btn btn-sm" href="{{ url_for('backup_db') }}">↓ Download database backup</a>
+      <button type="button" class="btn btn-sm" onclick="loadSampleData()">⚄ Load sample data</button>
       <button type="button" class="btn btn-sm btn-danger" onclick="resetDatabase()">Reset Database</button>
     </div>
+    <p style="font-size:.72rem;color:var(--text-muted);margin-top:8px">
+      <strong>Load sample data</strong> replaces all current data with a demo portfolio
+      (5 accounts, ~5 years of transactions, GICs and a watchlist) so you can explore every
+      feature. Reset it to empty anytime before adding your own.
+    </p>
     <form method="POST" action="{{ url_for('restore_database') }}" enctype="multipart/form-data"
           onsubmit="return confirmRestore()"
           style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:16px">
@@ -153,6 +159,14 @@ function resetDatabase() {
 }
 function confirmRestore() {
   return confirm('Restore will replace ALL current data with the uploaded backup. Continue?');
+}
+function loadSampleData() {
+  if (!confirm('This REPLACES all current data with a demo portfolio.\n\nIf you have your own data, download a backup first. Continue?')) return;
+  const f = document.createElement('form');
+  f.method = 'POST';
+  f.action = '{{ url_for("load_sample_data") }}';
+  document.body.appendChild(f);
+  f.submit();
 }
 </script>
 {% endblock %}

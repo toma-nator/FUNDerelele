@@ -786,17 +786,38 @@ def restore_database():
     return redirect(url_for('settings'))
 
 
-@app.route('/settings/reset', methods=['POST'])
-def reset_database():
-    # Full wipe back to first-run state. Destructive; guarded by JS confirms.
+def _wipe_all_data():
+    """Delete every row from every table (first-run state). Caller commits."""
     for model in (Transaction, GIC, WatchlistItem, TickerMap,
                   PortfolioSnapshot, PriceCache, Account, Setting):
         model.query.delete()
+
+
+@app.route('/settings/reset', methods=['POST'])
+def reset_database():
+    # Full wipe back to first-run state. Destructive; guarded by JS confirms.
+    _wipe_all_data()
     db.session.commit()
     # Re-seed the FX default so prices/FX keep working after the wipe.
     db.session.add(Setting(key='fx_usd_cad', value='1.365'))
     db.session.commit()
     flash('Database reset — all data deleted. Starting fresh.', 'success')
+    return redirect(url_for('settings'))
+
+
+@app.route('/settings/load-sample', methods=['POST'])
+def load_sample_data():
+    # Replace all data with the demo portfolio. Destructive; guarded by JS confirm.
+    from generate_sample_data import build_sample_data
+    try:
+        _wipe_all_data()
+        db.session.commit()
+        build_sample_data()  # seeds accounts, transactions, GICs, watchlist, FX
+        flash('Sample data loaded — 5 accounts, ~5 years of transactions, GICs and a '
+              'watchlist. Prices populate on the next refresh.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not load sample data: {e}', 'error')
     return redirect(url_for('settings'))
 
 

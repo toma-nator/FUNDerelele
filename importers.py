@@ -975,9 +975,16 @@ def _import_native(rows, account_override=None):
                     acct.type = atype
 
             net_cad = num(row.get('net_cad'))
-            # Amount-aware dedup so re-importing into the same DB is idempotent.
+            qty = num(row.get('qty'))
+            price = num(row.get('price'))
+            # Amount- and quantity-aware dedup so re-importing into the same DB is
+            # idempotent. qty/price are part of the key so cash-neutral pairs that
+            # only differ in shares — e.g. a Split (+120) and its reversal (−120),
+            # both net_cad=0 — aren't collapsed into one (which would corrupt the
+            # share count on a full CSV restore).
             existing = Transaction.query.filter_by(
-                date=txn_date, account=account, ticker=ticker, type=ttype, net_cad=net_cad
+                date=txn_date, account=account, ticker=ticker, type=ttype,
+                net_cad=net_cad, qty=qty, price=price
             ).first()
             if existing:
                 skipped += 1
@@ -986,7 +993,7 @@ def _import_native(rows, account_override=None):
             db.session.add(Transaction(
                 date=txn_date, ticker=ticker, account=account, type=ttype,
                 subtype=(row.get('subtype', '') or '').strip(),
-                qty=num(row.get('qty')), price=num(row.get('price')),
+                qty=qty, price=price,
                 currency=(row.get('currency', 'CAD') or 'CAD').strip().upper(),
                 amount_native=num(row.get('amount_native')),
                 amount_cad=num(row.get('amount_cad')),
