@@ -155,6 +155,7 @@ def get_dashboard_stats(holdings):
 
     cash_by_account = get_cash_by_account()
     total_cash = sum(cash_by_account.values())
+    total_gics = sum(v['value'] for v in get_gic_value_by_account().values())
 
     account_breakdown = {}
     for h in holdings:
@@ -162,7 +163,7 @@ def get_dashboard_stats(holdings):
         account_breakdown[acc] = account_breakdown.get(acc, 0) + (h['market_value_cad'] or 0)
 
     return {
-        'total_portfolio': total_mv + total_cash,
+        'total_portfolio': total_mv + total_cash + total_gics,
         'total_mv': total_mv,
         'total_book': total_book,
         'total_unrealized': total_unrealized,
@@ -170,6 +171,7 @@ def get_dashboard_stats(holdings):
         'total_day_change': total_day_change,
         'total_dividends': total_dividends,
         'total_cash': total_cash,
+        'total_gics': total_gics,
         'num_holdings': len(holdings),
         'account_breakdown': account_breakdown,
     }
@@ -438,6 +440,7 @@ def get_account_summary():
     all_holdings = get_holdings(include_closed=True)
     accounts = Account.query.all()
     cash_by_account = get_cash_by_account()
+    gic_by_account = get_gic_value_by_account()
 
     # Personal contributions vs. free government money (RDSP grants/bonds).
     # Grants and bonds aren't money the user put in, so they count toward gain.
@@ -464,13 +467,17 @@ def get_account_summary():
         dividends_total = sum(h['dividends_cad'] for h in acct_all)
         realized_total = sum(h['realized_gl_cad'] for h in acct_all)
         cash = cash_by_account.get(account.name, 0.0)
+        gic = gic_by_account.get(account.name, {'value': 0.0, 'principal': 0.0})
+        gic_value_cad = gic['value']
 
-        # Hide empty accounts — only show ones holding money or positions.
-        if abs(holdings_mv) < 0.005 and abs(cash) < 0.005:
+        # Hide empty accounts — only show ones holding money, positions, or GICs.
+        if abs(holdings_mv) < 0.005 and abs(cash) < 0.005 and abs(gic_value_cad) < 0.005:
             continue
 
-        total_value = holdings_mv + cash
-        net_contributions = contrib_by_account.get(account.name, 0.0)
+        total_value = holdings_mv + cash + gic_value_cad
+        # GIC principal isn't a cash transaction in this app, so count it as
+        # contributed capital — then all-time gain reflects only accrued interest.
+        net_contributions = contrib_by_account.get(account.name, 0.0) + gic['principal']
         grants_bonds = grants_by_account.get(account.name, 0.0)
 
         result.append({
@@ -480,6 +487,7 @@ def get_account_summary():
             'holdings_mv': holdings_mv,
             'holdings_book': holdings_book,
             'cash_balance': cash,
+            'gic_value': gic_value_cad,
             'total_value': total_value,
             'unrealized_gl': unrealized,
             'unrealized_gl_pct': (unrealized / holdings_book * 100) if holdings_book else 0,
@@ -519,12 +527,22 @@ def get_account_breakdown(account_name):
 
     holdings = [h for h in get_holdings() if h['account'] == account_name]
     cash = get_cash_by_account().get(account_name, 0.0)
+    gic_cad = get_gic_value_by_account().get(account_name, {}).get('value', 0.0)
     total_mv = sum(h['market_value_cad'] or 0 for h in holdings)
+
+    def _invested_vs_cash(invested):
+        """Holdings vs Cash vs GICs slice, dropping any zero buckets."""
+        tot = invested + cash + gic_cad
+        if tot <= 0:
+            return []
+        parts = [('Invested', invested), ('Cash', cash), ('GICs', gic_cad)]
+        return [{'label': lbl, 'value': round(v, 2), 'pct': round(v / tot * 100, 1)}
+                for lbl, v in parts if abs(v) > 0.005]
 
     if total_mv <= 0:
         return {'ok': True, 'total_mv': 0, 'cash': round(cash, 2),
                 'asset_type': [], 'sector': [], 'market_cap': [],
-                'currency': [], 'invested_vs_cash': [], 'positions': []}
+                'currency': [], 'invested_vs_cash': _invested_vs_cash(0.0), 'positions': []}
 
     meta = get_holdings_metadata([h['ticker'] for h in holdings])
     asset_type, sector, market_cap, currency = {}, {}, {}, {}
@@ -565,13 +583,7 @@ def get_account_breakdown(account_name):
              for k, v in d.items()],
             key=lambda x: x['value'], reverse=True)
 
-    account_total = total_mv + cash
-    invested_vs_cash = [
-        {'label': 'Invested', 'value': round(total_mv, 2),
-         'pct': round(total_mv / account_total * 100, 1) if account_total else 0},
-        {'label': 'Cash', 'value': round(cash, 2),
-         'pct': round(cash / account_total * 100, 1) if account_total else 0},
-    ]
+    invested_vs_cash = _invested_vs_cash(total_mv)
     positions.sort(key=lambda x: x['value'], reverse=True)
 
     return {
@@ -797,6 +809,49 @@ def get_dividend_stats(scope='portfolio'):
 
 # ── GICs ──────────────────────────────────────────────────────────────────────
 
+_GIC_COMP_PERIODS = {'Monthly': 12, 'Quarterly': 4, 'Semi-Annual': 2, 'Annual': 1}
+
+
+def gic_value(g, as_of=None):
+    """Value of a single GIC as of a date: (current_value, value_at_maturity).
+    Grows the principal at its (compounded or simple) rate over elapsed/total time."""
+    from datetime import date
+    today = as_of or date.today()
+    if not g.start_date or not g.maturity_date:
+        return g.principal or 0.0, g.principal or 0.0
+    days_total = max(1, (g.maturity_date - g.start_date).days)
+    days_elapsed = max(0, min(days_total, (today - g.start_date).days))
+    rate = (g.rate or 0) / 100
+    years_total = days_total / 365
+    years_elapsed = days_elapsed / 365
+    n = _GIC_COMP_PERIODS.get(g.compounding, 0)
+    if n > 0:
+        value_at_maturity = g.principal * (1 + rate / n) ** (n * years_total)
+        current_value = g.principal * (1 + rate / n) ** (n * years_elapsed)
+    else:  # simple interest
+        value_at_maturity = g.principal * (1 + rate * years_total)
+        current_value = g.principal * (1 + rate * years_elapsed)
+    return current_value, value_at_maturity
+
+
+def get_gic_value_by_account(as_of=None):
+    """Per-account current value and principal of ACTIVE (not matured) GICs.
+    Matured GICs are excluded — their principal has been paid back to cash.
+    Returns {account: {'value': float, 'principal': float}}."""
+    from models import GIC
+    from datetime import date
+    today = as_of or date.today()
+    out = {}
+    for g in GIC.query.all():
+        if not g.account or not g.maturity_date or today >= g.maturity_date:
+            continue
+        cur, _ = gic_value(g, today)
+        rec = out.setdefault(g.account, {'value': 0.0, 'principal': 0.0})
+        rec['value'] += cur
+        rec['principal'] += g.principal or 0.0
+    return out
+
+
 def get_gic_stats(account_filter=None, show_matured=False):
     from models import GIC
     from datetime import date
@@ -806,8 +861,6 @@ def get_gic_stats(account_filter=None, show_matured=False):
 
     # Accounts that actually hold a GIC — drives the chip filter row.
     gic_accounts = sorted({g.account for g in gics if g.account})
-
-    comp_periods = {'Monthly': 12, 'Quarterly': 4, 'Semi-Annual': 2, 'Annual': 1}
 
     rows = []
     for g in gics:
@@ -821,17 +874,7 @@ def get_gic_stats(account_filter=None, show_matured=False):
         days_remaining = max(0, (g.maturity_date - today).days)
         pct_elapsed = days_elapsed / days_total * 100
 
-        rate = (g.rate or 0) / 100
-        years_total = days_total / 365
-        years_elapsed = days_elapsed / 365
-
-        n = comp_periods.get(g.compounding, 0)
-        if n > 0:
-            value_at_maturity = g.principal * (1 + rate / n) ** (n * years_total)
-            current_value = g.principal * (1 + rate / n) ** (n * years_elapsed)
-        else:  # Simple interest
-            value_at_maturity = g.principal * (1 + rate * years_total)
-            current_value = g.principal * (1 + rate * years_elapsed)
+        current_value, value_at_maturity = gic_value(g, today)
 
         rows.append({
             'id': g.id,

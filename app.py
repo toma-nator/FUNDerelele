@@ -5,7 +5,13 @@ import os
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///finance.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.secret_key = 'midnight-terminal-2024'
+# Secret key from the environment in production; a fixed dev fallback keeps local
+# runs zero-config (sessions/flash only — no sensitive data rides on it).
+app.secret_key = os.environ.get('SECRET_KEY', 'midnight-terminal-dev')
+# Don't let cookies ride along on cross-site POSTs (basic CSRF hardening for a
+# local single-user app — blocks a malicious page from triggering Reset/Restore).
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 from models import db, Transaction, PriceCache, Account, Setting, GIC, WatchlistItem, PortfolioSnapshot, TickerMap
 db.init_app(app)
@@ -1024,4 +1030,6 @@ def api_fx():
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Debug off by default; opt in locally with FLASK_DEBUG=1. The Werkzeug
+    # debugger allows code execution, so never enable it on an exposed host.
+    app.run(debug=os.environ.get('FLASK_DEBUG') == '1')

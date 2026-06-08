@@ -52,12 +52,16 @@ KPI_CATALOG = [
 
 
 def _personal_contributions():
+    from calculations import get_gic_value_by_account
     total = 0.0
     for net, sub in (Transaction.query.filter_by(type='Deposit')
                      .with_entities(Transaction.net_cad, Transaction.subtype)):
         n = net or 0.0
         if sub not in ('RDSP Grant', 'RDSP Bond') and n > 0:
             total += n
+    # GIC principal isn't booked as a cash deposit; count it as contributed capital
+    # so the gain on net worth (which now includes GIC value) is only the interest.
+    total += sum(v['principal'] for v in get_gic_value_by_account().values())
     return total
 
 

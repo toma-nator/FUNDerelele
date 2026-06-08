@@ -236,22 +236,21 @@ account's funding building up rather than just per-year amounts.
 - **Effort:** small — a running-sum series in `get_cashflow_stats` and a line
   dataset in `cashflows.html`.
 
-## GICs — fold into net worth (Dashboard / Accounts)
+## GICs — fold into Performance series (remaining piece)
 
-GICs currently live only on the GICs tab (`GIC` is never referenced by the
-Dashboard, Accounts, or Performance calcs), so their principal + accrued
-interest isn't part of net worth anywhere. A $5k GIC is invisible outside its
-own tab.
+_Mostly done:_ active GICs now count toward net worth — `get_gic_value_by_account`
+feeds the Dashboard total (`total_gics`), each account's `total_value` in
+`get_account_summary` (with principal treated as contributed, so gain = accrued
+interest only), and a distinct **GICs** slice in the account allocation
+(`get_account_breakdown`). Matured GICs are excluded. The shared `gic_value`
+helper holds the current-value math.
 
-- **Compute:** add active GICs' `current_value` to the relevant account's total
-  in `get_account_summary` / the dashboard net-worth figure (and optionally a
-  "GICs" line in the account allocation, like cash). Use the same per-GIC
-  current-value math already in `get_gic_stats` (factor it out to share).
-- **Scope note:** decide whether GIC value counts as part of the account's cash
-  or as a distinct asset class in the allocation breakdowns; matured GICs should
-  be excluded (their principal returns to cash).
-- **Effort:** medium — cross-tab; touches account summary, dashboard, and
-  possibly the allocation breakdowns and Performance valuation.
+**Still parked:** the **Performance time-series** (`get_performance_series`)
+doesn't value GICs at each historical month, so the value/TWR line ignores them.
+Adding it means valuing each active GIC at every month-end (using `gic_value`
+with an `as_of` date) and folding it into the monthly market value — plus
+deciding how a GIC maturity (principal returning to cash) flows through the
+series. _Effort: medium — month-by-month valuation + maturity handling._
 
 ## Rebalancer — exact (convergent) trade solver
 
@@ -435,3 +434,30 @@ carry-forward** math and the two-phase accumulate→decumulate / LDAP projection
   (saved in memory) for the grant/bond and LDAP rules to mirror.
 - **Effort:** large — RDSP-specific rules (grants/bonds, holdback, LDAP) plus a
   two-phase (accumulate → decumulate) projection and a glide-path model.
+
+## Pre-public hardening — parked items
+
+Scoped during the go-public pass; the quick security/docs/cleanup wins were done
+(env secret key + debug, `SameSite=Lax`, MIT LICENSE, local-only README note,
+requirements pin, GICs in net worth). These were deliberately deferred:
+
+- **Test suite.** No automated tests exist, and the importers (TD / CIBC /
+  native) and ACB/holdings math are intricate — three were changed recently. Add
+  `pytest` cases for: CIBC round-trip, native-CSV idempotency, and ACB over a
+  buy/sell/split sequence. _Effort: medium; highest leverage once others send PRs._
+- **yfinance resilience.** The whole app depends on an unofficial, rate-limited
+  API. Add retry/backoff in `price_service` and a visible "prices stale (last
+  updated X)" indicator instead of silent $0s when a fetch fails (the cache
+  already stores last-good prices — lean on it). _Effort: medium._
+- **Income tax on the Tax tab.** Today it models only capital gains. For the
+  dividend-heavy audience, add an income section: eligible-dividend gross-up +
+  dividend tax credit, interest at full marginal, and US withholding as a foreign
+  tax credit. _Effort: medium–large; easy to get approximately right, hard to get
+  CRA-exact._
+- **README screenshots.** A public repo's first impression. Capture the
+  Dashboard, Accounts, Charts, and Dividends tabs (with sample data loaded) and
+  add a `## Screenshots` section to the README. _Effort: small (needs the app
+  running to capture)._
+
+(Broadening the importer to more brokers / file types is already parked above
+under "Import — accept more file types".)

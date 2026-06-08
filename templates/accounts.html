@@ -52,6 +52,12 @@
         <div class="stat-label">Cash</div>
         <div class="stat-value mono">{{ acc.cash_balance | cad }}</div>
       </div>
+      {% if acc.gic_value %}
+      <div class="account-stat">
+        <div class="stat-label">GICs</div>
+        <div class="stat-value mono">{{ acc.gic_value | cad }}</div>
+      </div>
+      {% endif %}
       <div class="account-stat">
         <div class="stat-label">Unrealized G/L</div>
         <div class="stat-value mono {{ acc.unrealized_gl | gl_class }}">{{ acc.unrealized_gl | signed_cad }}</div>

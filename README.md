@@ -82,7 +82,25 @@ The first run creates an empty database (`instance/finance.db`) automatically.
 - In **Settings → Data & Backup** you can:
   - **Export transactions (CSV)** — a complete, re-importable copy.
   - **Download / Restore a database backup** — a full snapshot you can restore later.
+  - **Load sample data** — fill the app with a demo portfolio (5 accounts, ~5 years
+    of transactions, GICs and a watchlist) to explore every feature. **Reset** it to
+    empty before adding your own.
   - **Reset Database** — wipe everything back to a clean slate (with confirmations).
+
+> **Tip:** before you experiment (Reset, Load sample data, Restore), use
+> **Download database backup** first — restoring that `.db` brings everything back
+> exactly as it was.
+
+---
+
+## Local-only & disclaimer
+
+- This app is meant to run **on your own machine** for **one person**. It has **no
+  login and a single shared database**, so **don't host it on a public/shared
+  server** — anyone who could reach it would see and edit your finances.
+- **Not financial or tax advice.** Holdings, gains/losses, ACB, and tax figures are
+  **estimates** for personal tracking — verify anything important against your
+  broker and the CRA.
 
 ---
 
