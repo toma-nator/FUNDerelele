@@ -43,6 +43,7 @@
             <option value="WithholdingTax">Withholding Tax</option>
             <option value="Split">Split</option>
             <option value="Fee">Fee</option>
+            <option value="CurrencyExchange">Currency Exchange</option>
           </select>
         </div>
       </div>
@@ -77,6 +78,20 @@
         <div class="form-group" id="grp-fees">
           <label>Fees (CAD)</label>
           <input type="number" name="fees" class="form-input mono" placeholder="4.95" step="any" min="0" />
+        </div>
+        <div class="form-group" id="grp-fx" style="display:none">
+          <label>Exchange (one side must be CAD)</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="number" name="from_amount" class="form-input mono" placeholder="from" step="any" min="0" style="width:90px" />
+            <select name="from_currency" class="form-input mono" style="width:74px">
+              <option value="CAD">CAD</option><option value="USD">USD</option>
+            </select>
+            <span>→</span>
+            <input type="number" name="to_amount" class="form-input mono" placeholder="to" step="any" min="0" style="width:90px" />
+            <select name="to_currency" class="form-input mono" style="width:74px">
+              <option value="USD">USD</option><option value="CAD">CAD</option>
+            </select>
+          </div>
         </div>
         <div class="form-group">
           <label>Notes</label>
@@ -293,12 +308,14 @@ function updateTxnForm() {
     WithholdingTax:  {ticker:1, qty:0, price:0, amount:1, subtype:0, currency:1, fees:0},
     Split:           {ticker:1, qty:1, price:0, amount:0, subtype:0, currency:0, fees:0, qtyLabel:'New shares added'},
     Fee:             {ticker:0, qty:0, price:0, amount:1, subtype:0, currency:1, fees:0},
+    CurrencyExchange:{ticker:0, qty:0, price:0, amount:0, subtype:0, currency:0, fees:0, fx:1},
   };
   const c = CFG[sel.value] || CFG.Buy;
   const grp = (id, on) => { const el = document.getElementById('grp-' + id); if (el) el.style.display = on ? '' : 'none'; };
   const req = (name, on) => { const el = document.querySelector('[name="' + name + '"]'); if (el) el.required = !!on; };
-  ['ticker', 'qty', 'price', 'amount', 'subtype', 'currency', 'fees'].forEach(k => grp(k, c[k]));
+  ['ticker', 'qty', 'price', 'amount', 'subtype', 'currency', 'fees', 'fx'].forEach(k => grp(k, c[k]));
   req('ticker', c.ticker); req('qty', c.qty); req('price', c.price); req('amount', c.amount);
+  req('from_amount', c.fx); req('to_amount', c.fx);
   const ql = document.getElementById('qtyLabel');
   if (ql) ql.textContent = c.qtyLabel || 'Quantity';
 }

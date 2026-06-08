@@ -250,6 +250,19 @@ def add_transaction():
         currency = request.form.get('currency', 'CAD') or 'CAD'
         fees = float(request.form.get('fees', 0) or 0)
         notes = request.form.get('notes', '')
+
+        # Currency Exchange is a two-legged cash transfer (one side must be CAD),
+        # handled by its own helper before the share/cash field logic below.
+        if txn_type == 'CurrencyExchange':
+            from currency import add_exchange
+            from_ccy = request.form.get('from_currency', 'CAD')
+            to_ccy = request.form.get('to_currency', 'USD')
+            from_amt = float(request.form.get('from_amount') or 0)
+            to_amt = float(request.form.get('to_amount') or 0)
+            add_exchange(account, txn_date, from_ccy, from_amt, to_ccy, to_amt, notes=notes)
+            flash(f'Recorded exchange: {from_amt:g} {from_ccy} → {to_amt:g} {to_ccy} in {account}.', 'success')
+            return redirect(url_for('transactions'))
+
         subtype = request.form.get('subtype', '').strip() if txn_type == 'Deposit' else ''
 
         # Cash-only types live on the CASH pseudo-ticker; the rest use the field.
@@ -358,6 +371,21 @@ def accounts():
     data = get_account_summary()
     return render_template('accounts.html', accounts=data, active='accounts',
                            account_types=ACCOUNT_TYPES, horizon_buckets=HORIZON_BUCKETS)
+
+
+@app.route('/accounts/<name>/reconcile-fx', methods=['POST'])
+def reconcile_fx(name):
+    Account.query.filter_by(name=name).first_or_404()
+    try:
+        from currency import reconcile_account_fx
+        made = reconcile_account_fx(name)
+        if made:
+            flash(f'Reconciled {name}: added {made} balancing exchange(s); foreign cash zeroed.', 'success')
+        else:
+            flash(f'Nothing to reconcile for {name} (no residual foreign cash).', 'info')
+    except Exception as e:
+        flash(f'Error: {e}', 'error')
+    return redirect(url_for('accounts'))
 
 
 @app.route('/accounts/<name>/cash', methods=['POST'])

@@ -53,6 +53,12 @@
         <div class="account-stat">
           <div class="stat-label">Cash ({{ 'US$' if ccy == 'USD' else ccy }})</div>
           <div class="stat-value mono">{% if ccy == 'USD' %}{{ amt | usd }}{% else %}{{ amt | cad }}{% endif %}</div>
+          {% if ccy != 'CAD' and amt < 0 %}
+          <form method="post" action="{{ url_for('reconcile_fx', name=acc.name) }}" style="margin-top:4px"
+                onsubmit="return confirm('Negative {{ ccy }} cash usually means {{ ccy }} buys were funded by an unrecorded CAD→{{ ccy }} conversion. Record a balancing exchange to zero it (CAD cash drops by the same value; net worth and graphs unchanged)?')">
+            <button type="submit" class="btn btn-sm" title="Record a balancing CAD→{{ ccy }} exchange">Reconcile</button>
+          </form>
+          {% endif %}
         </div>
         {% endfor %}
       {% else %}
