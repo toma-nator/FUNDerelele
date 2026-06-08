@@ -20,12 +20,29 @@
     </div>
     <div class="hero-sub">{{ hero.num_holdings }} holdings · {{ hero.cash }} cash</div>
   </div>
+  {% if alerts %}
+  <div class="hero-alerts" id="heroAlerts">
+    <span class="hero-alerts-title">⚠ Watchlist Alerts
+      <button class="te-btn alert-remove" id="alertRemove" title="Remove widget (in Customize)">🗑</button>
+      <button class="te-btn te-x" id="alertClose" title="Dismiss all">×</button>
+    </span>
+    {% for a in alerts %}
+    <span class="hero-alert hero-alert-{{ a.dir }}" data-key="{{ a.ticker }}:{{ a.dir }}">
+      <span class="mono ticker">{{ a.ticker }}</span>
+      <span class="hero-alert-label">{{ a.label }}</span>
+      <span class="mono hero-alert-px">{{ a.price }}<span class="text-dim"> / {{ a.target }}</span></span>
+      <button class="te-btn te-x alert-row-x" title="Dismiss {{ a.ticker }}">×</button>
+    </span>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="hero-spark"><canvas id="heroSpark"></canvas></div>
 </div>
 
 <!-- Edit controls (only visible in Customize mode) -->
 <div class="dash-edit-controls" id="editControls" style="display:none">
   <button class="btn btn-sm" id="heroShow" style="display:none">+ Hero strip</button>
+  <button class="btn btn-sm" id="alertShow" style="display:none">+ Price alerts</button>
   <select id="addKpi" class="dash-add"><option value="">+ Add KPI…</option></select>
   <select id="addWidget" class="dash-add">
     <option value="">+ Add widget…</option>
@@ -98,6 +115,65 @@
   document.getElementById('heroShow').addEventListener('click', () => {
     heroHidden = false; localStorage.setItem('dashHeroHidden', '0'); applyHero();
   });
+
+  // ── Watchlist price alerts (hero strip) ──
+  // Per-ticker × hides that chip (the "Watchlist Alerts" header stays); the
+  // header × hides the whole strip. Both re-show when the alert set changes.
+  // 🗑 (Customize only) disables the widget until re-added.
+  let alertEnabled = localStorage.getItem('dashAlertEnabled') !== '0';
+  let alertChips = load('dashAlertChips', []);                       // per-ticker dismissed keys
+  let alertHeaderSig = localStorage.getItem('dashAlertHeaderSig') || '';  // sig when header ×'d
+  const saveChips = () => localStorage.setItem('dashAlertChips', JSON.stringify(alertChips));
+  const alertKeys = () => {
+    const box = document.getElementById('heroAlerts');
+    return box ? Array.from(box.querySelectorAll('.hero-alert')).map(c => c.dataset.key) : [];
+  };
+  function applyAlerts() {
+    const reAdd = document.getElementById('alertShow');
+    if (reAdd) reAdd.style.display = (!alertEnabled && editing) ? '' : 'none';
+    const box = document.getElementById('heroAlerts');
+    if (!box) return;
+    const keys = alertKeys();
+    const sig = keys.slice().sort().join(',');
+    alertChips = alertChips.filter(k => keys.includes(k));  // drop stale per-ticker dismissals
+    saveChips();
+    box.querySelectorAll('.hero-alert').forEach(c => {
+      const hide = alertChips.includes(c.dataset.key) && !editing;  // show all in Customize
+      c.style.display = hide ? 'none' : '';
+    });
+    const headerDismissed = alertHeaderSig === sig && !editing;
+    box.style.display = (alertEnabled && !headerDismissed) ? '' : 'none';
+  }
+  (function () {
+    const box = document.getElementById('heroAlerts');
+    if (box) {
+      // Delegate so the per-ticker × always works, regardless of render timing.
+      box.addEventListener('click', (e) => {
+        const x = e.target.closest('.alert-row-x');
+        if (!x) return;
+        const key = x.closest('.hero-alert').dataset.key;
+        if (!alertChips.includes(key)) alertChips.push(key);
+        saveChips(); applyAlerts();
+      });
+      const close = document.getElementById('alertClose');
+      if (close) close.addEventListener('click', () => {
+        alertHeaderSig = alertKeys().slice().sort().join(',');
+        localStorage.setItem('dashAlertHeaderSig', alertHeaderSig);
+        applyAlerts();
+      });
+      const rm = document.getElementById('alertRemove');
+      if (rm) rm.addEventListener('click', () => {
+        alertEnabled = false; localStorage.setItem('dashAlertEnabled', '0'); applyAlerts();
+      });
+    }
+    const show = document.getElementById('alertShow');
+    if (show) show.addEventListener('click', () => {
+      alertEnabled = true; localStorage.setItem('dashAlertEnabled', '1');
+      alertChips = []; saveChips();
+      alertHeaderSig = ''; localStorage.removeItem('dashAlertHeaderSig');
+      applyAlerts();
+    });
+  })();
 
   function loadSparkline() {
     fetch('/dashboard/sparkline').then(r => r.json()).then(d => {
@@ -266,6 +342,7 @@
     document.getElementById('editControls').style.display = on ? 'flex' : 'none';
     document.getElementById('customizeBtn').textContent = on ? '✓ Done' : '⚙ Customize';
     applyHero();
+    applyAlerts();
   }
   document.getElementById('customizeBtn').addEventListener('click', () => setEditing(!editing));
   document.getElementById('resetDash').addEventListener('click', () => {
@@ -275,7 +352,7 @@
   });
 
   // init
-  renderHero(); applyHero(); loadSparkline();
+  renderHero(); applyHero(); applyAlerts(); loadSparkline();
   renderKpis(); refreshAddKpi(); renderWidgets();
 })();
 </script>

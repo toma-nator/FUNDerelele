@@ -501,6 +501,18 @@ def get_account_summary():
         net_contributions = contrib_by_account.get(account.name, 0.0) + gic['principal']
         grants_bonds = grants_by_account.get(account.name, 0.0)
 
+        # Group active positions by currency (CAD/USD/…) with per-group subtotals,
+        # so the detail view can show US vs CAD holdings separately.
+        ccy_map = {}
+        for h in acct_holdings:
+            g = ccy_map.setdefault(h['currency'], {
+                'currency': h['currency'], 'holdings': [], 'mv': 0.0, 'book': 0.0, 'unreal': 0.0})
+            g['holdings'].append(h)
+            g['mv'] += h['market_value_cad'] or 0
+            g['book'] += h['book_value_cad'] or 0
+            g['unreal'] += h['unrealized_gl'] or 0
+        ccy_groups = sorted(ccy_map.values(), key=lambda g: (g['currency'] != 'CAD', -g['mv']))
+
         result.append({
             'name': account.name,
             'type': account.type,
@@ -509,6 +521,8 @@ def get_account_summary():
             'holdings_book': holdings_book,
             'cash_balance': cash,
             'gic_value': gic_value_cad,
+            'ccy_groups': ccy_groups,
+            'multi_currency': len(ccy_groups) > 1,
             'total_value': total_value,
             'unrealized_gl': unrealized,
             'unrealized_gl_pct': (unrealized / holdings_book * 100) if holdings_book else 0,

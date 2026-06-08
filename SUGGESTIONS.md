@@ -2,6 +2,80 @@
 
 Ideas parked for future implementation. Not committed work — just a backlog.
 
+## Watchlist alerts — multiple tiers per ticker
+
+The dashboard hero alert + watchlist row highlight currently trigger on a single
+target (buy ≤ / sell ≥). Extend to **multiple alert levels per ticker** — e.g. a
+normal **Buy** target and a deeper **Extreme Buy** (strong-buy) target, and likewise
+tiered sell/take-profit levels. Each tier could have its own colour/label in the
+hero strip and watchlist row (e.g. amber "buy", green "extreme buy").
+
+- **Model:** today `WatchlistItem` has one `target_price` + `target_type`. Add
+  more target fields (or a small related `alert_levels` table: ticker, kind,
+  price, label) so a ticker can carry several thresholds.
+- **UI:** the watchlist add/edit form gains rows for each tier; `price_alerts()`
+  emits the deepest tier hit; the hero strip / row highlight pick colour by tier.
+- **Effort:** small–medium — a model/field add + form rows + a tier check in
+  `price_alerts` and the watchlist row classes.
+
+## Dashboard — "Restore alerts" button (Customize)
+
+A button in the dashboard **Customize** bar that **un-dismisses all watchlist
+alerts** — clears the per-ticker dismissals (`dashAlertChips`), the header dismiss
+(`dashAlertHeaderSig`), and re-enables the widget (`dashAlertEnabled`) in one click.
+Today re-adding the widget clears them, but there's no explicit "show everything I
+dismissed" control. _Effort: tiny — one button that clears those localStorage keys
+and calls `applyAlerts()`._
+
+## RRSP — contribution rules & room
+
+Add RRSP-specific contribution logic alongside the existing TFSA / FHSA / RDSP room
+math in `get_contribution_room`. RRSP room is **earned-income-driven** (18% of prior
+year's earned income, up to the annual max), plus carry-forward of unused room and
+the deduction-limit-vs-contributed distinction — so it needs a user-entered room
+figure (like the TFSA anchor) rather than being reconstructable from transactions
+alone. Surface it on the RRSP account detail and the Tax tab (RRSP contributions are
+deductible). _Effort: medium — a room input/anchor + a calculator + UI, mirroring the
+TFSA/FHSA room pattern._
+
+## Transactions — recurring / scheduled manual add
+
+Let a manually-added transaction **repeat on a schedule** (e.g. a monthly $500
+contribution, a quarterly DRIP, a recurring fee) instead of re-entering it each time.
+
+- **How:** a "Repeat" option on the Add-Transaction form (frequency: weekly /
+  monthly / quarterly / yearly, + end date or count). Store a small `recurring_rule`
+  table (template txn + cadence + next-date); generate the concrete transactions on
+  app start / a scan, or lazily up to today. Pairs with the auto-import folder watcher.
+- **Use cases:** automatic contributions, DRIPs, recurring account fees, GIC interest.
+- **Effort:** medium — a rule model + a generator pass + a small bit of form UI.
+
+## ⭐ HIGH IMPORTANCE — Multi-currency cash balances (per account)
+
+Let one account hold **two cash balances — CAD and USD** (and convert between them),
+instead of today's single CAD figure. This is the piece Brad's TFSA is waiting on
+(his USD $321.69 is currently folded into CAD with a "split later" note on the
+opening deposit).
+
+- **Why it's an architectural change:** cash is stored as one CAD number per account
+  — `get_cash_by_account` just sums every transaction's `net_cad` (always CAD). There
+  is no native/per-currency cash concept.
+- **What's needed:**
+  - Store each transaction's **native cash flow** (a `net_native` field + migration),
+    or derive it. CIBC import already has native `Amount`; TD's `Net Amount` is CAD,
+    so USD trades' native cash must be derived from qty×price ± fees.
+  - Bucket cash by **(account, currency)** → `{TFSA: {CAD: …, USD: …}}`; convert USD→CAD
+    at live FX for any total.
+  - A new **"Currency Exchange"** transaction type to move cash between the CAD and USD
+    pools (Norbert's gambit / FX conversion).
+  - A **USD deposit** option in the manual Add-Transaction form + importers.
+  - Thread per-currency cash through ~7 consumers: dashboard `total_cash`, Accounts
+    (two cash lines + holdings-vs-cash allocation), Performance valuation, Cash Flows.
+- **Effort:** medium — ~1–2 focused days; touches a core model + ~7 files, so plan
+  it before coding.
+- _Part 1 (grouping/sorting US vs CAD **stocks**) is already shipped (Accounts detail
+  groups positions by currency; Holdings tab has a CCY column + currency filter)._
+
 ## Branding — FUNDerelele logo & styling
 
 Give the app a real identity. Right now there's no logo or brand mark — just the

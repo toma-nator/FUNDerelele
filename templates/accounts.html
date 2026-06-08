@@ -192,7 +192,7 @@
 
       {% if acc.holdings or acc.closed_holdings %}
       <div class="account-holdings">
-        <div class="account-holdings-label">Positions — detailed</div>
+        <div class="account-holdings-label">Positions — detailed{% if acc.multi_currency %} <span class="bd-note">grouped by currency</span>{% endif %}</div>
         <table class="data-table mini">
           <thead>
             <tr>
@@ -208,7 +208,14 @@
             </tr>
           </thead>
           <tbody>
-            {% for h in acc.holdings %}
+            {% for g in acc.ccy_groups %}
+            {% if acc.multi_currency %}
+            <tr class="ccy-group-row">
+              <td colspan="9">{{ g.currency }} — {{ g.holdings | length }} position{{ 's' if g.holdings | length != 1 }}
+                <span class="text-dim">· {{ g.mv | cad }} (all values CAD)</span></td>
+            </tr>
+            {% endif %}
+            {% for h in g.holdings %}
             <tr>
               <td class="mono ticker">{{ h.ticker }}</td>
               <td class="r mono">{{ h.qty | num(2) }}</td>
@@ -220,6 +227,17 @@
               <td class="r mono text-green">{{ h.dividends_cad | cad }}</td>
               <td class="r mono {{ h.realized_gl_cad | gl_class }}">{{ h.realized_gl_cad | signed_cad }}</td>
             </tr>
+            {% endfor %}
+            {% if acc.multi_currency %}
+            <tr class="ccy-subtotal-row">
+              <td>{{ g.currency }} subtotal</td>
+              <td></td><td></td>
+              <td class="r mono">{{ g.book | cad }}</td>
+              <td class="r mono">{{ g.mv | cad }}</td>
+              <td class="r mono {{ g.unreal | gl_class }}">{{ g.unreal | signed_cad }}</td>
+              <td></td><td></td><td></td>
+            </tr>
+            {% endif %}
             {% endfor %}
             {% for h in acc.closed_holdings %}
             <tr class="closed-row">

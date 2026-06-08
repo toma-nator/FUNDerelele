@@ -163,6 +163,7 @@ def dashboard():
     return render_template('dashboard.html',
                            hero=overview['hero'],
                            kpis=overview['kpis'],
+                           alerts=dash.price_alerts(),
                            kpi_catalog=dash.KPI_CATALOG,
                            widget_groups=dash.widget_catalog_grouped(),
                            active='dashboard')

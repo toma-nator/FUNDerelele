@@ -182,7 +182,8 @@
       <tbody>
         {% for it in data.rows %}
         <tr data-owned="{{ 'owned' if it.owned else 'not' }}" data-sector="{{ it.sector }}" data-ccy="{{ it.currency }}"
-            data-search="{{ (it.ticker ~ ' ' ~ it.company) | lower }}">
+            data-search="{{ (it.ticker ~ ' ' ~ it.company) | lower }}"
+            {% if it.target_hit %}class="wl-hit wl-hit-{{ 'buy' if it.target_type == 'below' else 'sell' }}"{% endif %}>
           <td class="text-dim mono col-rownum">{{ loop.index }}</td>
           <td class="mono ticker" data-val="{{ it.ticker }}">
             {{ it.ticker }}{% if it.owned %} <span class="closed-badge" title="Held — {{ it.owned_value | cad }}">held</span>{% endif %}

@@ -405,6 +405,35 @@ body {
 .data-table.mini td,
 .data-table.mini th { padding: 7px 14px; }
 
+/* Currency-grouped positions (Accounts detail) */
+.ccy-group-row td {
+  background: rgba(255, 255, 255, .025);
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding-top: 11px !important;
+}
+.ccy-subtotal-row td {
+  border-top: 1px solid var(--border);
+  font-weight: 700;
+}
+.ccy-subtotal-row td:first-child {
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-dim);
+}
+
+/* Watchlist rows whose price target has been hit — highlight the whole row */
+tr.wl-hit td { background: rgba(0, 230, 118, .07); }
+tr.wl-hit:hover td { background: rgba(0, 230, 118, .11); }
+tr.wl-hit td:first-child { box-shadow: inset 3px 0 0 var(--green); }
+tr.wl-hit-sell td { background: rgba(255, 82, 82, .07); }
+tr.wl-hit-sell:hover td { background: rgba(255, 82, 82, .12); }
+tr.wl-hit-sell td:first-child { box-shadow: inset 3px 0 0 var(--red); }
+
 .empty-row {
   text-align: center;
   padding: 40px 20px;
@@ -676,6 +705,32 @@ a.hero-delta:hover { text-decoration: underline; }
 .hero-spark { width: 300px; max-width: 42%; height: 76px; flex: 0 0 auto; }
 .hero-hide { position: absolute; top: 8px; right: 8px; display: none; }
 .dash-editing .hero-hide { display: block; }
+
+/* Watchlist price-alert — small box in the middle, between value and sparkline */
+.hero-alerts {
+  flex: 0 1 auto; max-width: 260px; align-self: center;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 11px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-sub);
+  border-radius: 9px;
+  font-size: .74rem;
+}
+.hero-alerts-title {
+  display: flex; align-items: center; gap: 4px;
+  font-weight: 700; font-size: .66rem; letter-spacing: .03em; color: var(--orange); white-space: nowrap;
+}
+.hero-alerts-title .te-btn { margin-left: auto; }
+.alert-remove { display: none; }
+.dash-editing .alert-remove { display: inline-flex; }
+.hero-alert { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.hero-alert-label { color: var(--text-muted); font-size: .68rem; flex: 1; }
+.hero-alert-px { font-size: .7rem; }
+.hero-alert-buy .ticker { color: var(--green); }
+.hero-alert-sell .ticker { color: var(--red); }
+.alert-row-x { opacity: .55; }
+.alert-row-x:hover { opacity: 1; }
+@media (max-width: 820px) { .hero-alerts { display: none; } }
 
 .dash-edit-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
 .dash-add {

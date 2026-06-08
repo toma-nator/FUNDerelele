@@ -79,6 +79,30 @@ def _room_total():
     return total, bool(seen)
 
 
+def price_alerts():
+    """Watchlist items whose live price has crossed their target: below a buy
+    target ('below') or above a sell target ('above'). Drives the hero alert."""
+    from models import WatchlistItem, PriceCache
+    out = []
+    for it in WatchlistItem.query.order_by(WatchlistItem.ticker).all():
+        if not it.target_price:
+            continue
+        pc = PriceCache.query.get(it.ticker)
+        price = pc.price if pc else None
+        if not price:
+            continue
+        tt = it.target_type or 'below'
+        if tt == 'below' and price <= it.target_price:
+            d, label = 'buy', 'below buy target'
+        elif tt == 'above' and price >= it.target_price:
+            d, label = 'sell', 'above sell target'
+        else:
+            continue
+        out.append({'ticker': it.ticker, 'dir': d, 'label': label,
+                    'price': _cad(price), 'target': _cad(it.target_price)})
+    return out
+
+
 def build_overview():
     """Hero + every KPI in one pass (shared computations)."""
     holdings = get_holdings()
