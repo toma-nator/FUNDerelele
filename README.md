@@ -27,8 +27,8 @@ That's it. No accounts, no API keys, no paid services.
 **1. Get the code.** Either download the ZIP from GitHub (green *Code* button →
 *Download ZIP*) and unzip it, or clone it:
 ```
-git clone https://github.com/<your-username>/<repo-name>.git
-cd <repo-name>
+git clone https://github.com/toma-nator/FUNDerelele.git
+cd FUNDerelele
 ```
 
 **2. (Recommended) Create a virtual environment** — keeps these packages separate
