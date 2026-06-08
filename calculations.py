@@ -682,7 +682,9 @@ def get_dividend_stats(scope='portfolio'):
     from datetime import datetime as dt
     from price_service import get_holdings_metadata
 
-    dq = Transaction.query.filter_by(type='Dividend')
+    # Income = dividends + interest (cash/money-market). Both are cash income;
+    # only dividends carry withholding tax. They share this tab's totals & charts.
+    dq = Transaction.query.filter(Transaction.type.in_(['Dividend', 'Interest']))
     wq = Transaction.query.filter_by(type='WithholdingTax')
     if scope and scope != 'portfolio':
         dq = dq.filter_by(account=scope)
@@ -699,7 +701,10 @@ def get_dividend_stats(scope='portfolio'):
                 sum(r.amount_cad for r in rows if r.date >= ytd_start),
                 sum(r.amount_cad for r in rows if r.date >= ttm_start))
 
-    g_all, g_ytd, g_ttm = period_sums(dividends)      # gross
+    interest_rows = [d for d in dividends if d.type == 'Interest']
+    i_all, i_ytd, i_ttm = period_sums(interest_rows)  # interest income (no withholding)
+
+    g_all, g_ytd, g_ttm = period_sums(dividends)      # gross (dividends + interest)
     w_all, w_ytd, w_ttm = period_sums(withholdings)   # withholding tax (amount_cad positive)
     n_all, n_ytd, n_ttm = g_all - w_all, g_ytd - w_ytd, g_ttm - w_ttm  # net received
 
@@ -778,6 +783,8 @@ def get_dividend_stats(scope='portfolio'):
         'scope': scope,
         'all_time': n_all, 'ytd': n_ytd, 'ttm': n_ttm,
         'gross_all': g_all, 'withheld_all': w_all,
+        'interest_all': i_all, 'interest_ytd': i_ytd, 'interest_ttm': i_ttm,
+        'has_interest': bool(interest_rows),
         'ttm_monthly_avg': n_ttm / 12 if n_ttm else 0,
         'forward_income': fwd_total,
         'forward_yield': (fwd_total / total_mv * 100) if total_mv else 0,

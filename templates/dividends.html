@@ -16,7 +16,7 @@
   <div class="stat-card">
     <div class="stat-label">All-Time (net)</div>
     <div class="stat-value text-green">{{ stats.all_time | cad }}</div>
-    <div class="stat-sub text-dim">gross {{ stats.gross_all | cad }} · withheld {{ stats.withheld_all | cad }}</div>
+    <div class="stat-sub text-dim">gross {{ stats.gross_all | cad }} · withheld {{ stats.withheld_all | cad }}{% if stats.has_interest %} · incl. interest {{ stats.interest_all | cad }}{% endif %}</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">YTD (net)</div>

@@ -2,6 +2,28 @@
 
 Ideas parked for future implementation. Not committed work — just a backlog.
 
+## Branding — FUNDerelele logo & styling
+
+Give the app a real identity. Right now there's no logo or brand mark — just the
+nav and the Midnight Terminal theme. Add a **FUNDerelele logo** and tie the
+styling together around it so it reads as a finished product rather than a
+generic dashboard.
+
+- **Logo:** a small SVG mark + wordmark ("FUNDerelele") placed at the top of the
+  sidebar in `base.html` (above the nav sections) and as the browser tab favicon.
+  SVG keeps it crisp at any size and lets it inherit theme colours. Drop the
+  source in `static/img/` (e.g. `logo.svg`, `favicon.svg`).
+- **Styling:** pull the logo's accent colour into the existing CSS variables in
+  `static/css/style.css` so the brand colour flows through links, active nav
+  items, chart accents, and buttons — keep the Midnight Terminal dark base.
+  Optionally a subtle logo watermark on the dashboard hero or login/empty states.
+- **Polish:** matching favicon, page `<title>` prefix, and a small footer credit.
+- **Keep it on-theme:** Midnight Terminal dark stays the base; the logo just adds
+  a consistent accent and personality. Clean and uncluttered per the UI bar.
+- **Effort:** small — mostly an asset (the SVG) + a sidebar header block in
+  `base.html`, a favicon link, and a couple of CSS-variable tweaks. The bulk of
+  the work is designing/sourcing the actual logo art.
+
 ## New tab — Time Horizon / Liquidity
 
 Promote the "By Time Horizon" widget into a dedicated tab. The widget gives the

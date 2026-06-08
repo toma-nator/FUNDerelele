@@ -139,6 +139,38 @@
       {% elif not unmapped %}
       <div class="empty-row">No mappings yet. Import a file to get started.</div>
       {% endif %}
+
+      {% if all_tickers %}
+      <div style="padding:0 1.25rem 1.25rem">
+        <div class="toggle-header" style="cursor:pointer;padding:.5rem 0;border-top:1px solid var(--border)"
+             onclick="togglePanel('remapList','remapArrow')">
+          <span class="text-dim" style="font-size:.8rem">FIX A WRONG SYMBOL</span>
+          <span class="card-sub">remap any imported ticker (e.g. a CIBC <span class="mono">.TO/.NE</span> guess)</span>
+          <span class="toggle-arrow" id="remapArrow">▼</span>
+        </div>
+        <div id="remapList" style="display:none">
+          <table class="data-table">
+            <thead><tr><th>Current Ticker</th><th>Correct Ticker</th></tr></thead>
+            <tbody>
+              {% for tk in all_tickers %}
+              <tr>
+                <td class="mono text-dim">{{ tk }}</td>
+                <td>
+                  <form method="POST" action="{{ url_for('ticker_map_add') }}" class="inline-map-form"
+                        onsubmit="return confirm('Remap {{ tk }} and update all its transactions?')">
+                    <input type="hidden" name="description" value="{{ tk }}">
+                    <input type="text" name="ticker" value="{{ tk }}" required class="form-input mono"
+                           style="width:120px;display:inline">
+                    <button type="submit" class="btn" style="padding:.25rem .65rem">Remap</button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endif %}
     </div>
   </div>
 </div>

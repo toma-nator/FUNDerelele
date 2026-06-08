@@ -107,7 +107,29 @@ def _parse_content(content, broker='auto', account_override=None):
             raise ValueError('TD file has a header but no data rows.')
         return _import_td(rows, account_name=td_account_name, account_override=account_override)
 
-    # Standard path for CIBC and any future brokers
+    # CIBC Investor's Edge Transaction History files have a metadata block (account
+    # number+type, holder, export date, From/To range) before the real header row.
+    # Detect by scanning for the "Transaction Date" header; the account label is the
+    # first non-empty line, e.g. "62729276 FHSA".
+    cibc_header_idx = None
+    cibc_account = None
+    for i, line in enumerate(lines[:20]):
+        if re.match(r'^"?Transaction Date"?,', line):
+            cibc_header_idx = i
+            break
+    if cibc_header_idx is not None:
+        for line in lines[:cibc_header_idx]:
+            first = line.split(',')[0].strip().strip('"')
+            if re.match(r'^\d{4,}\s+\S', first):
+                cibc_account = first
+                break
+        real_content = '\n'.join(lines[cibc_header_idx:])
+        rows = list(csv.DictReader(io.StringIO(real_content)))
+        if not rows:
+            raise ValueError('CIBC file has a header but no data rows.')
+        return _import_cibc(rows, account_name=cibc_account, account_override=account_override)
+
+    # Standard path for the app's own export and any future brokers
     rows = list(csv.DictReader(io.StringIO(content)))
     if not rows:
         raise ValueError('File is empty or not a valid CSV.')
@@ -133,7 +155,9 @@ def _detect_broker(first_row):
     if 'settle date' in keys or 'settlement date' in keys:
         if 'action' in keys:
             return 'td'
-    if 'transaction date' in keys and 'activity type' in keys:
+    # CIBC Investor's Edge — real export uses "Transaction Type"; the older
+    # column map used "Activity Type". Accept either.
+    if 'transaction date' in keys and ('transaction type' in keys or 'activity type' in keys):
         return 'cibc'
     return 'unknown'
 
@@ -722,60 +746,191 @@ def _import_td_pdf(file_bytes, account_name=None, account_override=None):
     return _import_td(all_rows, account_name=account_name, account_override=account_override)
 
 
-def _import_cibc(rows, account_override=None):
+# CIBC account-type tokens (from the "<number> <TYPE>" header line) → app types.
+_CIBC_ACCT_TYPES = {
+    'tfsa': 'TFSA', 'fhsa': 'FHSA', 'rdsp': 'RDSP', 'resp': 'RESP',
+    'rrsp': 'RRSP', 'rsp': 'RRSP', 'rrif': 'RRIF', 'rif': 'RRIF',
+    'lira': 'LIRA', 'lif': 'LIF',
+}
+
+
+def _cibc_account(account_name, account_override):
+    """Turn the CIBC header label (e.g. "62729276 FHSA") into a clean account name
+    and registration type. Returns (name, type)."""
+    if account_override:
+        existing = Account.query.filter_by(name=account_override).first()
+        return account_override, (existing.type if existing else None)
+    if not account_name:
+        return 'CIBC Investor\'s Edge', 'Non-Reg'
+    m = re.match(r'^(\d+)\s+(.+)$', account_name.strip())
+    if not m:
+        return account_name.strip(), 'Non-Reg'
+    number, raw_type = m.group(1), m.group(2).strip()
+    acct_type = _CIBC_ACCT_TYPES.get(raw_type.lower(), 'Non-Reg')
+    return f'{acct_type} ({number})', acct_type
+
+
+def _cibc_ticker(symbol, description, market):
+    """Resolve a CIBC symbol to a yfinance ticker. Canadian listings need a suffix:
+    CDRs trade on Cboe Canada (.NE), other CDN-listed names on the TSX (.TO). A
+    user TickerMap on the bare symbol overrides the heuristic. US names stay plain."""
+    from models import TickerMap
+    sym = (symbol or '').strip().upper()
+    if not sym:
+        return ''
+    # A user mapping on the bare symbol wins (set it before importing).
+    mapping = TickerMap.query.get(sym)
+    if mapping:
+        return mapping.ticker
+    if '.' in sym:  # already suffixed
+        return sym
+    desc = (description or '').upper()
+    mkt = (market or '').upper()
+    if 'CDR' in desc:
+        guess = sym + '.NE'
+    elif mkt in ('CDN', 'CAD', 'TSX', 'TSXV', 'NEO', 'CSE'):
+        guess = sym + '.TO'
+    else:
+        guess = sym
+    # Also honour a mapping on the suffixed guess, so a correction made after an
+    # import (which remaps e.g. "T.TO" → the right symbol) survives a re-import.
+    remap = TickerMap.query.get(guess)
+    return remap.ticker if remap else guess
+
+
+def _import_cibc(rows, account_name=None, account_override=None):
     """
-    CIBC Investor's Edge CSV export format.
-    Columns: Transaction Date, Settlement Date, Activity Type, Symbol, Description,
-             Quantity, Price, Commission, Net Amount, Currency, Account Number, Account Type
+    CIBC Investor's Edge "Transaction History" CSV export.
+    Real columns: Transaction Date, Settlement Date, Currency of Sub-account Held In,
+        Transaction Type, Symbol, Market, Description, Quantity, Currency of Price,
+        Price, Commission, Exchange Rate, Currency of Amount, Amount,
+        Settlement Instruction, Exchange Rate (Canadian Equivalent), Canadian Equivalent
+    The account number/type comes from the file's metadata header, not a column.
+    Older column names (Activity Type / Net Amount / Currency) are still accepted.
+    Amount is signed native cash (negative for buys); Canadian Equivalent holds the
+    CAD value for USD trades.
     """
     count = 0
     skipped = 0
-    date_fmts = ['%Y-%m-%d', '%m/%d/%Y', '%B %d, %Y']
+    date_fmts = ['%Y-%m-%d', '%m/%d/%Y', '%B %d, %Y', '%b %d, %Y', '%d-%b-%y', '%d-%b-%Y']
     action_map = {
-        'Buy': 'Buy', 'Sell': 'Sell',
-        'Dividend': 'Dividend', 'Dividends': 'Dividend',
-        'DIV': 'Dividend',
+        'buy': 'Buy', 'sell': 'Sell',
+        'dividend': 'Dividend', 'dividends': 'Dividend', 'div': 'Dividend',
+        'interest': 'Interest',
+        'contrib': 'Deposit', 'contribution': 'Deposit', 'deposit': 'Deposit',
+        'withholding tax': 'WithholdingTax', 'withholding': 'WithholdingTax',
+        'nr tax': 'WithholdingTax',
     }
 
+    acct_name, acct_type = _cibc_account(account_name, account_override)
+    _ensure_account(acct_name)
+    if acct_type:  # stamp the registration type so the Tax tab treats it correctly
+        acct = Account.query.filter_by(name=acct_name).first()
+        if acct and (acct.type or 'Non-Reg') in ('Non-Reg', '') and acct_type != 'Non-Reg':
+            acct.type = acct_type
+            db.session.commit()
+
+    def num(v):
+        try:
+            return float((v or '0').replace(',', '').replace('$', '').strip())
+        except (TypeError, ValueError):
+            return 0.0
+
     for row in rows:
-        action_raw = row.get('Activity Type', '').strip()
-        txn_type = action_map.get(action_raw)
+        action_raw = (row.get('Transaction Type') or row.get('Activity Type') or '').strip()
+        txn_type = action_map.get(action_raw.lower())
         if not txn_type:
             continue
 
-        ticker = (row.get('Symbol', '') or '').strip().upper()
-        if not ticker:
-            continue
-
         try:
-            date_str = row.get('Transaction Date', '') or row.get('Settlement Date', '')
+            date_str = (row.get('Transaction Date', '') or row.get('Settlement Date', '')).strip()
             txn_date = _parse_date(date_str, date_fmts)
-            qty = abs(float((row.get('Quantity', '') or '0').replace(',', '')))
-            price = abs(float((row.get('Price', '') or '0').replace(',', '')))
-            currency = (row.get('Currency', 'CAD') or 'CAD').strip().upper()
-            fees = abs(float((row.get('Commission', '') or '0').replace(',', '')))
-            account_num = (row.get('Account Number', '') or '').strip()
-            account_type = (row.get('Account Type', 'Non-Reg') or 'Non-Reg').strip()
-            account_name = account_override or (f'{account_type} ({account_num})' if account_num else account_type)
 
-            _ensure_account(account_name)
+            qty = abs(num(row.get('Quantity')))
+            price = abs(num(row.get('Price')))
+            fees_native = abs(num(row.get('Commission')))
+            currency = (row.get('Currency of Amount') or row.get('Currency') or 'CAD').strip().upper() or 'CAD'
 
+            # Amount is signed native cash; Canadian Equivalent is the CAD value (USD trades).
+            amount_signed = num(row.get('Amount') if row.get('Amount') not in (None, '') else row.get('Net Amount'))
+            ce = num(row.get('Canadian Equivalent'))
+            if currency != 'CAD' and ce:
+                net_cad = ce
+                rate = abs(ce) / abs(amount_signed) if amount_signed else 1.0
+            else:
+                net_cad = amount_signed
+                rate = 1.0
+            fees_cad = round(fees_native * rate, 2)
             amount_native = qty * price
-            amount_cad = amount_native
-            net_cad = (amount_cad - fees) if txn_type in ('Sell', 'Dividend') else -(amount_cad + fees)
+
+            if txn_type in ('Buy', 'Sell'):
+                ticker = _cibc_ticker(row.get('Symbol'), row.get('Description'), row.get('Market'))
+                if not ticker:
+                    continue
+                if net_cad == 0:  # fall back to qty*price if Amount was blank
+                    net_cad = -(amount_native + fees_native) * rate if txn_type == 'Buy' \
+                        else (amount_native - fees_native) * rate
+                if txn_type == 'Buy':
+                    net_cad = -abs(net_cad)
+                    amount_cad = abs(net_cad) - fees_cad
+                else:
+                    net_cad = abs(net_cad)
+                    amount_cad = abs(net_cad) + fees_cad
+
+            elif txn_type == 'Dividend':
+                ticker = _cibc_ticker(row.get('Symbol'), row.get('Description'), row.get('Market'))
+                if not ticker:
+                    continue
+                amount_cad = abs(net_cad) or abs(amount_signed)
+                if amount_cad == 0:
+                    continue
+                net_cad = amount_cad
+                qty = price = 0.0
+
+            elif txn_type == 'WithholdingTax':
+                ticker = _cibc_ticker(row.get('Symbol'), row.get('Description'), row.get('Market'))
+                if not ticker:
+                    continue
+                amount_cad = abs(net_cad)
+                if amount_cad == 0:
+                    continue
+                net_cad = -amount_cad
+                qty = price = 0.0
+
+            elif txn_type == 'Interest':
+                # Cash/money-market interest income. Tie to CASH unless a security
+                # symbol is given (e.g. bond interest), so no phantom holding appears.
+                sym = (row.get('Symbol') or '').strip()
+                ticker = _cibc_ticker(sym, row.get('Description'), row.get('Market')) if sym else 'CASH'
+                amount_cad = abs(net_cad)
+                if amount_cad == 0:
+                    continue
+                net_cad = amount_cad
+                qty = price = 0.0
+
+            else:  # Deposit (Contribution)
+                ticker = 'CASH'
+                amount_cad = abs(net_cad)
+                if amount_cad == 0:
+                    continue
+                net_cad = amount_cad
+                qty = price = 0.0
+
+            subtype = 'Contribution' if txn_type == 'Deposit' else ''
 
             existing = Transaction.query.filter_by(
-                date=txn_date, ticker=ticker, type=txn_type, qty=qty, price=price
+                date=txn_date, account=acct_name, ticker=ticker,
+                type=txn_type, net_cad=round(net_cad, 2)
             ).first()
             if existing:
                 skipped += 1
                 continue
 
             db.session.add(Transaction(
-                date=txn_date, ticker=ticker, account=account_name,
+                date=txn_date, ticker=ticker, account=acct_name,
                 type=txn_type, qty=qty, price=price, currency=currency,
-                amount_native=amount_native, amount_cad=amount_cad,
-                fees_cad=fees, net_cad=net_cad,
+                amount_native=amount_native, amount_cad=round(amount_cad, 2),
+                fees_cad=fees_cad, net_cad=round(net_cad, 2), subtype=subtype,
             ))
             count += 1
         except Exception:

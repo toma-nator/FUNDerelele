@@ -225,7 +225,7 @@ def add_transaction():
         fx = get_fx_rate()
         amount_native = qty * price
         amount_cad = amount_native * (fx if currency == 'USD' else 1.0)
-        net_cad = (amount_cad - fees) if txn_type in ('Sell', 'Dividend') else -(amount_cad + fees)
+        net_cad = (amount_cad - fees) if txn_type in ('Sell', 'Dividend', 'Interest') else -(amount_cad + fees)
 
         db.session.add(Transaction(
             date=txn_date, ticker=ticker, account=account, type=txn_type,
@@ -330,6 +330,12 @@ def import_page():
                       .order_by(Transaction.ticker).all()]
     unmapped = [{'desc': d, 'guess': _guess_ticker(d)} for d in unmapped_descs]
 
+    # Every resolved ticker in use (clean symbols, excludes raw descriptions + CASH),
+    # so a wrong auto-mapped symbol (e.g. a CIBC ".TO/.NE" guess) can be corrected.
+    all_tickers = [r[0] for r in db.session.query(Transaction.ticker)
+                   .filter(~Transaction.ticker.like('% %'), Transaction.ticker != 'CASH')
+                   .distinct().order_by(Transaction.ticker).all()]
+
     # "Recent Imports" = just the most recent import batch.
     latest = (db.session.query(Transaction.import_batch)
               .filter(Transaction.import_batch.isnot(None))
@@ -342,8 +348,8 @@ def import_page():
     folder_setting = Setting.query.get('auto_import_folder')
     folder = folder_setting.value if folder_setting else ''
     return render_template('import.html', active='import', log=log, mappings=mappings,
-                           unmapped=unmapped, accounts=accounts, folder=folder,
-                           latest_batch=latest_batch)
+                           unmapped=unmapped, all_tickers=all_tickers, accounts=accounts,
+                           folder=folder, latest_batch=latest_batch)
 
 
 @app.route('/import/ticker-map/add', methods=['POST'])
