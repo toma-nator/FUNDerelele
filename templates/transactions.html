@@ -16,9 +16,9 @@
           <label>Date</label>
           <input type="date" name="date" required class="form-input" value="{{ today }}" />
         </div>
-        <div class="form-group">
+        <div class="form-group" id="grp-ticker">
           <label>Ticker</label>
-          <input type="text" name="ticker" required class="form-input mono" placeholder="e.g. VFV.TO" />
+          <input type="text" name="ticker" class="form-input mono" placeholder="e.g. VFV.TO" />
         </div>
         <div class="form-group">
           <label>Account</label>
@@ -32,32 +32,49 @@
         </div>
         <div class="form-group">
           <label>Type</label>
-          <select name="type" required class="form-input">
+          <select name="type" id="txnType" required class="form-input" onchange="updateTxnForm()">
             <option value="Buy">Buy</option>
             <option value="Sell">Sell</option>
             <option value="Dividend">Dividend</option>
-            <option value="Interest">Interest</option>
             <option value="Reinvest">Reinvest (DRIP)</option>
+            <option value="Interest">Interest</option>
+            <option value="Deposit">Deposit / Contribution</option>
+            <option value="ReturnOfCapital">Return of Capital</option>
+            <option value="WithholdingTax">Withholding Tax</option>
+            <option value="Split">Split</option>
+            <option value="Fee">Fee</option>
           </select>
         </div>
       </div>
       <div class="form-row">
-        <div class="form-group">
-          <label>Quantity</label>
-          <input type="number" name="qty" required class="form-input mono" placeholder="0" step="any" min="0" />
+        <div class="form-group" id="grp-qty">
+          <label id="qtyLabel">Quantity</label>
+          <input type="number" name="qty" class="form-input mono" placeholder="0" step="any" min="0" />
         </div>
-        <div class="form-group">
+        <div class="form-group" id="grp-price">
           <label>Price per Share</label>
-          <input type="number" name="price" required class="form-input mono" placeholder="0.00" step="any" min="0" />
+          <input type="number" name="price" class="form-input mono" placeholder="0.00" step="any" min="0" />
         </div>
-        <div class="form-group">
+        <div class="form-group" id="grp-amount" style="display:none">
+          <label>Amount (total)</label>
+          <input type="number" name="amount" class="form-input mono" placeholder="0.00" step="any" min="0" />
+        </div>
+        <div class="form-group" id="grp-subtype" style="display:none">
+          <label>Subtype</label>
+          <select name="subtype" class="form-input">
+            <option value="Contribution">Contribution</option>
+            <option value="RDSP Grant">RDSP Grant</option>
+            <option value="RDSP Bond">RDSP Bond</option>
+          </select>
+        </div>
+        <div class="form-group" id="grp-currency">
           <label>Currency</label>
           <select name="currency" class="form-input mono">
             <option value="CAD">CAD</option>
             <option value="USD">USD</option>
           </select>
         </div>
-        <div class="form-group">
+        <div class="form-group" id="grp-fees">
           <label>Fees (CAD)</label>
           <input type="number" name="fees" class="form-input mono" placeholder="4.95" step="any" min="0" />
         </div>
@@ -203,6 +220,34 @@ function toggleAddForm() {
   form.style.display = open ? 'block' : 'none';
   arrow.textContent = open ? '▲' : '▼';
 }
+
+// Adapt the Add-Transaction form to the selected type: share trades use
+// qty+price; income/cash types use a single Amount; Split uses shares only;
+// Deposit adds a subtype. Hidden fields are de-required so submit isn't blocked.
+function updateTxnForm() {
+  const sel = document.getElementById('txnType');
+  if (!sel) return;
+  const CFG = {
+    Buy:             {ticker:1, qty:1, price:1, amount:0, subtype:0, currency:1, fees:1, qtyLabel:'Quantity'},
+    Sell:            {ticker:1, qty:1, price:1, amount:0, subtype:0, currency:1, fees:1, qtyLabel:'Quantity'},
+    Reinvest:        {ticker:1, qty:1, price:1, amount:0, subtype:0, currency:1, fees:0, qtyLabel:'Shares acquired'},
+    Dividend:        {ticker:1, qty:0, price:0, amount:1, subtype:0, currency:1, fees:0},
+    Interest:        {ticker:0, qty:0, price:0, amount:1, subtype:0, currency:1, fees:0},
+    Deposit:         {ticker:0, qty:0, price:0, amount:1, subtype:1, currency:1, fees:0},
+    ReturnOfCapital: {ticker:0, qty:0, price:0, amount:1, subtype:0, currency:1, fees:0},
+    WithholdingTax:  {ticker:1, qty:0, price:0, amount:1, subtype:0, currency:1, fees:0},
+    Split:           {ticker:1, qty:1, price:0, amount:0, subtype:0, currency:0, fees:0, qtyLabel:'New shares added'},
+    Fee:             {ticker:0, qty:0, price:0, amount:1, subtype:0, currency:1, fees:0},
+  };
+  const c = CFG[sel.value] || CFG.Buy;
+  const grp = (id, on) => { const el = document.getElementById('grp-' + id); if (el) el.style.display = on ? '' : 'none'; };
+  const req = (name, on) => { const el = document.querySelector('[name="' + name + '"]'); if (el) el.required = !!on; };
+  ['ticker', 'qty', 'price', 'amount', 'subtype', 'currency', 'fees'].forEach(k => grp(k, c[k]));
+  req('ticker', c.ticker); req('qty', c.qty); req('price', c.price); req('amount', c.amount);
+  const ql = document.getElementById('qtyLabel');
+  if (ql) ql.textContent = c.qtyLabel || 'Quantity';
+}
+document.addEventListener('DOMContentLoaded', updateTxnForm);
 
 // ── Filters ──────────────────────────────────────────────────────────────────
 function applyFilters() {

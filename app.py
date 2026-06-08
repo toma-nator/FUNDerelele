@@ -214,7 +214,6 @@ def add_transaction():
     from price_service import get_fx_rate, refresh_prices
     try:
         txn_date = datetime.strptime(request.form['date'], '%Y-%m-%d').date()
-        ticker = request.form['ticker'].strip().upper()
         account = request.form['account'].strip()
         if not account:
             raise ValueError('Account is required.')
@@ -222,32 +221,55 @@ def add_transaction():
         if not Account.query.filter_by(name=account).first():
             db.session.add(Account(name=account, type='Non-Reg', cash_balance=0))
         txn_type = request.form['type']
-        qty = float(request.form['qty'])
-        price = float(request.form['price'])
-        currency = request.form['currency']
+        qty = float(request.form.get('qty') or 0)
+        price = float(request.form.get('price') or 0)
+        amount_in = float(request.form.get('amount') or 0)
+        currency = request.form.get('currency', 'CAD') or 'CAD'
         fees = float(request.form.get('fees', 0) or 0)
         notes = request.form.get('notes', '')
+        subtype = request.form.get('subtype', '').strip() if txn_type == 'Deposit' else ''
+
+        # Cash-only types live on the CASH pseudo-ticker; the rest use the field.
+        CASH_TYPES = ('Interest', 'ReturnOfCapital', 'Deposit', 'Fee')
+        ticker = 'CASH' if txn_type in CASH_TYPES else request.form.get('ticker', '').strip().upper()
+        if txn_type not in CASH_TYPES and not ticker:
+            raise ValueError('Ticker is required for this type.')
 
         fx = get_fx_rate()
-        amount_native = qty * price
-        amount_cad = amount_native * (fx if currency == 'USD' else 1.0)
-        if txn_type in ('Sell', 'Dividend', 'Interest'):
-            net_cad = amount_cad - fees
+        rate = fx if currency == 'USD' else 1.0
+        if txn_type in ('Buy', 'Sell', 'Reinvest'):
+            amount_native = qty * price          # share trade — value from qty × price
+        elif txn_type == 'Split':
+            amount_native = 0.0                  # only adds shares
         else:
-            # Buy and Reinvest (DRIP) both spend cash to add shares. A Reinvest is
-            # funded by its paired Dividend (logged separately), so it's a normal
-            # cash-out purchase — but tracked as 'reinvested' in get_holdings.
+            amount_native = amount_in            # income/cash types — a single total
+        amount_cad = amount_native * rate
+
+        if txn_type == 'Sell':
+            net_cad = amount_cad - fees
+        elif txn_type in ('Dividend', 'Interest', 'ReturnOfCapital', 'Deposit'):
+            net_cad = amount_cad - fees          # cash in
+        elif txn_type == 'Split':
+            net_cad = 0.0
+        else:  # Buy, Reinvest, WithholdingTax, Fee — cash out (amount_cad stays positive)
             net_cad = -(amount_cad + fees)
 
         db.session.add(Transaction(
             date=txn_date, ticker=ticker, account=account, type=txn_type,
             qty=qty, price=price, currency=currency,
             amount_native=amount_native, amount_cad=amount_cad,
-            fees_cad=fees, net_cad=net_cad, notes=notes,
+            fees_cad=fees, net_cad=net_cad, notes=notes, subtype=subtype,
         ))
         db.session.commit()
-        refresh_prices([ticker])
-        flash(f'Added: {txn_type} {qty:g} {ticker} @ ${price:,.2f} {currency}', 'success')
+        if ticker and ticker != 'CASH':
+            refresh_prices([ticker])
+        if txn_type in ('Buy', 'Sell', 'Reinvest'):
+            flash(f'Added: {txn_type} {qty:g} {ticker} @ ${price:,.2f} {currency}', 'success')
+        elif txn_type == 'Split':
+            flash(f'Added: Split {ticker} +{qty:g} shares', 'success')
+        else:
+            tail = f' · {ticker}' if ticker != 'CASH' else ''
+            flash(f'Added: {txn_type} ${amount_in:,.2f} {currency}{tail}', 'success')
     except Exception as e:
         flash(f'Error: {e}', 'error')
     return redirect(url_for('transactions'))
