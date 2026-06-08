@@ -23,6 +23,10 @@ generic dashboard.
 - **Effort:** small — mostly an asset (the SVG) + a sidebar header block in
   `base.html`, a favicon link, and a couple of CSS-variable tweaks. The bulk of
   the work is designing/sourcing the actual logo art.
+- _Free API — holding logos:_ a logo-by-domain service (Clearbit-style, no key) or
+  a fundamentals provider's logo endpoint to show a small **company/ETF logo** next
+  to each holding on Holdings/Dashboard. Cheap visual polish that rides the branding
+  pass (cache per ticker; fall back to a monogram when none is found).
 
 ## New tab — Time Horizon / Liquidity
 
@@ -89,6 +93,8 @@ entry to enable any of them:
   "By Asset Type" chart, which is equity/ETF/etc.)
 - **Geographic Exposure** — 🔴 yfinance gives `country` only for individual
   stocks; ETFs have no country look-through, so this would be mostly "Mixed".
+  _Free API:_ **REST Countries** (free, no key) for country **flags/regions** to
+  prettify whatever country data exists.
 - **Dividend Snowball (DRIP)** — 🟡 already computed in `get_planning_stats`
   (`dividend` block: labels/annual_data/cumulative_data); just needs a builder.
 - **Portfolio Value vs USD/CAD** — 🟡 needs a stored historical FX series.
@@ -351,6 +357,9 @@ Broaden the importer beyond TD/CIBC CSV + TD PDF:
   that covers more institutions than per-broker CSV.
 - **More brokers' CSVs** (Questrade, Wealthsimple, RBC DI, etc.) — add detectors
   + per-broker column maps alongside `_detect_broker`.
+- **Auto-resolve tickers via OpenFIGI** (free, optional key) — map broker
+  descriptions / **CUSIP / ISIN** to real symbols automatically, cutting the manual
+  ticker-mapping step. Pairs with the existing TickerMap + "Fix a wrong symbol".
 - **Effort:** medium — one parser per format; the normalise-to-Transaction step
   is shared.
 
@@ -449,6 +458,13 @@ requirements pin, GICs in net worth). These were deliberately deferred:
   API. Add retry/backoff in `price_service` and a visible "prices stale (last
   updated X)" indicator instead of silent $0s when a fetch fails (the cache
   already stores last-good prices — lean on it). _Effort: medium._
+  - _Free APIs — official & backup data:_ **Bank of Canada Valet** (free, no key)
+    for **official USD/CAD** (more authoritative than yfinance's `USDCAD=X`) and
+    **CPI/inflation + rates** — which also lets Projections compute *real* returns
+    from real CPI instead of a hardcoded 2%, and gives a benchmark GIC/prime rate.
+    **Finnhub / Tiingo / Alpha Vantage** (free tier, key) make good **fallback
+    price/FX sources** when Yahoo is rate-limiting. **FRED** (free, key) for US
+    inflation/treasury yields if you want US real-return benchmarks.
 - **Income tax on the Tax tab.** Today it models only capital gains. For the
   dividend-heavy audience, add an income section: eligible-dividend gross-up +
   dividend tax credit, interest at full marginal, and US withholding as a foreign
@@ -523,6 +539,8 @@ and RDSP-planner tabs).
   trend over time. The single biggest scope expansion — many people want one
   number. _Effort: medium–large — a new model (manual line items) + a tab + fold
   into the dashboard total._
+  - _Free API:_ **CoinGecko** (free, no key) for live **crypto** prices so a
+    crypto holding tracks automatically instead of being a stale manual figure.
 
 - **Calendar — upcoming events.** One month/agenda view of everything time-bound:
   **ex-dividend & pay dates** and **earnings dates** for your holdings (yfinance
@@ -530,6 +548,9 @@ and RDSP-planner tabs).
   **contribution deadlines** (TFSA/RRSP/FHSA). Great for the dividend-focused
   user — "what's paying me this month." _Effort: medium — a calendar view + a
   per-ticker date fetch (cached)._
+  - _Free API:_ **Finnhub** or **Tiingo** (free tier, key) give reliable
+    **earnings dates** and **company news** — more dependable than yfinance's
+    `calendar`, and a news feed is a natural companion widget.
 
 - **Year-End Tax Package / Reports.** A printable/exportable per-year summary that
   rolls up what the Tax tab computes: realized gains (with ACB), dividends by
@@ -600,6 +621,13 @@ Each is a builder in `charts.py` + a catalog entry.
 **On-theme / fun**
 - **Portfolio "flavour" radar** — tilts across growth/value, income, risk, US/CAD,
   large/small; a one-glance fingerprint (pairs with the dashboard flavour line).
+  - **Name it after a real ice-cream flavour.** Map the radar profile to an actual
+    flavour and label the portfolio with it — e.g. high-risk/tech → *Rocky Road*,
+    dividend/stable → *Vanilla Bean*, diversified → *Neapolitan*. Seed the choice
+    from the profile (not pure random) so it's meaningful, but pull the flavour
+    **names** from a stored list gathered via a free API (Open Food Facts
+    `ice-creams` category or TheMealDB), refreshed occasionally. Ties the radar,
+    the dashboard flavour line, and the branding together.
 - **🍨 "The Melt" doughnut** — drag breakdown (fees / MER / withholding /
   cash-vs-inflation / tax); the chart companion to the Melt tab.
 - **🍦 Ice-cream cone stack** — allocation as a stack of "scoops" on a cone:
@@ -627,6 +655,15 @@ Each is a builder in `charts.py` + a catalog entry.
   a predicted scoop melt rate / ice-cream-days-per-month curve.
 - **☀️ Ice-cream daylight** — *Sunrise-Sunset API* (free, no key). Daylight hours
   by month → "prime scooping hours" across the year. Gloriously pointless.
+- **🍸 Affogato finder** — *TheCocktailDB* (free) search for ice-cream drinks /
+  affogato (coffee + ice cream, on brand) → a little flavour gallery.
+- **😂 Scoop of the day joke** — *icanhazdadjoke* (free, no key) for a finance/dad
+  joke, or *Advice Slip API* for "advice" paired with a *not financial advice* wink.
+- **🔢 Portfolio number fact** — *Numbers API* (free) → a fun trivia fact about your
+  exact net-worth number.
+- _Glue:_ **ip-api.com / ipapi.co** (free, no key) auto-detects the user's **city**,
+  so "Scoops near me", the weather/melt charts, and daylight all work without
+  asking for a location.
 - **🍨 Flavours of the world** — *TheMealDB* (free) or *Wikidata SPARQL* (free).
   Dessert/ice-cream recipe or named-flavour counts by country → a doughnut of
   global flavour diversity.
