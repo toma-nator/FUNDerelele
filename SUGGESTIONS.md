@@ -461,3 +461,177 @@ requirements pin, GICs in net worth). These were deliberately deferred:
 
 (Broadening the importer to more brokers / file types is already parked above
 under "Import — accept more file types".)
+
+## Fun & delight — personality for FUNDerelele
+
+Optional flourishes that lean into the name (scoop your funds 🍨) and the Midnight
+Terminal vibe. All opt-in and subtle — the clean, uncluttered UI stays the
+default. Several pair naturally with the upcoming **logo & styling** pass.
+
+- **Ice-cream theme & accent picker.** Keep Midnight Terminal as the default dark
+  base, but add a few swappable accent palettes named playfully — e.g. *Mint
+  Chip* (teal), *Blueberry* (indigo), *Neapolitan* (warm). Just remaps the CSS
+  accent variables; persist the choice in localStorage like the dashboard layout.
+  _Effort: small — a Settings dropdown + a handful of `:root` variable sets. Best
+  done alongside the logo/styling work._
+
+- **Net-worth milestone celebrations.** A subtle confetti burst + toast when net
+  worth crosses a round threshold ($10k / $50k / $100k …) or a holding doubles
+  from cost. Opt-in toggle in Settings so it never gets annoying. _Effort: small —
+  a tiny JS confetti + a check against the dashboard total on load._
+
+- **Portfolio "flavour" line.** An auto-generated one-liner on the dashboard hero
+  describing your style from the allocation mix — e.g. "🍨 Dividend Connoisseur",
+  "Tech Maximalist", "Balanced Scooper", "Maple-Heavy (mostly CAD)". Pure read of
+  the existing breakdown data; rotate the wording. _Effort: small — one classifier
+  + a hero line._
+
+- **Command palette (Ctrl/⌘+K).** A terminal-flavoured quick switcher to jump
+  between tabs and fire actions (add transaction, refresh prices, load sample).
+  Fits the Midnight Terminal identity and speeds up power use. _Effort: small–
+  medium — a modal + a static action/route index + fuzzy filter._
+
+- **Ticker-tape strip.** An optional thin marquee across the top showing your
+  holdings' live day moves (green/red), very "trading terminal". Toggle in
+  Settings; reuses cached prices. _Effort: small — a CSS marquee fed by the price
+  cache._
+
+- **"Scoop of the day."** A small dashboard widget that spotlights one of your
+  holdings each day (rotating) with a fun stat — best/worst day, longest held,
+  highest yield. Seeded by the date so it's stable within a day. _Effort: tiny —
+  one widget picking from existing holdings data._
+
+- **Themed empty states & flashes.** Lean the copy into the motif: empty tables
+  read "No funds scooped yet 🍨", import success flashes get a little personality.
+  Tiny, and pairs with the branding pass. _Effort: tiny — copy + an icon here and
+  there._
+
+- **Achievements / badges (optional panel).** Lightweight milestones from the
+  transaction history — "First $10k", "10 dividend payers", "5-year holder",
+  "Diamond hands (held through a −20% drawdown)". Keep it a collapsible panel so
+  it never clutters. _Effort: medium — a rules pass over transactions + a panel._
+
+## New tabs — practical
+
+Bigger, genuinely useful tabs (distinct from the parked Time Horizon, Optimizer,
+and RDSP-planner tabs).
+
+- **Net Worth (beyond investments).** Turn the investment tracker into a full
+  net-worth tracker: let the user add **manual assets** (cash/savings, real
+  estate, vehicle, crypto) and **liabilities** (mortgage, loans, credit), then
+  show total net worth = investments + GICs + manual assets − liabilities, with a
+  trend over time. The single biggest scope expansion — many people want one
+  number. _Effort: medium–large — a new model (manual line items) + a tab + fold
+  into the dashboard total._
+
+- **Calendar — upcoming events.** One month/agenda view of everything time-bound:
+  **ex-dividend & pay dates** and **earnings dates** for your holdings (yfinance
+  `Ticker.calendar` / dividend history), **GIC maturities**, and Canadian
+  **contribution deadlines** (TFSA/RRSP/FHSA). Great for the dividend-focused
+  user — "what's paying me this month." _Effort: medium — a calendar view + a
+  per-ticker date fetch (cached)._
+
+- **Year-End Tax Package / Reports.** A printable/exportable per-year summary that
+  rolls up what the Tax tab computes: realized gains (with ACB), dividends by
+  type, US withholding (foreign tax credit), interest, and fees — formatted to
+  drop into a tax return or hand to an accountant. _Effort: medium — mostly a
+  report view + PDF/CSV export over existing calcs._
+
+- **"Needs Attention" inbox.** A consolidated flags page: watchlist targets hit,
+  GICs maturing soon, big allocation drift vs Rebalancer targets, holdings down a
+  lot, cash sitting idle, unmapped tickers. One place that answers "is there
+  anything I should look at?" _Effort: medium — a rules pass aggregating signals
+  the other tabs already compute._
+
+## New tab — for fun
+
+- **FUNDerelele Wrapped (year in review).** A "Spotify Wrapped"-style recap of
+  your investing year: total contributed, best & worst performer, dividends
+  collected, number of trades, busiest month, your portfolio "flavour", and a
+  shareable summary card (with an optional **redacted mode** that shows % returns
+  but hides dollar amounts). Seasonal/year-end delight that's also genuinely
+  reflective. _Effort: medium — a stats roll-up over the year + a styled card;
+  reuses dividends/performance/cashflow numbers already computed._
+
+- **🍦 "The Melt" — where your returns drip away.** A themed-but-practical costs &
+  leakage tab with a "$X melting away per year" headline and a breakdown of
+  everything quietly eroding returns: **fee drips** (commissions, already in
+  `fees_cad`), **MER drag** (each ETF's expense ratio × market value, from
+  yfinance fund data where available), **withholding melt** (US dividend tax from
+  your `WithholdingTax` rows), **cash melt** (idle cash × an assumed inflation
+  rate), and **tax drag** (reuses the Tax tab). The ice-cream framing makes a dry
+  "total cost of ownership" view fun, and it fills a real gap — nothing today
+  shows your annual drag in one place. _Effort: medium — mostly aggregation over
+  existing data + an expense-ratio fetch (cached)._
+
+## Charts — more ideas (catalog candidates)
+
+New `CHART_CATALOG` candidates (distinct from the shipped charts and from the
+deferred 🟡/🔴 list above). A few of the % ones ride on the **percent-format
+renderer** noted in "Charts tab — deferred charts" — do that small tweak first.
+Each is a builder in `charts.py` + a catalog entry.
+
+**Performance & risk**
+- **Rolling 12-month return** (line) — trailing-1yr return at each month-end.
+- **Monthly returns heatmap** (year × month grid) — the classic colored grid.
+- **Return distribution histogram** — buckets of monthly returns (volatility/skew).
+- **Rolling volatility** (line) — annualized stdev over a trailing window.
+- **Up vs down months** (doughnut) — % of positive months + best/worst labels.
+
+**Holdings & concentration**
+- **Concentration / Pareto curve** (line) — cumulative % as holdings are added.
+- **Size vs return scatter** (bubble) — weight (x) vs total return % (y), bubble = MV.
+- **Holdings treemap** — boxes sized by MV, green/red by gain/loss (needs a
+  Chart.js treemap plugin).
+- **Book vs market by holding** (grouped bar) — per-holding cost vs current value.
+- **Holding tenure** (hbar) — days held since first buy ("diamond hands").
+
+**Dividends & income**
+- **Yield-on-cost vs current yield by holding** (grouped bar). _(% renderer)_
+- **Dividend growth rate by holding** (bar) — YoY change per ticker. _(% renderer)_
+- **Income by sector** (doughnut) — which sectors pay you most.
+- **Withholding tax by year** (bar) — foreign-tax drag over time.
+
+**Behaviour & cash flow**
+- **Net buys vs sells over time** (bar) — net buyer/seller each period.
+- **Invested % over time** (line) — how deployed vs cash-heavy historically.
+- **Trading activity heatmap** — number of trades per month.
+
+**On-theme / fun**
+- **Portfolio "flavour" radar** — tilts across growth/value, income, risk, US/CAD,
+  large/small; a one-glance fingerprint (pairs with the dashboard flavour line).
+- **🍨 "The Melt" doughnut** — drag breakdown (fees / MER / withholding /
+  cash-vs-inflation / tax); the chart companion to the Melt tab.
+- **🍦 Ice-cream cone stack** — allocation as a stack of "scoops" on a cone:
+  biggest holding is the bottom scoop, each smaller holding a smaller scoop
+  stacking upward, so the tower visually narrows toward the top (a cone, not a
+  uniform bar). Could render as a stacked/funnel bar styled as scoops on a cone.
+- **🌳 Net-worth growth rings** — polar-area chart, one ring per year, net worth
+  stacking like tree rings.
+- **☀️ Ice-cream-weather calendar** _(non-finance easter egg)_ — daily city highs
+  from the free Open-Meteo API (no key), marking the "ice cream weather" days.
+- **🍧 Flavour log** _(non-finance easter egg)_ — a doughnut of the real ice-cream
+  flavours you've eaten (manually logged); zero financial purpose, pure fun.
+
+**Free-API easter-egg charts (mostly no key needed)**
+- **🌍 Price of a scoop around the world** — *Frankfurter* / *exchangerate.host*
+  (free FX, no key). A fixed scoop price (e.g. CAD $4.50) converted to ~15
+  currencies → bar chart. Sneakily reuses the app's FX wheelhouse.
+- **📍 Scoops near me** — *OpenStreetMap Overpass API* (free, no key). Query
+  `amenity=ice_cream` within X km of your city → count by neighbourhood / distance
+  to nearest scoop.
+- **🍫 Sugar in your scoop** — *Open Food Facts API* (free, no key). The
+  `ice-creams` category → average sugar/fat across popular brands, or products by
+  country.
+- **🌡️ Melt-o-meter** — *Open-Meteo* (free, no key). Forecast/historical highs →
+  a predicted scoop melt rate / ice-cream-days-per-month curve.
+- **☀️ Ice-cream daylight** — *Sunrise-Sunset API* (free, no key). Daylight hours
+  by month → "prime scooping hours" across the year. Gloriously pointless.
+- **🍨 Flavours of the world** — *TheMealDB* (free) or *Wikidata SPARQL* (free).
+  Dessert/ice-cream recipe or named-flavour counts by country → a doughnut of
+  global flavour diversity.
+
+_Effort: most are small once a builder pattern exists — one `charts.py` function
+over already-computed data + a catalog entry. Heatmaps/treemap/radar need a small
+Chart.js plugin or a custom render; the two easter eggs need a tiny store (and the
+weather one a cached API call)._
