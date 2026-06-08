@@ -2,6 +2,40 @@
 
 Ideas parked for future implementation. Not committed work — just a backlog.
 
+## How to read this backlog
+
+Every suggestion below ends with a **Priority** tag — `Impact · Effort` — plus a ⭐ for
+the **do-first unlocks**: cheap items that make many later ideas near-free.
+
+- **Impact** — High / Med / Low: does it serve a core goal, help the dividend-heavy
+  friend, or unblock other work?
+- **Effort** — tiny / small / medium / large (some "small–medium"), taken from each
+  item's own notes.
+- **⭐ Do-first unlocks** (build these before the matrix says so): **Percent-format
+  chart renderer**, **manual recurring-transaction engine**, **multi-currency cash
+  balances**.
+
+**Prioritize with the 2×2:** High-impact + low-effort = do now; High-impact +
+high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
+Low-impact + high-effort = skip / much later.
+
+## Backlog at a glance (≈96 ideas)
+
+| Category | Count | Notes |
+|---|---|---|
+| Charts | ~42 | ~27 finance-useful + ~15 fun/easter-egg |
+| Per-tab feature enhancements | ~21 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX |
+| New tabs (big features) | 9 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt |
+| Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
+| UI/UX polish | 6 | Restore-alerts, sidebar reorder, sparkline, chart descriptions/hide/star, daily-swing widget, trend indicator |
+| Infrastructure / hardening | 4 | Test suite, yfinance resilience, income tax, README screenshots |
+| Account / data model | 3 | Multi-currency cash ⭐, Savings account, recurring transactions ⭐ |
+| Canadian rules | 1 | RRSP room |
+| Internationalization | 1 | German → Spanish → French |
+| Branding | 1 | Logo & styling |
+
+_Keep this table and the Priority tags in sync whenever suggestions are added or removed._
+
 ## Watchlist alerts — multiple tiers per ticker
 
 The dashboard hero alert + watchlist row highlight currently trigger on a single
@@ -18,6 +52,8 @@ hero strip and watchlist row (e.g. amber "buy", green "extreme buy").
 - **Effort:** small–medium — a model/field add + form rows + a tier check in
   `price_alerts` and the watchlist row classes.
 
+**Priority:** Impact: Med · Effort: small–medium
+
 ## Dashboard — "Restore alerts" button (Customize)
 
 A button in the dashboard **Customize** bar that **un-dismisses all watchlist
@@ -26,6 +62,8 @@ alerts** — clears the per-ticker dismissals (`dashAlertChips`), the header dis
 Today re-adding the widget clears them, but there's no explicit "show everything I
 dismissed" control. _Effort: tiny — one button that clears those localStorage keys
 and calls `applyAlerts()`._
+
+**Priority:** Impact: Low · Effort: tiny
 
 ## RRSP — contribution rules & room
 
@@ -38,7 +76,9 @@ alone. Surface it on the RRSP account detail and the Tax tab (RRSP contributions
 deductible). _Effort: medium — a room input/anchor + a calculator + UI, mirroring the
 TFSA/FHSA room pattern._
 
-## Transactions — recurring / scheduled manual add
+**Priority:** Impact: Med · Effort: medium
+
+## ⭐ Transactions — recurring / scheduled manual add
 
 Let a manually-added transaction **repeat on a schedule** (e.g. a monthly $500
 contribution, a quarterly DRIP, a recurring fee) instead of re-entering it each time.
@@ -49,6 +89,8 @@ contribution, a quarterly DRIP, a recurring fee) instead of re-entering it each 
   app start / a scan, or lazily up to today. Pairs with the auto-import folder watcher.
 - **Use cases:** automatic contributions, DRIPs, recurring account fees, GIC interest.
 - **Effort:** medium — a rule model + a generator pass + a small bit of form UI.
+
+**Priority:** ⭐ do-first unlock · Impact: High · Effort: medium _(unlocks the Savings-account interest, DRIP, and recurring-fee items)_
 
 ## ⭐ HIGH IMPORTANCE — Multi-currency cash balances (per account)
 
@@ -76,6 +118,8 @@ opening deposit).
 - _Part 1 (grouping/sorting US vs CAD **stocks**) is already shipped (Accounts detail
   groups positions by currency; Holdings tab has a CCY column + currency filter)._
 
+**Priority:** ⭐ do-first unlock · Impact: High · Effort: medium _(blocks Brad's TFSA)_
+
 ## Branding — FUNDerelele logo & styling
 
 Give the app a real identity. Right now there's no logo or brand mark — just the
@@ -102,6 +146,8 @@ generic dashboard.
   to each holding on Holdings/Dashboard. Cheap visual polish that rides the branding
   pass (cache per ticker; fall back to a monogram when none is found).
 
+**Priority:** Impact: Med · Effort: small
+
 ## New tab — Time Horizon / Liquidity
 
 Promote the "By Time Horizon" widget into a dedicated tab. The widget gives the
@@ -120,6 +166,8 @@ Flexible/overridable). The tab adds depth:
 - **Effort:** medium — new template/route + drill-down + ladder; the bucketing
   logic comes from the widget.
 
+**Priority:** Impact: Med · Effort: medium
+
 ## FX Sensitivity — multi-currency
 
 The shipped FX Sensitivity chart (`charts._b_fx_sensitivity`) only models USD/CAD
@@ -130,6 +178,8 @@ pair to stress (a dropdown like the per-pane account filter) or show a small
 multi-series chart. Would also pair with a true historical FX overlay (the parked
 "Portfolio Value vs USD/CAD" idea).
 
+**Priority:** Impact: Low · Effort: medium
+
 ## Sidebar — drag to reorder tabs
 
 Let the user drag the nav items in the sidebar (`base.html`) into whatever order
@@ -139,6 +189,8 @@ and save the order; restore on load. Keep the section grouping (MAIN / ANALYTICS
 ADVANCED / TOOLS) or allow free reordering — decide during design. Effort: small–
 medium (HTML5 drag-and-drop or a tiny up/down control in an "edit nav" mode).
 
+**Priority:** Impact: Low · Effort: small–medium
+
 ## Dashboard — hero sparkline visual polish
 
 The hero strip's 12-month sparkline (`loadSparkline()` in `dashboard.html`) works
@@ -146,6 +198,8 @@ but still looks a bit off. Ideas to make it nicer: trend-color the line green/re
 by net change over the window; smooth/normalize the y-scale so flat-ish periods
 don't look jagged; a faint baseline or a "vs contributions" ghost line; possibly
 a small area-gradient tweak or a wider/taller footprint. Parked for a later pass.
+
+**Priority:** Impact: Low · Effort: small
 
 ## Charts tab — deferred charts (🟡/🔴)
 
@@ -183,6 +237,8 @@ entry to enable any of them:
   Rebalancer tab better than a generic catalog chart. Deferred pending a way to
   pick the account/dimension within a pane.
 
+**Priority:** Impact: Med _(⭐ percent-format renderer is High / small — do it first; the rest vary)_ · Effort: small–medium each
+
 ## Asset-class look-through (ETFs)
 
 Decompose each ETF's market value into its underlying **asset classes**
@@ -205,6 +261,8 @@ Decompose each ETF's market value into its underlying **asset classes**
 _Effort: small — the data is already cached; it's one more aggregation dict in
 `get_account_breakdown` and one more `breakdown-block` in `accounts.html`._
 
+**Priority:** Impact: Med · Effort: small
+
 ## Performance — Holdings-only return
 
 A toggle to compute TWR / yearly returns on **holdings market value only**
@@ -218,6 +276,8 @@ deployed." Pairs with the existing total-account TWR (which includes cash).
   (instead of `market_value + cash`) and use the net buy/sell cash as the
   per-month flow rather than deposits.
 
+**Priority:** Impact: Med · Effort: small–medium
+
 ## Tax — Province-based marginal rate helper
 
 The Tax tab already takes a manual Marginal % (+ Inclusion %) and estimates tax
@@ -230,6 +290,8 @@ capital-gains / eligible-dividend effective rates, prefilling the Tax tab inputs
   for the eligible-dividend effective rate.
 - **Effort:** medium — mostly the bracket data + a small lookup; UI is a dropdown
   and one number. Deferred (manual rate is sufficient for now).
+
+**Priority:** Impact: Low · Effort: medium
 
 ## Dividends — Default US withholding rate (setting)
 
@@ -247,6 +309,8 @@ estimates on US names overstate net income.
   TFSA is not) — could refine by account type later.
 - **Effort:** small–medium — one setting + a tweak to the forward-income calc.
 
+**Priority:** Impact: Med _(dividend-friend feature)_ · Effort: small–medium
+
 ## Dividends — Per-ticker payment drill-down
 
 Click a ticker row in the "By Ticker" table to expand its individual dividend
@@ -256,6 +320,8 @@ dividends, or reconciling against statements.
 - **Compute:** already have every Dividend/WithholdingTax row; just group by
   ticker and render an expandable sub-row (or a small modal) on click.
 - **Effort:** small — a hidden detail row toggled in `dividends.html`.
+
+**Priority:** Impact: Med · Effort: small
 
 ## Dividends — Income projection & growth
 
@@ -269,6 +335,8 @@ from "what I received" into "what I'll receive."
 - **Growth:** compare each ticker's trailing-year net vs. the prior year.
 - **Effort:** medium — needs a payment-schedule heuristic from dividend history.
 
+**Priority:** Impact: High _(dividend-friend feature)_ · Effort: medium
+
 ## Performance — Max drawdown
 
 Largest peak-to-trough decline over the selected range, as a stat card (and
@@ -278,6 +346,8 @@ optionally a shaded region on the chart). Good risk context next to TWR.
   point = (value − peak) / peak; max drawdown = the most negative. Compute in
   the Performance JS from the already-loaded series (respects scope/range/cash).
 - **Where:** another stat card beside "Annualized TWR", e.g. "Max Drawdown −18%".
+
+**Priority:** Impact: Med · Effort: small
 
 ## Performance — Target rate line
 
@@ -292,6 +362,8 @@ Performance chart, so actual vs. goal is visible at a glance.
 - **Effort:** small-to-medium — a setting + input on Settings, and one more
   dataset in the Performance render.
 
+**Priority:** Impact: Low–Med · Effort: small–medium
+
 ## Cash Flows — Matching / "free money" ratio stat
 
 A headline stat card showing the RDSP efficiency number: free government money
@@ -304,6 +376,8 @@ framing it as a return on contributions.
   ratio to the return dict and a stat card. Respects the active account filter.
 - **Effort:** tiny — one division and one stat card.
 
+**Priority:** Impact: Med _(RDSP)_ · Effort: tiny
+
 ## Cash Flows — Cumulative growth line
 
 A cumulative-deposits line chart (running total of contributions over time),
@@ -315,6 +389,8 @@ account's funding building up rather than just per-year amounts.
 - **Where:** a toggle on the Annual Cash Flows chart, or a second small chart.
 - **Effort:** small — a running-sum series in `get_cashflow_stats` and a line
   dataset in `cashflows.html`.
+
+**Priority:** Impact: Low · Effort: small
 
 ## GICs — fold into Performance series (remaining piece)
 
@@ -332,6 +408,8 @@ with an `as_of` date) and folding it into the monthly market value — plus
 deciding how a GIC maturity (principal returning to cash) flows through the
 series. _Effort: medium — month-by-month valuation + maturity handling._
 
+**Priority:** Impact: Med · Effort: medium
+
 ## Rebalancer — exact (convergent) trade solver
 
 The v2 per-account rebalancer uses a single-pass greedy allocator: it splits
@@ -347,6 +425,8 @@ other buckets), so the "Projected" column lands short of the targets.
 - **Watch:** keep it dependency-light (no scipy) — an iterative reweighting loop
   in pure Python is probably enough and matches the existing stack.
 - **Effort:** medium — engine-only change in `get_rebalancer_data`; UI unchanged.
+
+**Priority:** Impact: Med · Effort: medium
 
 ## Rebalancer — risk targeting by historical volatility
 
@@ -365,6 +445,8 @@ more robust and covers the ETFs/securities that don't report a beta.
   once and cache; refresh lazily.
 - **Effort:** medium — `_fetch_one_metadata` history pull + a basis toggle in the
   risk classifier.
+
+**Priority:** Impact: Low–Med · Effort: medium
 
 ## Rebalancer — strategy presets (one-click target templates)
 
@@ -392,6 +474,8 @@ targets by hand and gives a starting point.
 - **Effort:** medium — a small preset table (strategy → {dimension, targets}) +
   a dropdown that populates the existing target inputs; engine unchanged.
 
+**Priority:** Impact: Med · Effort: medium
+
 ## Watchlist — quick "add transaction" from a row
 
 A one-click action on a watchlist row that jumps to the Add Transaction form
@@ -402,6 +486,8 @@ name can be turned into a Buy without retyping.
   pre-filling ticker/currency/price (form reads them on load), or a small inline
   buy modal that POSTs to the existing add-transaction route.
 - **Effort:** small — a pre-fill on the existing transaction form + a row action.
+
+**Priority:** Impact: Low–Med · Effort: small
 
 ## Watchlist — bulk add tickers
 
@@ -420,6 +506,8 @@ created and tracked.
 - **Effort:** small–medium — one route + a textarea; reuses the existing add and
   auto-classify logic.
 
+**Priority:** Impact: Low · Effort: small–medium
+
 ## Import — accept more file types
 
 Broaden the importer beyond TD/CIBC CSV + TD PDF:
@@ -436,6 +524,8 @@ Broaden the importer beyond TD/CIBC CSV + TD PDF:
   ticker-mapping step. Pairs with the existing TickerMap + "Fix a wrong symbol".
 - **Effort:** medium — one parser per format; the normalise-to-Transaction step
   is shared.
+
+**Priority:** Impact: Med · Effort: medium
 
 ## Projections — TFSA room projector
 
@@ -454,6 +544,8 @@ limit, project the account value year by year assuming room is filled each year.
 - **Effort:** small — one calculator + a card; reuses the FV helper in
   `get_planning_stats`.
 
+**Priority:** Impact: Med · Effort: small
+
 ## Projections — sequence-of-returns risk
 
 Show how the *order* of returns affects outcomes (the V6 Excel had this): a big
@@ -466,6 +558,8 @@ average return — important once withdrawals/decumulation matter.
   growth chart.
 - **Effort:** small–medium — two scripted return sequences through the FV loop +
   a stat card / overlay.
+
+**Priority:** Impact: Low · Effort: small–medium
 
 ## New tab — Portfolio Optimizer (efficient frontier)
 
@@ -489,6 +583,8 @@ Frontier" tab reading `EF_POINTS`, `EF_MIN_W`, `EF_MAX_W`, `RISK_FREE_RATE`,
   a table — with a hand-off to the Rebalancer to act on the deltas.
 - **Effort:** medium–large — history fetch + covariance + optimizer + a new tab;
   the math is the bulk of it.
+
+**Priority:** Impact: Low–Med · Effort: medium–large
 
 ## New tab — RDSP tracker & decumulation planner
 
@@ -517,6 +613,8 @@ carry-forward** math and the two-phase accumulate→decumulate / LDAP projection
   (saved in memory) for the grant/bond and LDAP rules to mirror.
 - **Effort:** large — RDSP-specific rules (grants/bonds, holdback, LDAP) plus a
   two-phase (accumulate → decumulate) projection and a glide-path model.
+
+**Priority:** Impact: Med–High _(the tracked account is an RDSP)_ · Effort: large
 
 ## Pre-public hardening — parked items
 
@@ -551,6 +649,8 @@ requirements pin, GICs in net worth). These were deliberately deferred:
 
 (Broadening the importer to more brokers / file types is already parked above
 under "Import — accept more file types".)
+
+**Priority:** Impact: High _(test suite + yfinance resilience are the real wins)_ · Effort: medium _(varies per item; README screenshots are small)_
 
 ## Fun & delight — personality for FUNDerelele
 
@@ -601,6 +701,8 @@ default. Several pair naturally with the upcoming **logo & styling** pass.
   "Diamond hands (held through a −20% drawdown)". Keep it a collapsible panel so
   it never clutters. _Effort: medium — a rules pass over transactions + a panel._
 
+**Priority:** Impact: Low · Effort: small _(mostly tiny–small; Achievements is medium)_
+
 ## New tabs — practical
 
 Bigger, genuinely useful tabs (distinct from the parked Time Horizon, Optimizer,
@@ -638,6 +740,8 @@ and RDSP-planner tabs).
   anything I should look at?" _Effort: medium — a rules pass aggregating signals
   the other tabs already compute._
 
+**Priority:** Impact: Med–High _(Net Worth + Needs-Attention are the standouts)_ · Effort: medium–large
+
 ## New tab — for fun
 
 - **FUNDerelele Wrapped (year in review).** A "Spotify Wrapped"-style recap of
@@ -658,6 +762,8 @@ and RDSP-planner tabs).
   "total cost of ownership" view fun, and it fills a real gap — nothing today
   shows your annual drag in one place. _Effort: medium — mostly aggregation over
   existing data + an expense-ratio fetch (cached)._
+
+**Priority:** Impact: Low–Med _(The Melt is genuinely useful; Wrapped is delight)_ · Effort: medium
 
 ## Charts — more ideas (catalog candidates)
 
@@ -746,3 +852,127 @@ _Effort: most are small once a builder pattern exists — one `charts.py` functi
 over already-computed data + a catalog entry. Heatmaps/treemap/radar need a small
 Chart.js plugin or a custom render; the two easter eggs need a tiny store (and the
 weather one a cached API call)._
+
+**Priority:** Impact: Low–Med _(finance charts Med; easter eggs Low)_ · Effort: small each _(heatmaps/treemap/radar need a plugin)_
+
+## Dashboard — daily swing widget (is today's move outside your usual range?)
+
+A **dashboard widget** (not the hero — a regular movable widget like the others) that
+reads **how the whole portfolio (or a single account) is moving today** at a glance.
+Today the day move only shows per holding; there's no single "the portfolio is +1.8%
+today" pulse at the account/total level.
+
+- **The real point — abnormal-swing flag:** the value isn't to label a "good day / bad
+  day" (that's just one way to read it). It's to show when **today's change is outside
+  your usual swing** — i.e. compare today's % move against the portfolio's typical daily
+  range (e.g. its recent daily-move stdev) and highlight it when it's unusually large in
+  either direction. A normal ±0.5% day looks calm; a −3% day stands out.
+- **Compute:** for each holding, day move = (live price − prior close) × shares, summed
+  across the scope → a portfolio $ and % day change. yfinance already gives the previous
+  close (`previousClose`/`regularMarketPreviousClose`); cache it next to the live price in
+  `price_cache` so no extra calls. For the "usual swing," keep a short trailing series of
+  daily % moves (or derive stdev from recent history) and express today as a z-score /
+  percentile ("biggest move in 3 months").
+- **UI:** a small dashboard widget — the day $/% number, coloured green→red, with a
+  subtle marker when it's outside the normal band. Optional per-account version on Accounts.
+- **Effort:** small–medium — a prior-close field in the price cache + a day-move
+  aggregation + a dashboard widget. Reuses the cached-price refresh loop.
+
+**Priority:** Impact: Med · Effort: small–medium
+
+## Dashboard / Holdings — trend ("treading") indicator per ticker (and per account)
+
+A simple **up / down / flat trend** marker for each ticker — which way is it treading?
+Sits next to each holding (Holdings rows, dashboard widget) as a little ↑/↓/→ arrow.
+
+- **Open question (decide later):** how to define the trend window is undecided — could
+  be vs. a moving average (e.g. price vs 50-day MA), the sign of the last N days' return,
+  a short-term slope, or "above/below your average cost." Pick the definition during design.
+- **Per account / portfolio:** the same trend marker rolled up to an account or the whole
+  portfolio — though over a long enough window this "should be always up haha," so the
+  account version is more useful on a **short** window (e.g. last week/month treading
+  up or down) than all-time.
+- **Effort:** small once the trend rule is chosen — a per-ticker classifier over price
+  history (cache it) + an arrow/colour in the row and widget. Ties into the daily-swing
+  widget and the parked Rolling-return / Rolling-volatility ideas.
+
+**Priority:** Impact: Med · Effort: small _(once the trend rule is chosen)_
+
+## Performance — "tread" chart (portfolio beta vs. staying even)
+
+A chart that shows the portfolio/account **drift relative to a flat baseline** — i.e.
+how much it swings versus just "staying even." Two flavours, pick one or both:
+
+- **Value vs. flat line:** plot account value against a horizontal reference at the
+  starting value (or contributions line), shading above green / below red — the visual
+  gap is "how far ahead/behind staying even" you are.
+- **Beta / sensitivity:** compute the portfolio's **beta** vs a benchmark (S&P/TSX) from
+  the performance series — how amplified the swings are vs the market. Per-holding beta
+  is already cached (`price_service` `info['beta']`); a portfolio-level beta is the
+  weighted blend, and a rolling beta line shows how it changes over time.
+- **Where:** the Performance tab (a toggle/overlay on the existing value chart) or a
+  Charts-tab catalog entry. Pairs with the parked Max-drawdown and Rolling-volatility ideas.
+- **Effort:** medium — value-vs-flat is small (a flat dataset on the existing series);
+  the beta version needs a benchmark-return alignment + covariance from the series.
+
+**Priority:** Impact: Med · Effort: medium _(value-vs-flat alone is small)_
+
+## Charts — descriptions + hide / favourite (star) charts
+
+Make the Charts tab (and dashboard widgets) easier to navigate and personalise.
+
+- **Quick chart description:** a one-line "what am I looking at" caption (or an ⓘ
+  tooltip/info icon) on each chart, pulled from a `description` field added to each
+  `CHART_CATALOG` entry in `charts.py`. Cheap once the field exists.
+- **Hide charts:** let the user hide charts they don't care about so the tab only shows
+  what they want — a per-chart toggle (eye icon), persisted in localStorage like the
+  existing dashboard/chart layouts.
+- **Favourite / star charts:** star the ones you check often so they float to the top
+  (or feed a "Favourites" row on the dashboard). Persist starred IDs in localStorage.
+- **Effort:** small — a `description` field per catalog entry + a tiny show/hide/star
+  state in `charts.html` saved to localStorage (mirrors the layout-persistence pattern).
+
+**Priority:** Impact: Med · Effort: small
+
+## Internationalization — German, Spanish, French (in that order)
+
+Add multi-language support so the UI can render in other languages. Priority order:
+**German → Spanish → French**.
+
+- **How:** extract the user-facing strings (nav labels, tab headings, table headers,
+  button text, flash messages) into a translation layer — e.g. Flask-Babel with `.po`
+  catalogs, or a lighter JSON dictionary per locale loaded into the templates. A
+  language picker on the Settings page persists the choice (a `language` setting +
+  localStorage for client-side strings).
+- **Scope notes:** keep ticker symbols, currency codes, and account names untranslated;
+  number/date/currency formatting is locale-aware but **all monetary values stay in CAD**
+  (the locale only changes grouping/decimal style, not the currency). Chart.js labels
+  feed from the same string layer.
+- **Effort:** medium–large — mostly the one-time string extraction + a catalog per
+  language; German first, then Spanish, then French. The plumbing (picker + lookup) is
+  built once and the later languages are just more catalogs.
+
+**Priority:** Impact: Med · Effort: medium–large _(plumbing is one-time; each extra language is a catalog)_
+
+## Accounts — Savings account type with recurring interest
+
+A dedicated **Savings** account type that **auto-pays interest** on its cash balance,
+so a high-interest savings account (HISA) tracks itself instead of needing a manual
+interest transaction each month.
+
+- **Account type:** add "Savings" to the editable account-type list. Per-account
+  settings: an **annual interest rate** and a **payout cadence** (monthly / quarterly /
+  annual) and compounding basis.
+- **Recurring interest:** on each period, generate an Interest cash transaction =
+  balance × (rate ÷ periods/yr) on the account's current cash. Reuses the parked
+  **recurring/scheduled transaction** engine (see "Transactions — recurring / scheduled
+  manual add") — a savings account is just a recurring interest rule seeded from the
+  account's rate + balance.
+- **Other recommended settings:** optional **interest tiers** (rate by balance band),
+  a **promo rate + expiry**, and treating accrued-but-unpaid interest in the daily
+  value. Interest is taxable (non-registered) — flows into the Tax tab's income section.
+- **Effort:** medium — a Savings type + rate/cadence fields + an interest generator
+  (best built on the recurring-transaction rule engine). Pairs with the GIC-interest
+  and recurring-transaction items already parked.
+
+**Priority:** Impact: Med · Effort: medium _(rides on the ⭐ recurring-transaction engine)_
