@@ -13,7 +13,7 @@ app.secret_key = os.environ.get('SECRET_KEY', 'midnight-terminal-dev')
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
-from models import db, Transaction, PriceCache, Account, Setting, GIC, WatchlistItem, PortfolioSnapshot, TickerMap
+from models import db, Transaction, PriceCache, Account, Setting, GIC, WatchlistItem, PortfolioSnapshot, TickerMap, RecurringRule
 db.init_app(app)
 
 def run_migrations():
@@ -43,6 +43,7 @@ def run_migrations():
         _add_col('gics', 'institution', 'VARCHAR(100)')
         _add_col('transactions', 'subtype', 'VARCHAR(50) DEFAULT ""')
         _add_col('transactions', 'import_batch', 'VARCHAR(40)')
+        _add_col('transactions', 'recurring_id', 'INTEGER')
         _add_col('accounts', 'cash_balance', 'FLOAT DEFAULT 0')
         _add_col('accounts', 'horizon', 'VARCHAR(20)')
         _add_col('price_cache', 'meta_json', 'TEXT')
@@ -71,6 +72,16 @@ with app.app_context():
         try:
             from importers import scan_import_folder
             scan_import_folder(_f.value)
+        except Exception:
+            pass
+
+# Materialize any due recurring transactions on startup. Gated to the reloader
+# child (like the price thread) so the dev parent/child don't both generate.
+if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
+    with app.app_context():
+        try:
+            from recurring import generate_due
+            generate_due()
         except Exception:
             pass
 
@@ -205,9 +216,13 @@ def holdings():
 
 @app.route('/transactions')
 def transactions():
+    from recurring import generate_due
+    generate_due()  # materialize any due recurring rows before listing
     txns = Transaction.query.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
     accounts = Account.query.order_by(Account.name).all()
-    return render_template('transactions.html', transactions=txns, accounts=accounts, active='transactions')
+    rules = RecurringRule.query.order_by(RecurringRule.active.desc(), RecurringRule.next_date).all()
+    return render_template('transactions.html', transactions=txns, accounts=accounts,
+                           recurring_rules=rules, active='transactions')
 
 
 @app.route('/transactions/add', methods=['POST'])
@@ -236,24 +251,30 @@ def add_transaction():
         if txn_type not in CASH_TYPES and not ticker:
             raise ValueError('Ticker is required for this type.')
 
+        # A repeat cadence turns this into a recurring rule instead of a one-off:
+        # the engine then materializes the first (and any already-due) occurrences.
+        from recurring import FREQUENCIES, compute_amounts, generate_due
+        repeat = (request.form.get('repeat', '') or '').strip().lower()
+        if repeat in FREQUENCIES:
+            end_raw = request.form.get('repeat_end', '').strip()
+            count_raw = request.form.get('repeat_count', '').strip()
+            rule = RecurringRule(
+                account=account, ticker=ticker, type=txn_type,
+                qty=qty, price=price, currency=currency, amount=amount_in,
+                fees=fees, notes=notes, subtype=subtype, frequency=repeat,
+                next_date=txn_date,
+                end_date=datetime.strptime(end_raw, '%Y-%m-%d').date() if end_raw else None,
+                count_remaining=int(count_raw) if count_raw.isdigit() else None,
+            )
+            db.session.add(rule)
+            db.session.commit()
+            made = generate_due()
+            flash(f'Recurring rule added ({repeat}); generated {made} transaction(s) to date.', 'success')
+            return redirect(url_for('transactions'))
+
         fx = get_fx_rate()
         rate = fx if currency == 'USD' else 1.0
-        if txn_type in ('Buy', 'Sell', 'Reinvest'):
-            amount_native = qty * price          # share trade — value from qty × price
-        elif txn_type == 'Split':
-            amount_native = 0.0                  # only adds shares
-        else:
-            amount_native = amount_in            # income/cash types — a single total
-        amount_cad = amount_native * rate
-
-        if txn_type == 'Sell':
-            net_cad = amount_cad - fees
-        elif txn_type in ('Dividend', 'Interest', 'ReturnOfCapital', 'Deposit'):
-            net_cad = amount_cad - fees          # cash in
-        elif txn_type == 'Split':
-            net_cad = 0.0
-        else:  # Buy, Reinvest, WithholdingTax, Fee — cash out (amount_cad stays positive)
-            net_cad = -(amount_cad + fees)
+        amount_native, amount_cad, net_cad = compute_amounts(txn_type, qty, price, amount_in, fees, rate)
 
         db.session.add(Transaction(
             date=txn_date, ticker=ticker, account=account, type=txn_type,
@@ -273,6 +294,24 @@ def add_transaction():
             flash(f'Added: {txn_type} ${amount_in:,.2f} {currency}{tail}', 'success')
     except Exception as e:
         flash(f'Error: {e}', 'error')
+    return redirect(url_for('transactions'))
+
+
+@app.route('/recurring/<int:id>/pause', methods=['POST'])
+def toggle_recurring(id):
+    rule = RecurringRule.query.get_or_404(id)
+    rule.active = not rule.active
+    db.session.commit()
+    flash(f"Recurring rule {'resumed' if rule.active else 'paused'}.", 'info')
+    return redirect(url_for('transactions'))
+
+
+@app.route('/recurring/<int:id>/delete', methods=['POST'])
+def delete_recurring(id):
+    rule = RecurringRule.query.get_or_404(id)
+    db.session.delete(rule)
+    db.session.commit()
+    flash('Recurring rule deleted (generated transactions kept).', 'info')
     return redirect(url_for('transactions'))
 
 

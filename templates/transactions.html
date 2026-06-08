@@ -83,11 +83,66 @@
           <input type="text" name="notes" class="form-input" placeholder="optional" />
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Repeat</label>
+          <select name="repeat" id="txnRepeat" class="form-input" onchange="updateRepeatFields()">
+            <option value="">Does not repeat</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="yearly">Yearly</option>
+          </select>
+        </div>
+        <div class="form-group" id="grp-repeat-end" style="display:none">
+          <label>Until (optional)</label>
+          <input type="date" name="repeat_end" class="form-input" />
+        </div>
+        <div class="form-group" id="grp-repeat-count" style="display:none">
+          <label># of times (optional)</label>
+          <input type="number" name="repeat_count" class="form-input mono" placeholder="∞" step="1" min="1" />
+        </div>
+        <div class="form-group" id="grp-repeat-hint" style="display:none;align-self:flex-end">
+          <span class="card-sub">The Date above is the first occurrence; due ones are created now.</span>
+        </div>
+      </div>
       <div class="form-actions">
         <button type="submit" class="btn btn-primary">Add Transaction</button>
         <button type="button" class="btn" onclick="toggleAddForm()">Cancel</button>
       </div>
     </form>
+
+    {% if recurring_rules %}
+    <div class="recurring-list" style="margin-top:18px">
+      <div class="card-sub" style="margin-bottom:8px">Recurring rules ({{ recurring_rules | length }})</div>
+      <table class="data-table">
+        <thead>
+          <tr><th>Rule</th><th>Next</th><th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for r in recurring_rules %}
+          <tr>
+            <td>{{ r.summary }}</td>
+            <td class="mono">{% if r.active %}{{ r.next_date.strftime('%Y-%m-%d') }}{% else %}—{% endif %}</td>
+            <td>
+              {% if r.active %}<span class="type-badge type-buy">Active</span>
+              {% else %}<span class="type-badge">Paused</span>{% endif %}
+            </td>
+            <td class="r">
+              <form method="POST" action="{{ url_for('toggle_recurring', id=r.id) }}" style="display:inline">
+                <button class="btn btn-sm" type="submit">{{ 'Pause' if r.active else 'Resume' }}</button>
+              </form>
+              <form method="POST" action="{{ url_for('delete_recurring', id=r.id) }}" style="display:inline"
+                    onsubmit="return confirm('Delete this recurring rule? Generated transactions are kept.')">
+                <button class="btn-delete" type="submit">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
   </div>
 </div>
 
@@ -248,6 +303,18 @@ function updateTxnForm() {
   if (ql) ql.textContent = c.qtyLabel || 'Quantity';
 }
 document.addEventListener('DOMContentLoaded', updateTxnForm);
+
+// Show the "until" / "# of times" / hint fields only when a repeat cadence is set.
+function updateRepeatFields() {
+  const sel = document.getElementById('txnRepeat');
+  if (!sel) return;
+  const on = sel.value !== '';
+  ['repeat-end', 'repeat-count', 'repeat-hint'].forEach(id => {
+    const el = document.getElementById('grp-' + id);
+    if (el) el.style.display = on ? '' : 'none';
+  });
+}
+document.addEventListener('DOMContentLoaded', updateRepeatFields);
 
 // ── Filters ──────────────────────────────────────────────────────────────────
 function applyFilters() {
