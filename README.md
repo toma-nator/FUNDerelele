@@ -1,4 +1,6 @@
-# Portfolio Tracker
+# FUNDerelele 🍨
+
+*Scoop your funds into one sweet dashboard. Local-first, Canadian, private.*
 
 A personal finance web app for Canadian investors. You only enter **transactions**
 — everything else (holdings, dashboard, dividends, gains/losses, tax, charts)
