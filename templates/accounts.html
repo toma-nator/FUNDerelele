@@ -123,6 +123,12 @@
           <div class="stat-label">Dividends</div>
           <div class="stat-value mono text-green">{{ acc.dividends_total | cad }}</div>
         </div>
+        {% if acc.reinvested_total %}
+        <div class="account-stat">
+          <div class="stat-label">Reinvested</div>
+          <div class="stat-value mono text-green">{{ acc.reinvested_total | cad }}<span class="text-dim" style="font-size:.72rem;font-weight:400"> · {{ '%.0f' % acc.reinvested_pct }}% of book</span></div>
+        </div>
+        {% endif %}
         <div class="account-stat">
           <div class="stat-label">Realized G/L</div>
           <div class="stat-value mono {{ acc.realized_total | gl_class }}">{{ acc.realized_total | signed_cad }}</div>

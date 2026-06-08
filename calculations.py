@@ -27,6 +27,7 @@ def get_holdings(include_closed=False):
                 'avg_cost_cad': 0.0,
                 'dividends_cad': 0.0,
                 'realized_gl_cad': 0.0,
+                'reinvested_cad': 0.0,
                 'total_fees_cad': 0.0,
             }
         pos = positions[key]
@@ -64,6 +65,20 @@ def get_holdings(include_closed=False):
 
         elif t.type == 'Dividend':
             pos['dividends_cad'] += t.amount_cad or (t.qty * t.price)
+
+        elif t.type == 'Reinvest':
+            # DRIP: a distribution reinvested into shares. Adds quantity + book cost
+            # (ACB-correct — cost basis = the reinvested value), but no cash was paid
+            # out of pocket. Tracked separately as 'reinvested' (the portion of the
+            # holding funded by distributions, not contributions). The income side is
+            # counted in get_dividend_stats; here it only grows the position.
+            cost = t.amount_cad or (t.qty * t.price)
+            new_qty = pos['qty'] + t.qty
+            pos['total_cost_cad'] += cost
+            pos['avg_cost_cad'] = pos['total_cost_cad'] / new_qty if new_qty > 0 else 0
+            pos['qty'] = new_qty
+            pos['reinvested_cad'] += cost
+            pos['currency'] = t.currency
 
     result = []
     for key, pos in positions.items():
@@ -117,6 +132,9 @@ def get_holdings(include_closed=False):
             'day_change_pct': day_change_pct,
             'dividends_cad': pos['dividends_cad'],
             'realized_gl_cad': pos['realized_gl_cad'],
+            'reinvested_cad': pos['reinvested_cad'],
+            'reinvested_pct': (pos['reinvested_cad'] / pos['total_cost_cad'] * 100)
+                              if pos['total_cost_cad'] else 0,
             'last_updated': last_updated,
             'port_pct': 0,
             'closed': is_closed,
@@ -156,6 +174,7 @@ def get_dashboard_stats(holdings):
     cash_by_account = get_cash_by_account()
     total_cash = sum(cash_by_account.values())
     total_gics = sum(v['value'] for v in get_gic_value_by_account().values())
+    total_reinvested = sum(h['reinvested_cad'] for h in holdings)
 
     account_breakdown = {}
     for h in holdings:
@@ -170,6 +189,7 @@ def get_dashboard_stats(holdings):
         'total_unrealized_pct': total_unrealized_pct,
         'total_day_change': total_day_change,
         'total_dividends': total_dividends,
+        'total_reinvested': total_reinvested,
         'total_cash': total_cash,
         'total_gics': total_gics,
         'num_holdings': len(holdings),
@@ -466,6 +486,7 @@ def get_account_summary():
         # Dividends and realized G/L span the account's full history (closed too).
         dividends_total = sum(h['dividends_cad'] for h in acct_all)
         realized_total = sum(h['realized_gl_cad'] for h in acct_all)
+        reinvested_total = sum(h['reinvested_cad'] for h in acct_all)
         cash = cash_by_account.get(account.name, 0.0)
         gic = gic_by_account.get(account.name, {'value': 0.0, 'principal': 0.0})
         gic_value_cad = gic['value']
@@ -494,6 +515,8 @@ def get_account_summary():
             'day_change': day_change,
             'dividends_total': dividends_total,
             'realized_total': realized_total,
+            'reinvested_total': reinvested_total,
+            'reinvested_pct': (reinvested_total / holdings_book * 100) if holdings_book else 0,
             'net_contributions': net_contributions,
             'grants_bonds': grants_bonds,
             'all_time_gain': total_value - net_contributions,
@@ -694,8 +717,10 @@ def get_dividend_stats(scope='portfolio'):
     from datetime import datetime as dt
     from price_service import get_holdings_metadata
 
-    # Income = dividends + interest (cash/money-market). Both are cash income;
-    # only dividends carry withholding tax. They share this tab's totals & charts.
+    # Income = dividends + interest (cash/money-market). Both are cash income; only
+    # dividends carry withholding tax. (A DRIP's income is its Dividend row; the
+    # paired Reinvest row is the share purchase it funded, not income — see
+    # get_holdings, where it adds shares + 'reinvested' book cost.)
     dq = Transaction.query.filter(Transaction.type.in_(['Dividend', 'Interest']))
     wq = Transaction.query.filter_by(type='WithholdingTax')
     if scope and scope != 'portfolio':

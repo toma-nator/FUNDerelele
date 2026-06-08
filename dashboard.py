@@ -126,6 +126,7 @@ def build_overview():
     add('div_ttm', 'Dividends · TTM', _cad(ds['ttm']), 'last 12 mo', 'text-green')
     add('div_ytd', 'Dividends · YTD', _cad(ds['ytd']), str(yr), 'text-green')
     add('fwd_income', 'Forward Income', _cad(ds['forward_income']), f"{ds['forward_yield']:.2f}% yield", 'text-green')
+    add('reinvested', 'Reinvested', _cad(st['total_reinvested']), 'DRIP — holdings not paid for', 'text-green')
     add('realized_ytd', 'Realized G/L · YTD', _signed(realized.get(yr, 0.0)), str(yr), _cls(realized.get(yr, 0.0)))
     add('realized_all', 'Realized G/L · All-time', _signed(sum(realized.values())), 'all-time', _cls(sum(realized.values())))
     add('contributions', 'Net Contributions', _cad(contrib), 'all-time')

@@ -63,6 +63,7 @@
           <th class="r" data-sort data-type="num">Day Chg % <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">% Port <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">Dividends <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Reinv % <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">Realized G/L <span class="sort-arrow"></span></th>
         </tr>
       </thead>
@@ -102,10 +103,15 @@
           <td class="r mono" data-val="{{ h.port_pct }}">{{ '%.1f' % h.port_pct }}%</td>
           {% endif %}
           <td class="r mono text-green" data-val="{{ h.dividends_cad }}">{{ h.dividends_cad | cad }}</td>
+          <td class="r mono {% if h.reinvested_pct %}text-green{% else %}text-dim{% endif %}"
+              data-val="{{ h.reinvested_pct if h.reinvested_pct else '' }}"
+              title="Share of this position's book value funded by reinvested distributions">
+            {% if h.reinvested_pct %}{{ '%.0f' % h.reinvested_pct }}%{% else %}—{% endif %}
+          </td>
           <td class="r mono {{ h.realized_gl_cad | gl_class }}" data-val="{{ h.realized_gl_cad }}">{{ h.realized_gl_cad | signed_cad }}</td>
         </tr>
         {% else %}
-        <tr><td colspan="16" class="empty-row">No holdings yet. Add transactions to see your portfolio here.</td></tr>
+        <tr><td colspan="17" class="empty-row">No holdings yet. Add transactions to see your portfolio here.</td></tr>
         {% endfor %}
       </tbody>
     </table>

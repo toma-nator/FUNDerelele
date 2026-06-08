@@ -42,6 +42,7 @@ CHART_CATALOG = [
     ('dividends_by_year',       'Dividends by Year',          'Income',               'compact'),
     ('dividends_by_holding',    'Dividends by Holding',       'Income',               'compact'),
     ('forward_income',          'Forward Income by Holding',  'Income',               'compact'),
+    ('reinvested_by_holding',   'Reinvested by Holding',      'Income',               'compact'),
 
     ('alloc_account',           'By Account',                 'Allocation',           'compact'),
     ('alloc_sector',            'By Sector',                  'Allocation',           'compact'),
@@ -236,6 +237,21 @@ def _b_forward_income(account=None):
     return {'ok': True, 'type': 'hbar', 'title': 'Forward Annual Income by Holding',
             'labels': [r['ticker'] for r in rows],
             'datasets': [{'data': [round(r['fwd_income'], 2) for r in rows], 'color': GREEN}]}
+
+
+def _b_reinvested_by_holding(account=None):
+    agg = {}
+    for h in get_holdings(include_closed=True):
+        if account and h['account'] != account:
+            continue
+        if h.get('reinvested_cad'):
+            agg[h['ticker']] = agg.get(h['ticker'], 0) + h['reinvested_cad']
+    rows = sorted(agg.items(), key=lambda x: x[1], reverse=True)[:12]
+    if not rows:
+        return _empty('hbar', 'Reinvested by Holding', 'No reinvested distributions (DRIP) recorded.')
+    return {'ok': True, 'type': 'hbar', 'title': 'Reinvested by Holding (DRIP, all-time)',
+            'labels': [t for t, _ in rows],
+            'datasets': [{'data': [round(v, 2) for _, v in rows], 'color': GREEN}]}
 
 
 def _alloc(key, title, ctype, account):
@@ -451,6 +467,7 @@ _BUILDERS = {
     'cumulative_dividends': _b_cumulative_dividends,
     'dividends_by_year': _b_dividends_by_year,
     'dividends_by_holding': _b_dividends_by_holding,
+    'reinvested_by_holding': _b_reinvested_by_holding,
     'forward_income': _b_forward_income,
     'alloc_account': _b_alloc_account,
     'alloc_sector': _b_alloc_sector,

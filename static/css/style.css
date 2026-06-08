@@ -469,6 +469,7 @@ body {
 .type-withholdingtax  { background: rgba(255,140,66,.12);     color: var(--orange); }
 .type-deposit         { background: rgba(0,200,240,.08);      color: var(--accent); }
 .type-interest        { background: rgba(45,212,191,.12);     color: #2dd4bf;       }
+.type-reinvest        { background: rgba(0,230,118,.12);      color: var(--green);  }
 
 /* ── Filter bar ── */
 .filter-bar {

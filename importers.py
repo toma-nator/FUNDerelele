@@ -215,6 +215,9 @@ def _import_td(rows, account_name=None, account_override=None):
         'split': 'Split',    # SPLIT adds new shares; CXLSPL subtracts (temp-ticker reversal)
         'cxlspl': 'Split',
         'whtx02': 'WithholdingTax',
+        # DRIP: TD books the cash distribution as a separate Dividend row (income)
+        # and this as the share purchase it funded (qty + cost, cash out, not income).
+        'reinv': 'Reinvest', 'reinvest': 'Reinvest', 'drip': 'Reinvest',
         # Corporate removals: only negative-qty rows (share removal side) become Sell
         'exch': 'CorpRemoval',
         'disp': 'CorpRemoval',
@@ -465,6 +468,29 @@ def _import_td(rows, account_name=None, account_override=None):
                 ))
                 count += 1
 
+            elif txn_type == 'Reinvest':
+                # DRIP share purchase: Quantity = shares acquired, Net Amount = cost.
+                # Cash out (paired Dividend row is the income); adds shares + book cost.
+                qty_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
+                qty = abs(float(qty_raw)) if qty_raw else 0.0
+                net_raw = (row.get('Net Amount', '') or '0').replace(',', '').strip()
+                amount = abs(float(net_raw)) if net_raw else 0.0
+                if qty == 0 or amount == 0:
+                    continue
+                price = round(amount / qty, 4)
+                existing = Transaction.query.filter_by(
+                    date=txn_date, ticker=ticker, type='Reinvest', qty=qty, price=price
+                ).first()
+                if existing:
+                    skipped += 1
+                    continue
+                db.session.add(Transaction(
+                    date=txn_date, ticker=ticker, account=default_account,
+                    type='Reinvest', qty=qty, price=price, currency=currency,
+                    amount_native=amount, amount_cad=amount, fees_cad=0, net_cad=-amount,
+                ))
+                count += 1
+
             else:  # Buy, Sell
                 qty_raw = (row.get('Quantity', '') or '0').replace(',', '').strip()
                 qty = abs(float(qty_raw)) if qty_raw else 0.0
@@ -647,7 +673,9 @@ def _import_td_pdf(file_bytes, account_name=None, account_override=None):
                     action = 'CDSG' if 'savings grant' in combined else 'CDSB'
                     tail = first[17:].strip()
                 elif fl.startswith('reinvested distribution'):
-                    action, tail = 'DIV', first[23:].strip()
+                    # DRIP share purchase (the cash distribution is its own Dividend
+                    # line). Has a quantity, so extract like a Buy → mapped to Reinvest.
+                    action, tail = 'REINV', first[23:].strip()
                 elif fl.startswith('gst charged'):
                     action, tail = 'FEE', first[11:].strip()
                 elif fl.startswith('admin fee'):
@@ -659,7 +687,7 @@ def _import_td_pdf(file_bytes, account_name=None, account_override=None):
                 qty = price = amount = None
                 desc_first = tail
 
-                if action in ('Buy', 'Sell'):
+                if action in ('Buy', 'Sell', 'REINV'):
                     m = _PDF_BUY_SELL_TAIL.search(tail)
                     if m:
                         qty   = abs(int(m.group(1)))
@@ -820,6 +848,7 @@ def _import_cibc(rows, account_name=None, account_override=None):
         'contrib': 'Deposit', 'contribution': 'Deposit', 'deposit': 'Deposit',
         'withholding tax': 'WithholdingTax', 'withholding': 'WithholdingTax',
         'nr tax': 'WithholdingTax',
+        'reinvest': 'Reinvest', 'reinvestment': 'Reinvest', 'drip': 'Reinvest',
     }
 
     acct_name, acct_type = _cibc_account(account_name, account_override)
@@ -832,7 +861,9 @@ def _import_cibc(rows, account_name=None, account_override=None):
 
     def num(v):
         try:
-            return float((v or '0').replace(',', '').replace('$', '').strip())
+            # CIBC pads some cells with a zero-width space (U+200B) — strip it so
+            # quantities like "​1" on Reinvest rows parse instead of becoming 0.
+            return float((v or '0').replace(',', '').replace('$', '').replace('​', '').strip())
         except (TypeError, ValueError):
             return 0.0
 
@@ -907,6 +938,21 @@ def _import_cibc(rows, account_name=None, account_override=None):
                     continue
                 net_cad = amount_cad
                 qty = price = 0.0
+
+            elif txn_type == 'Reinvest':
+                # DRIP: CIBC books the distribution as a separate Dividend row (the
+                # income) and this Reinvest row as the share purchase it funded —
+                # Amount is the (negative) cash spent, Quantity the shares acquired.
+                # So this is a distribution-funded buy: cash out, adds shares + book
+                # cost, but NOT income (the paired Dividend already is).
+                ticker = _cibc_ticker(row.get('Symbol'), row.get('Description'), row.get('Market'))
+                if not ticker or qty == 0:
+                    continue
+                amount_cad = abs(net_cad)
+                if amount_cad == 0:
+                    continue
+                net_cad = -amount_cad
+                price = round(amount_cad / qty, 4)
 
             else:  # Deposit (Contribution)
                 ticker = 'CASH'

@@ -231,7 +231,13 @@ def add_transaction():
         fx = get_fx_rate()
         amount_native = qty * price
         amount_cad = amount_native * (fx if currency == 'USD' else 1.0)
-        net_cad = (amount_cad - fees) if txn_type in ('Sell', 'Dividend', 'Interest') else -(amount_cad + fees)
+        if txn_type in ('Sell', 'Dividend', 'Interest'):
+            net_cad = amount_cad - fees
+        else:
+            # Buy and Reinvest (DRIP) both spend cash to add shares. A Reinvest is
+            # funded by its paired Dividend (logged separately), so it's a normal
+            # cash-out purchase — but tracked as 'reinvested' in get_holdings.
+            net_cad = -(amount_cad + fees)
 
         db.session.add(Transaction(
             date=txn_date, ticker=ticker, account=account, type=txn_type,
