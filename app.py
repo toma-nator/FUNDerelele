@@ -135,6 +135,13 @@ def cad_filter(v):
     return f'${v:,.2f}'
 
 
+@app.template_filter('usd')
+def usd_filter(v):
+    if v is None:
+        return '—'
+    return f'US${v:,.2f}'
+
+
 @app.template_filter('signed_cad')
 def signed_cad_filter(v):
     if v is None:

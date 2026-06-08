@@ -48,10 +48,19 @@
         <div class="stat-label">Holdings</div>
         <div class="stat-value mono">{{ acc.holdings_mv | cad }}</div>
       </div>
-      <div class="account-stat">
-        <div class="stat-label">Cash</div>
-        <div class="stat-value mono">{{ acc.cash_balance | cad }}</div>
-      </div>
+      {% if acc.multi_currency_cash %}
+        {% for ccy, amt in acc.cash_ccy | dictsort %}
+        <div class="account-stat">
+          <div class="stat-label">Cash ({{ 'US$' if ccy == 'USD' else ccy }})</div>
+          <div class="stat-value mono">{% if ccy == 'USD' %}{{ amt | usd }}{% else %}{{ amt | cad }}{% endif %}</div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="account-stat">
+          <div class="stat-label">Cash</div>
+          <div class="stat-value mono">{{ acc.cash_balance | cad }}</div>
+        </div>
+      {% endif %}
       {% if acc.gic_value %}
       <div class="account-stat">
         <div class="stat-label">GICs</div>

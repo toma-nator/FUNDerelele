@@ -149,17 +149,43 @@ def get_holdings(include_closed=False):
     return result
 
 
-def get_cash_by_account():
-    """Net liquid cash per account: sum of net_cad across all transactions.
-    Deposits (+), buys (−), sells/dividends (+). Reflects actual uninvested cash."""
+def get_cash_by_account_currency():
+    """Net liquid cash per (account, currency), in that currency's *native*
+    dollars → {account: {'CAD': x, 'USD': y, …}}.
+
+    CAD rows use net_cad directly. Non-CAD rows are converted from the stored
+    net_cad back to native at the row's own booked rate (amount_cad / amount_native),
+    so each pool holds real dollars of its currency (e.g. USD dividends land in the
+    USD pool). Falls back to live FX when a row lacks the amounts to imply a rate."""
     rows = (
         Transaction.query
-        .with_entities(Transaction.account, Transaction.net_cad)
+        .with_entities(Transaction.account, Transaction.currency, Transaction.net_cad,
+                       Transaction.amount_native, Transaction.amount_cad)
         .all()
     )
+    fx = get_fx_rate()
     result = {}
-    for acc, net in rows:
-        result[acc] = result.get(acc, 0.0) + (net or 0.0)
+    for acc, ccy, net_cad, amt_n, amt_c in rows:
+        net_cad = net_cad or 0.0
+        ccy = ccy or 'CAD'
+        if ccy == 'CAD':
+            native = net_cad
+        else:
+            rate = (amt_c / amt_n) if (amt_n and amt_c) else (fx or 1.0)
+            native = (net_cad / rate) if rate else net_cad
+        pools = result.setdefault(acc, {})
+        pools[ccy] = pools.get(ccy, 0.0) + native
+    return result
+
+
+def get_cash_by_account():
+    """Net liquid cash per account in CAD-equivalent, revaluing non-CAD pools at
+    live FX. Built from the per-currency native pools so the account page's native
+    USD/CAD lines and this rolled-up total share one source of truth."""
+    fx = get_fx_rate()
+    result = {}
+    for acc, pools in get_cash_by_account_currency().items():
+        result[acc] = sum(amt * (fx if ccy != 'CAD' else 1.0) for ccy, amt in pools.items())
     return result
 
 
@@ -460,6 +486,7 @@ def get_account_summary():
     all_holdings = get_holdings(include_closed=True)
     accounts = Account.query.all()
     cash_by_account = get_cash_by_account()
+    cash_ccy_by_account = get_cash_by_account_currency()
     gic_by_account = get_gic_value_by_account()
 
     # Personal contributions vs. free government money (RDSP grants/bonds).
@@ -488,6 +515,10 @@ def get_account_summary():
         realized_total = sum(h['realized_gl_cad'] for h in acct_all)
         reinvested_total = sum(h['reinvested_cad'] for h in acct_all)
         cash = cash_by_account.get(account.name, 0.0)
+        # Native cash pools (CAD/USD/…), keeping only non-trivial balances so the
+        # account page can show a separate line per currency when more than one.
+        cash_ccy = {c: round(v, 2) for c, v in cash_ccy_by_account.get(account.name, {}).items()
+                    if abs(v) >= 0.005}
         gic = gic_by_account.get(account.name, {'value': 0.0, 'principal': 0.0})
         gic_value_cad = gic['value']
 
@@ -520,6 +551,8 @@ def get_account_summary():
             'holdings_mv': holdings_mv,
             'holdings_book': holdings_book,
             'cash_balance': cash,
+            'cash_ccy': cash_ccy,
+            'multi_currency_cash': len([c for c in cash_ccy if c != 'CAD']) > 0,
             'gic_value': gic_value_cad,
             'ccy_groups': ccy_groups,
             'multi_currency': len(ccy_groups) > 1,
