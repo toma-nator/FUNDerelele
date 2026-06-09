@@ -126,6 +126,19 @@ def inject_last_updated():
     return {'last_updated': lu}
 
 
+@app.context_processor
+def inject_static_versioner():
+    # Cache-busting: append the file's mtime so edited CSS/JS/images reload
+    # without a hard refresh.
+    def static_v(filename):
+        try:
+            ver = int(os.path.getmtime(os.path.join(app.static_folder, filename)))
+        except OSError:
+            ver = 0
+        return url_for('static', filename=filename, v=ver)
+    return {'static_v': static_v}
+
+
 # ── Template filters ──────────────────────────────────────────────────────────
 
 @app.template_filter('cad')

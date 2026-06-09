@@ -7,17 +7,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <link rel="stylesheet" href="{{ static_v('css/style.css') }}" />
   <script>if(localStorage.getItem('sidebarCollapsed')==='1')document.documentElement.classList.add('sidebar-collapsed');</script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="{{ url_for('static', filename='js/chart_render.js') }}"></script>
+  <script src="{{ static_v('js/chart_render.js') }}"></script>
 </head>
 <body class="{% block body_class %}{% endblock %}">
 
   <nav class="sidebar" id="sidebar">
     <div class="sidebar-brand">
-      <span class="brand-glyph">◈</span>
-      <span class="brand-name">Portfolio</span>
+      <img src="{{ static_v('img/logo.png') }}" alt="Portfolio Tracker" class="brand-logo">
     </div>
 
     <div class="nav-section">
@@ -59,11 +58,15 @@
         <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
       </div>
       <div class="topbar-right">
-        {% block topbar_actions %}{% endblock %}
         {% if last_updated %}
-          <span class="updated-at">prices updated {{ last_updated.last_updated.strftime('%H:%M') if last_updated.last_updated else '—' }}</span>
+          <span class="updated-at">prices updated <time>{{ last_updated.last_updated.strftime('%H:%M') if last_updated.last_updated else '—' }}</time></span>
         {% endif %}
         <button class="btn btn-sm" onclick="refreshPrices(this)">↻ Refresh Prices</button>
+        {% block topbar_actions %}{% endblock %}
+        <button type="button" class="btn-icecream" title="Ice cream mode — coming soon"
+                aria-label="Ice cream mode (coming soon)">
+          <img src="{{ static_v('img/icon.png') }}" alt="" />
+        </button>
       </div>
     </header>
 
@@ -80,7 +83,7 @@
     </div>
   </div>
 
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  <script src="{{ static_v('js/app.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
