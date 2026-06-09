@@ -10,19 +10,23 @@ Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
   friend, or unblock other work?
 - **Effort** — tiny / small / medium / large (some "small–medium"), taken from each
   item's own notes.
-- **✅ Shipped** (removed from this list): the percent-format chart renderer, the
-  recurring/scheduled-transaction engine, and multi-currency cash (per-currency
-  CAD/USD balances + the Currency Exchange transaction type).
+- **✅ Shipped** (removed from this list): the percent-format chart renderer plus
+  three percent charts (Portfolio Growth %, Growth % vs Benchmarks, Monthly
+  Return %); the recurring/scheduled-transaction engine; multi-currency cash
+  (per-currency CAD/USD balances + the Currency Exchange transaction type); the
+  **FUNDerelele logo & branding** (sidebar wordmark, topbar icon button, readable
+  price-stamp, static-asset cache-busting); and empty-account hygiene (dropdowns
+  hide transaction-less accounts + a Settings "clean up empty accounts" button).
 
 **Prioritize with the 2×2:** High-impact + low-effort = do now; High-impact +
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈93 ideas)
+## Backlog at a glance (≈92 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
-| Charts | ~41 | ~26 finance-useful + ~15 fun/easter-egg |
+| Charts | ~41 | ~26 finance-useful + ~15 fun/easter-egg (3 % charts now shipped) |
 | Per-tab feature enhancements | ~21 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX |
 | New tabs (big features) | 9 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt |
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
@@ -31,7 +35,7 @@ Low-impact + high-effort = skip / much later.
 | Account / data model | 1 | Savings account (recurring-interest) |
 | Canadian rules | 1 | RRSP room |
 | Internationalization | 1 | German → Spanish → French |
-| Branding | 1 | Logo & styling |
+| Branding | 1 | Remaining: favicon, title prefix, accent flow-through, per-holding logos (core logo shipped) |
 
 _Keep this table and the Priority tags in sync whenever suggestions are added or removed._
 
@@ -77,33 +81,34 @@ TFSA/FHSA room pattern._
 
 **Priority:** Impact: Med · Effort: medium
 
-## Branding — FUNDerelele logo & styling
+## Branding — remaining polish (core logo shipped)
 
-Give the app a real identity. Right now there's no logo or brand mark — just the
-nav and the Midnight Terminal theme. Add a **FUNDerelele logo** and tie the
-styling together around it so it reads as a finished product rather than a
-generic dashboard.
+_Shipped:_ the **FUNDerelele wordmark** in the sidebar (luma-keyed transparent
+PNG, brand box height-aligned to the topbar divider), a **topbar cup icon button**
+(`.btn-icecream`, inert placeholder for the planned ice-cream-mode toggle — see
+memory `icecream-mode-planned`), a readable "prices updated" stamp with a live
+dot, and a `static_v()` cache-buster so CSS/JS/image edits reload without a hard
+refresh. Source art lives in `static/img/` (`logo.png`, `icon.png`).
 
-- **Logo:** a small SVG mark + wordmark ("FUNDerelele") placed at the top of the
-  sidebar in `base.html` (above the nav sections) and as the browser tab favicon.
-  SVG keeps it crisp at any size and lets it inherit theme colours. Drop the
-  source in `static/img/` (e.g. `logo.svg`, `favicon.svg`).
-- **Styling:** pull the logo's accent colour into the existing CSS variables in
-  `static/css/style.css` so the brand colour flows through links, active nav
-  items, chart accents, and buttons — keep the Midnight Terminal dark base.
-  Optionally a subtle logo watermark on the dashboard hero or login/empty states.
-- **Polish:** matching favicon, page `<title>` prefix, and a small footer credit.
-- **Keep it on-theme:** Midnight Terminal dark stays the base; the logo just adds
-  a consistent accent and personality. Clean and uncluttered per the UI bar.
-- **Effort:** small — mostly an asset (the SVG) + a sidebar header block in
-  `base.html`, a favicon link, and a couple of CSS-variable tweaks. The bulk of
-  the work is designing/sourcing the actual logo art.
+Still parked:
+
+- **Favicon + page `<title>` prefix.** A matching favicon and a "FUNDerelele —"
+  prefix on each tab's title (the sidebar shows the wordmark, but the browser tab
+  still reads "Portfolio Tracker").
+- **Accent flow-through.** Pull the logo's cyan accent into more CSS variables so
+  the brand colour carries through links, active nav, chart accents, and buttons —
+  Midnight Terminal dark stays the base. Optional subtle watermark on empty states.
+- **Lighter assets (SVG / compression).** Re-export the logo & icon as SVG, or
+  compress the PNGs (~1–2 MB each today), so they load lighter at any size. See
+  memory `optimize-brand-pngs`.
 - _Free API — holding logos:_ a logo-by-domain service (Clearbit-style, no key) or
   a fundamentals provider's logo endpoint to show a small **company/ETF logo** next
-  to each holding on Holdings/Dashboard. Cheap visual polish that rides the branding
-  pass (cache per ticker; fall back to a monogram when none is found).
+  to each holding on Holdings/Dashboard. Cheap visual polish; cache per ticker,
+  fall back to a monogram when none is found.
+- **Effort:** small — favicon + title prefix are tiny; accent flow-through and
+  holding logos are the bulk.
 
-**Priority:** Impact: Med · Effort: small
+**Priority:** Impact: Low–Med · Effort: small
 
 ## New tab — Time Horizon / Liquidity
 
@@ -185,7 +190,7 @@ entry to enable any of them:
   Rebalancer tab better than a generic catalog chart. Deferred pending a way to
   pick the account/dimension within a pane.
 
-**Priority:** Impact: Med _(⭐ percent-format renderer is High / small — do it first; the rest vary)_ · Effort: small–medium each
+**Priority:** Impact: Med _(percent-format renderer + first % charts shipped; the rest vary)_ · Effort: small–medium each
 
 ## Asset-class look-through (ETFs)
 
@@ -716,9 +721,9 @@ and RDSP-planner tabs).
 ## Charts — more ideas (catalog candidates)
 
 New `CHART_CATALOG` candidates (distinct from the shipped charts and from the
-deferred 🟡/🔴 list above). A few of the % ones ride on the **percent-format
-renderer** noted in "Charts tab — deferred charts" — do that small tweak first.
-Each is a builder in `charts.py` + a catalog entry.
+deferred 🟡/🔴 list above). The % ones use the **percent-format renderer**
+(shipped) — just set `unit: 'percent'` in the builder. Each is a builder in
+`charts.py` + a catalog entry.
 
 **Performance & risk**
 - **Rolling 12-month return** (line) — trailing-1yr return at each month-end.

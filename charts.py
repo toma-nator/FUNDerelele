@@ -31,6 +31,9 @@ def _palette(n):
 CHART_CATALOG = [
     ('value_vs_contrib',        'Value vs Contributions',     'Growth & Performance', 'wide'),
     ('value_vs_benchmarks',     'Value vs Benchmarks',        'Growth & Performance', 'wide'),
+    ('portfolio_growth_pct',    'Portfolio Growth %',         'Growth & Performance', 'wide'),
+    ('growth_pct_vs_benchmarks', 'Growth % vs Benchmarks',    'Growth & Performance', 'wide'),
+    ('monthly_return_pct',      'Monthly Return %',           'Growth & Performance', 'wide'),
     ('book_vs_market',          'Book vs Market Value',       'Growth & Performance', 'wide'),
     ('holdings_vs_cash',        'Holdings vs Cash',           'Growth & Performance', 'wide'),
     ('projection_scenarios',    'Projection Scenarios',       'Growth & Performance', 'wide'),
@@ -168,6 +171,71 @@ def _b_value_vs_benchmarks(account=None):
         ds.append({'label': name, 'data': series, 'color': cols.get(name, GREY)})
     return {'ok': True, 'type': 'line', 'title': 'Portfolio vs Benchmarks (money-weighted, CAD)',
             'labels': s['labels'], 'datasets': ds}
+
+
+def _total_series(s):
+    return [round((s['market_value'][i] or 0) + (s['cash'][i] or 0), 2)
+            for i in range(len(s['labels']))]
+
+
+def _cum_flows(s):
+    out, run = [], 0.0
+    for f in s['flows']:
+        run += f or 0
+        out.append(run)
+    return out
+
+
+def _gain_pct(totals, cum_flows):
+    # % gain over capital invested to date; None until any capital is in.
+    return [round((v - c) / c * 100, 2) if c and c > 0 else None
+            for v, c in zip(totals, cum_flows)]
+
+
+def _b_portfolio_growth_pct(account=None):
+    s = get_performance_series(_scope(account))
+    if not s['labels']:
+        return _empty('line', 'Portfolio Growth %', 'No transactions yet.')
+    pct = _gain_pct(_total_series(s), _cum_flows(s))
+    return {'ok': True, 'type': 'line', 'title': 'Portfolio Growth % (gain on contributions)',
+            'labels': s['labels'], 'unit': 'percent',
+            'datasets': [{'label': 'Growth %', 'data': pct, 'color': ACCENT, 'fill': True}]}
+
+
+def _b_growth_pct_vs_benchmarks(account=None):
+    s = get_performance_series(_scope(account))
+    if not s['labels']:
+        return _empty('line', 'Growth % vs Benchmarks', 'No transactions yet.')
+    cum = _cum_flows(s)
+    ds = [{'label': 'Portfolio', 'data': _gain_pct(_total_series(s), cum), 'color': ACCENT}]
+    cols = {'S&P 500': GREEN, 'NASDAQ': '#ba68c8', 'TSX': '#ffb74d'}
+    for name, series in s.get('benchmarks', {}).items():
+        ds.append({'label': name, 'data': _gain_pct(series, cum), 'color': cols.get(name, GREY)})
+    return {'ok': True, 'type': 'line', 'title': 'Growth % vs Benchmarks (money-weighted)',
+            'labels': s['labels'], 'unit': 'percent', 'datasets': ds}
+
+
+def _b_monthly_return_pct(account=None):
+    s = get_performance_series(_scope(account))
+    total = _total_series(s)
+    if len(total) < 2:
+        return _empty('bar', 'Monthly Return %', 'Not enough history yet.')
+    flows = s['flows']
+    labels, data, colors = [], [], []
+    for i in range(1, len(total)):
+        prev = total[i - 1]
+        if not prev or prev <= 0:
+            continue
+        # Simple Dietz: strip the month's contribution so it's a return, not a top-up.
+        r = round((total[i] - prev - (flows[i] or 0)) / prev * 100, 2)
+        labels.append(s['labels'][i])
+        data.append(r)
+        colors.append(GREEN if r >= 0 else RED)
+    if not data:
+        return _empty('bar', 'Monthly Return %', 'Not enough history yet.')
+    return {'ok': True, 'type': 'bar', 'title': 'Monthly Return % (contribution-adjusted)',
+            'labels': labels, 'unit': 'percent',
+            'datasets': [{'label': 'Return %', 'data': data, 'colors': colors}]}
 
 
 def _b_book_vs_market(account=None):
@@ -467,6 +535,9 @@ def _b_gic_values(account=None):
 _BUILDERS = {
     'value_vs_contrib': _b_value_vs_contrib,
     'value_vs_benchmarks': _b_value_vs_benchmarks,
+    'portfolio_growth_pct': _b_portfolio_growth_pct,
+    'growth_pct_vs_benchmarks': _b_growth_pct_vs_benchmarks,
+    'monthly_return_pct': _b_monthly_return_pct,
     'book_vs_market': _b_book_vs_market,
     'holdings_vs_cash': _b_holdings_vs_cash,
     'projection_scenarios': _b_projection_scenarios,
