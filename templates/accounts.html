@@ -173,10 +173,6 @@
             <div class="stat-label">Total Room Left</div>
             <div class="stat-value mono">{{ acc.room.total_remaining | cad }}{% if acc.room.total_cap %}<span class="stat-cap">of {{ acc.room.total_cap | cad }}</span>{% endif %}</div>
           </div>
-          <div class="account-stat">
-            <div class="stat-label">This Year's Room Left</div>
-            <div class="stat-value mono">{{ acc.room.year_remaining | cad }}</div>
-          </div>
           {% if acc.room.carry_over is not none %}
           <div class="account-stat">
             <div class="stat-label">Carry-Over From Last Year</div>

@@ -120,5 +120,5 @@ The first run creates an empty database (`instance/finance.db`) automatically.
 
 ## Tech (for the curious)
 
-Python + Flask + SQLite, vanilla HTML/CSS/JS with Chart.js, `yfinance` for prices.
-No build step, no framework — just `python app.py`.
+Python + Flask + Flask-SQLAlchemy + SQLite, vanilla HTML/CSS/JS with Chart.js,
+`yfinance` for prices. No build step, no front-end framework — just `python app.py`.

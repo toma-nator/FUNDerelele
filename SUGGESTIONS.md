@@ -4,32 +4,31 @@ Ideas parked for future implementation. Not committed work — just a backlog.
 
 ## How to read this backlog
 
-Every suggestion below ends with a **Priority** tag — `Impact · Effort` — plus a ⭐ for
-the **do-first unlocks**: cheap items that make many later ideas near-free.
+Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
 
 - **Impact** — High / Med / Low: does it serve a core goal, help the dividend-heavy
   friend, or unblock other work?
 - **Effort** — tiny / small / medium / large (some "small–medium"), taken from each
   item's own notes.
-- **⭐ Do-first unlocks** (build these before the matrix says so): **Percent-format
-  chart renderer**, **manual recurring-transaction engine**, **multi-currency cash
-  balances**.
+- **✅ Shipped** (removed from this list): the percent-format chart renderer, the
+  recurring/scheduled-transaction engine, and multi-currency cash (per-currency
+  CAD/USD balances + the Currency Exchange transaction type).
 
 **Prioritize with the 2×2:** High-impact + low-effort = do now; High-impact +
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈96 ideas)
+## Backlog at a glance (≈93 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
-| Charts | ~42 | ~27 finance-useful + ~15 fun/easter-egg |
+| Charts | ~41 | ~26 finance-useful + ~15 fun/easter-egg |
 | Per-tab feature enhancements | ~21 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX |
 | New tabs (big features) | 9 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt |
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
 | UI/UX polish | 6 | Restore-alerts, sidebar reorder, sparkline, chart descriptions/hide/star, daily-swing widget, trend indicator |
 | Infrastructure / hardening | 4 | Test suite, yfinance resilience, income tax, README screenshots |
-| Account / data model | 3 | Multi-currency cash ⭐, Savings account, recurring transactions ⭐ |
+| Account / data model | 1 | Savings account (recurring-interest) |
 | Canadian rules | 1 | RRSP room |
 | Internationalization | 1 | German → Spanish → French |
 | Branding | 1 | Logo & styling |
@@ -77,48 +76,6 @@ deductible). _Effort: medium — a room input/anchor + a calculator + UI, mirror
 TFSA/FHSA room pattern._
 
 **Priority:** Impact: Med · Effort: medium
-
-## ⭐ Transactions — recurring / scheduled manual add
-
-Let a manually-added transaction **repeat on a schedule** (e.g. a monthly $500
-contribution, a quarterly DRIP, a recurring fee) instead of re-entering it each time.
-
-- **How:** a "Repeat" option on the Add-Transaction form (frequency: weekly /
-  monthly / quarterly / yearly, + end date or count). Store a small `recurring_rule`
-  table (template txn + cadence + next-date); generate the concrete transactions on
-  app start / a scan, or lazily up to today. Pairs with the auto-import folder watcher.
-- **Use cases:** automatic contributions, DRIPs, recurring account fees, GIC interest.
-- **Effort:** medium — a rule model + a generator pass + a small bit of form UI.
-
-**Priority:** ⭐ do-first unlock · Impact: High · Effort: medium _(unlocks the Savings-account interest, DRIP, and recurring-fee items)_
-
-## ⭐ HIGH IMPORTANCE — Multi-currency cash balances (per account)
-
-Let one account hold **two cash balances — CAD and USD** (and convert between them),
-instead of today's single CAD figure. This is the piece Brad's TFSA is waiting on
-(his USD $321.69 is currently folded into CAD with a "split later" note on the
-opening deposit).
-
-- **Why it's an architectural change:** cash is stored as one CAD number per account
-  — `get_cash_by_account` just sums every transaction's `net_cad` (always CAD). There
-  is no native/per-currency cash concept.
-- **What's needed:**
-  - Store each transaction's **native cash flow** (a `net_native` field + migration),
-    or derive it. CIBC import already has native `Amount`; TD's `Net Amount` is CAD,
-    so USD trades' native cash must be derived from qty×price ± fees.
-  - Bucket cash by **(account, currency)** → `{TFSA: {CAD: …, USD: …}}`; convert USD→CAD
-    at live FX for any total.
-  - A new **"Currency Exchange"** transaction type to move cash between the CAD and USD
-    pools (Norbert's gambit / FX conversion).
-  - A **USD deposit** option in the manual Add-Transaction form + importers.
-  - Thread per-currency cash through ~7 consumers: dashboard `total_cash`, Accounts
-    (two cash lines + holdings-vs-cash allocation), Performance valuation, Cash Flows.
-- **Effort:** medium — ~1–2 focused days; touches a core model + ~7 files, so plan
-  it before coding.
-- _Part 1 (grouping/sorting US vs CAD **stocks**) is already shipped (Accounts detail
-  groups positions by currency; Holdings tab has a CCY column + currency filter)._
-
-**Priority:** ⭐ do-first unlock · Impact: High · Effort: medium _(blocks Brad's TFSA)_
 
 ## Branding — FUNDerelele logo & styling
 
@@ -206,15 +163,6 @@ a small area-gradient tweak or a wider/taller footprint. Parked for a later pass
 The Charts tab (`charts.py` + `templates/charts.html`) ships the 🟢 catalog. These
 were parked per the build plan; add a builder in `charts.py` + a `CHART_CATALOG`
 entry to enable any of them:
-
-- **⭐ HIGH VALUE — percent-format support in the renderer.** The chart renderer
-  currently formats every value as CAD (axis ticks + tooltip). Add an optional
-  `unit: 'percent'` (or `'pct'`) field to a chart's payload and have
-  `buildConfig()` in `charts.html` switch the axis/tooltip formatter accordingly.
-  This is a small, one-time change that **unlocks a whole class of charts for
-  near-free**: yield-on-cost & current yield by holding, holding/sector return %,
-  allocation drift %, monthly/cumulative TWR %, dividend-growth %, etc. Do this
-  first — it's the cheapest high-leverage win in the backlog.
 
 - **Asset Class look-through** (stock/bond/cash) — 🟡 `fund_assets` is cached; see
   the "Asset-class look-through (ETFs)" item below. (Distinct from the shipped
