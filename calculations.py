@@ -279,6 +279,12 @@ def _tfsa_limit(year, overrides=None):
     return TFSA_ANNUAL_LIMITS.get(year, TFSA_FALLBACK_LIMIT)
 
 
+def _txn_account_names():
+    """Names of accounts that have at least one transaction — keeps empty/stale
+    accounts out of selection dropdowns."""
+    return {r[0] for r in Transaction.query.with_entities(Transaction.account).distinct()}
+
+
 def _deposits_by_year(account_names):
     """Split deposits across the given accounts into personal contributions vs
     withdrawals (negative deposits) per year, plus grants and bonds separately.
@@ -734,7 +740,8 @@ def get_cashflow_stats(account_filter=None, subtype_filter=None):
     free_pct   = round(100 * free_money / all_time, 1) if all_time else 0.0
     pie_values = [round(by_subtype[st]['total'], 2) for st in known_subtypes]
 
-    accounts = [a.name for a in Account.query.order_by(Account.name).all()]
+    used = _txn_account_names()
+    accounts = [a.name for a in Account.query.order_by(Account.name).all() if a.name in used]
 
     return {
         'deposits': deposits,
@@ -997,7 +1004,10 @@ def get_gic_stats(account_filter=None, show_matured=False):
         'gic_accounts': gic_accounts,
         'active_account': account_filter or '',
         'show_matured': show_matured,
-        'accounts': [a.name for a in Account.query.order_by(Account.name).all()],
+        # Add-GIC suggestions: accounts with transactions, plus any account that
+        # already holds a GIC (those may be GIC-only with no transactions).
+        'accounts': sorted({a.name for a in Account.query.all() if a.name in _txn_account_names()}
+                           | set(gic_accounts)),
     }
 
 

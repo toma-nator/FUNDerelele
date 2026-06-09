@@ -118,9 +118,14 @@
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
       <a class="btn btn-sm" href="{{ url_for('export_transactions') }}">↓ Export transactions (CSV)</a>
       <a class="btn btn-sm" href="{{ url_for('backup_db') }}">↓ Download database backup</a>
+      <button type="button" class="btn btn-sm" onclick="cleanAccounts()">⌫ Clean up empty accounts</button>
       <button type="button" class="btn btn-sm" onclick="loadSampleData()">⚄ Load sample data</button>
       <button type="button" class="btn btn-sm btn-danger" onclick="resetDatabase()">Reset Database</button>
     </div>
+    <p style="font-size:.72rem;color:var(--text-muted);margin-top:8px">
+      <strong>Clean up empty accounts</strong> removes accounts that have no transactions
+      (e.g. left over from testing). Accounts holding a GIC or a manual cash balance are kept.
+    </p>
     <p style="font-size:.72rem;color:var(--text-muted);margin-top:8px">
       <strong>Load sample data</strong> replaces all current data with a demo portfolio
       (5 accounts, ~5 years of transactions, GICs and a watchlist) so you can explore every
@@ -159,6 +164,14 @@ function resetDatabase() {
 }
 function confirmRestore() {
   return confirm('Restore will replace ALL current data with the uploaded backup. Continue?');
+}
+function cleanAccounts() {
+  if (!confirm('Remove all accounts that have no transactions?\n\nAccounts holding a GIC or a manual cash balance are kept. This cannot be undone.')) return;
+  const f = document.createElement('form');
+  f.method = 'POST';
+  f.action = '{{ url_for("clean_accounts") }}';
+  document.body.appendChild(f);
+  f.submit();
 }
 function loadSampleData() {
   if (!confirm('This REPLACES all current data with a demo portfolio.\n\nIf you have your own data, download a backup first. Continue?')) return;

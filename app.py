@@ -221,12 +221,20 @@ def holdings():
                            currencies=currencies, last_updated=last_updated, active='holdings')
 
 
+def _used_account_names():
+    """Names of accounts that have at least one transaction — used to keep
+    empty/stale accounts out of selection dropdowns (you can still type a new
+    name where the field allows it)."""
+    return {r[0] for r in Transaction.query.with_entities(Transaction.account).distinct()}
+
+
 @app.route('/transactions')
 def transactions():
     from recurring import generate_due
     generate_due()  # materialize any due recurring rows before listing
     txns = Transaction.query.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
-    accounts = Account.query.order_by(Account.name).all()
+    used = _used_account_names()
+    accounts = [a for a in Account.query.order_by(Account.name).all() if a.name in used]
     rules = RecurringRule.query.order_by(RecurringRule.active.desc(), RecurringRule.next_date).all()
     return render_template('transactions.html', transactions=txns, accounts=accounts,
                            recurring_rules=rules, active='transactions')
@@ -453,7 +461,9 @@ def import_page():
     log = (Transaction.query.filter_by(import_batch=latest_batch)
            .order_by(Transaction.date.desc(), Transaction.id.desc()).all()) if latest_batch else []
 
-    accounts = [a.name for a in Account.query.order_by(Account.name).all()]
+    used = _used_account_names()
+    accounts = [a.name for a in Account.query.order_by(Account.name).all()
+                if a.name in used]
     folder_setting = Setting.query.get('auto_import_folder')
     folder = folder_setting.value if folder_setting else ''
     return render_template('import.html', active='import', log=log, mappings=mappings,
@@ -914,6 +924,27 @@ def reset_database():
     return redirect(url_for('settings'))
 
 
+@app.route('/settings/clean-accounts', methods=['POST'])
+def clean_accounts():
+    # Remove account rows that carry no data — typically left over from tests.
+    # An account is "in use" if it has a transaction, holds a GIC, or has a
+    # manually-set cash balance; those are kept so they don't lose type/horizon.
+    used = _used_account_names()
+    gic_accounts = {g.account for g in GIC.query.with_entities(GIC.account).all() if g.account}
+    removed = []
+    for a in Account.query.order_by(Account.name).all():
+        if a.name in used or a.name in gic_accounts or (a.cash_balance or 0):
+            continue
+        removed.append(a.name)
+        db.session.delete(a)
+    db.session.commit()
+    if removed:
+        flash(f'Removed {len(removed)} empty account(s): {", ".join(removed)}.', 'success')
+    else:
+        flash('No empty accounts to remove.', 'info')
+    return redirect(url_for('settings'))
+
+
 @app.route('/settings/load-sample', methods=['POST'])
 def load_sample_data():
     # Replace all data with the demo portfolio. Destructive; guarded by JS confirm.
@@ -935,7 +966,11 @@ def load_sample_data():
 @app.route('/charts')
 def charts():
     from charts import catalog_grouped
-    accounts = [a.name for a in Account.query.order_by(Account.name).all()]
+    # Only offer accounts that actually have transactions — empty/stale accounts
+    # shouldn't clutter the scope dropdown.
+    used = _used_account_names()
+    accounts = [a.name for a in Account.query.order_by(Account.name).all()
+                if a.name in used]
     return render_template('charts.html', active='charts',
                            groups=catalog_grouped(), accounts=accounts)
 
