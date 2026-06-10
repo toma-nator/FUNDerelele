@@ -1277,7 +1277,29 @@ tr[data-status="closed"] td { opacity: .72; }
 .rdsp-bar.green > span.plan { background: rgba(0, 230, 118, .30); }
 .rdsp-warn { background: rgba(255, 180, 60, .08); border: 1px solid rgba(255, 180, 60, .30); color: #ffce80;
              border-radius: var(--radius); padding: 8px 12px; font-size: .78rem; margin-top: 6px; }
-.rdsp-rejected { margin-left: 8px; font-size: .68rem; color: #ffb43c; white-space: nowrap; cursor: help; }
+.rdsp-rejected { margin-right: 8px; font-size: .68rem; color: #ffb43c; white-space: nowrap; cursor: help; }
+
+/* Clickable dataset legend above the projection chart (keeps the plot area the
+   same height in Value / Composition / Tax). */
+/* Clickable dataset toggles, inline in the chart header (left of the view buttons),
+   so the plot stays full size in every view. */
+.rdsp-chart-legend { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; }
+.rdsp-chart-legend-item { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px;
+  font-size: .7rem; color: var(--text-muted); background: var(--bg-hover);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer;
+  font-family: var(--sans); transition: border-color .15s, color .15s; }
+.rdsp-chart-legend-item:hover { border-color: var(--accent); color: var(--text); }
+.rdsp-chart-legend-item.off { opacity: .45; text-decoration: line-through; }
+.rdsp-chart-legend-item i { width: 9px; height: 9px; border-radius: 2px; }
+
+/* Highlighted "+ Add lump" sized to match the other controls; lumps flow as
+   their own bar items. */
+.rdsp-addlump { padding: 8px 12px; font-size: .82rem; font-weight: 500;
+  background: rgba(0,200,240,.10); border-color: var(--accent-dim); color: var(--accent); }
+.rdsp-addlump:hover { background: rgba(0,200,240,.18); border-color: var(--accent); color: #fff; }
+.rdsp-lump-row { display: flex; gap: 4px; align-items: center; }
+.rdsp-lump .form-input { width: 70px; }
+.rdsp-lump .form-input[data-k="amt"] { width: 94px; }
 .rdsp-plan td:first-child { color: var(--text-dim); font-family: var(--mono); }
 .rdsp-plan input { width: 100%; max-width: 112px; background: var(--bg-surface); color: var(--text); font-size: .78rem;
                    border: 1px solid var(--border-sub); border-radius: 4px; padding: 4px 7px; text-align: right; }

@@ -22,12 +22,12 @@ Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈93 ideas)
+## Backlog at a glance (≈94 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
 | Charts | ~41 | ~26 finance-useful + ~15 fun/easter-egg (3 % charts now shipped) |
-| Per-tab feature enhancements | ~22 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX, RDSP |
+| Per-tab feature enhancements | ~23 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX, RDSP |
 | New tabs (big features) | 9 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt |
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
 | UI/UX polish | 6 | Restore-alerts, sidebar hide/reorder tabs, sparkline, chart descriptions/hide/star, daily-swing widget, trend indicator |
@@ -578,6 +578,25 @@ carry-forward** math and the two-phase accumulate→decumulate / LDAP projection
   two-phase (accumulate → decumulate) projection and a glide-path model.
 
 **Priority:** Impact: Med–High _(the tracked account is an RDSP)_ · Effort: large
+
+## RDSP — provincial rate + at-source withholding tax
+
+The RDSP tab taxes the **taxable portion** of each withdrawal at a single editable
+**Tax rate %** (default 20%) — `net = withdrawal − taxable × rate`. That's a
+deliberate simplification and is fine for now. Two refinements parked:
+
+- **Provincial marginal rate selector.** Instead of typing a rate, pick a province
+  (+ estimated retirement income) and prefill the combined federal+provincial
+  marginal rate. Shares the bracket-table work with the parked **"Tax —
+  Province-based marginal rate helper"** item; build once, feed both the Tax tab
+  and the RDSP tab's rate field.
+- **At-source withholding vs. final tax.** RDSP issuers withhold tax on the taxable
+  part **at payment** by lump-sum tiers (~10% ≤ $5k, 20% $5k–$15k, 30% > $15k
+  federally, plus provincial), then it trues up to the real marginal rate at filing.
+  Could show "withheld now" vs "actual tax / refund at filing" as two numbers in the
+  schedule. Low priority — the single-rate net is close enough for planning.
+
+**Priority:** Impact: Low–Med · Effort: small (rate selector) / medium (true withholding)
 
 ## RDSP — reconsider the "Tax" chart view
 

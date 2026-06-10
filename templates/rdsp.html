@@ -39,10 +39,12 @@
     <input class="form-input" type="number" step="1000" value="{{ view.withdrawal.target }}" placeholder="e.g. 40000"
            onchange="setP('target', this.value)">
   </div>
-  <div class="ctl" data-when="ldap_dap" style="min-width:215px">
-    <label>Lump DAPs (year + amount)</label>
-    <div id="lumpList"></div>
-    <button type="button" class="btn btn-sm" onclick="addLump()" style="margin-top:2px">+ Add lump</button>
+  <!-- Each lump renders as its own control (display:contents) so they fill the
+       settings bar's free space and wrap before the bar grows taller. -->
+  <div id="lumpList" data-when="ldap_dap" data-display="contents"></div>
+  <div class="ctl" data-when="ldap_dap">
+    <label>Lump DAP</label>
+    <button type="button" class="btn rdsp-addlump" onclick="addLump()">+ Add lump</button>
   </div>
   <div class="ctl" data-when="to_age">
     <label>Deplete by age</label>
@@ -50,7 +52,7 @@
            onchange="setP('to_age', this.value)">
   </div>
   <div class="ctl">
-    <label>Drawdown return</label>
+    <label>Drawdown return ({{ (view.withdrawal.draw_rate*100)|round(1) }}%)</label>
     <select class="form-input" onchange="setP('draw', this.value)">
       {% for p in view.withdrawal.draw_presets %}<option value="{{ p }}" {% if p == view.withdrawal.draw_label %}selected{% endif %}>{{ p }}</option>{% endfor %}
     </select>
@@ -129,7 +131,7 @@
   <div class="stat-card">
     <div class="stat-label">Avg monthly income</div>
     <div class="stat-value">{{ view.profile.avg_monthly | cad }}/mo</div>
-    <div class="stat-sub text-dim">{{ view.profile.first_monthly | cad }} → {{ view.profile.last_monthly | cad }}/mo · {{ view.profile.trend }}</div>
+    <div class="stat-sub text-dim">after tax @ {{ view.withdrawal.tax_rate }}% · {{ view.profile.first_monthly | cad }} → {{ view.profile.last_monthly | cad }}/mo</div>
   </div>
 </div>
 
@@ -137,17 +139,17 @@
 <div class="card">
   <div class="card-header">Projection
     <span class="card-sub">{{ view.return_label }} {{ (view.return_rate*100)|round(1) }}% · {{ modenames[view.withdrawal.mode] }} from {{ view.withdrawal.start }}</span>
-    <span style="margin-left:auto; display:flex; gap:4px" id="viewBtns">
-      <button type="button" class="btn btn-sm rdsp-viewbtn active" data-view="value">Value</button>
-      <button type="button" class="btn btn-sm rdsp-viewbtn" data-view="composition">Composition</button>
-      <button type="button" class="btn btn-sm rdsp-viewbtn" data-view="tax">Tax</button>
+    <span style="margin-left:auto; display:flex; align-items:center; gap:14px">
+      <span class="rdsp-chart-legend" id="rdspChartLegend"></span>
+      <span style="display:flex; gap:4px" id="viewBtns">
+        <button type="button" class="btn btn-sm rdsp-viewbtn active" data-view="value">Value</button>
+        <button type="button" class="btn btn-sm rdsp-viewbtn" data-view="composition">Composition</button>
+        <button type="button" class="btn btn-sm rdsp-viewbtn" data-view="tax">Tax</button>
+      </span>
     </span>
   </div>
   <div class="chart-wrap" style="height:380px;padding:18px 22px"><canvas id="rdspChart"></canvas></div>
   <div class="rdsp-legend" style="padding:0 22px 16px">
-    <span><i style="background:#00c8f0"></i>Actual</span>
-    <span><i style="background:#5fd6f5"></i>Projected</span>
-    <span><i style="background:rgba(0,200,240,.25)"></i>Range (GIC↔Aggressive)</span>
     <span><i style="background:rgba(150,167,184,.45)"></i>past</span>
     <span><i style="background:#9aa7b3"></i>today</span>
     <span><i style="background:#00e676"></i>grant maxed</span>
@@ -165,11 +167,11 @@
 <!-- Preset comparison -->
 <div class="card" style="margin-top:16px">
   <div class="card-header">Withdrawals by return assumption
-    <span class="card-sub">same plan ({{ modenames[view.withdrawal.mode] }} from {{ view.withdrawal.start }}, drawdown @ {{ view.withdrawal.draw_label }}) at each growth return</span>
+    <span class="card-sub">same plan ({{ modenames[view.withdrawal.mode] }} from {{ view.withdrawal.start }}, drawdown @ {{ view.withdrawal.draw_label }}) at each growth return · averages after tax @ {{ view.withdrawal.tax_rate }}%</span>
   </div>
   <div class="table-scroll rdsp-plan">
   <table class="data-table">
-    <thead><tr><th>Return</th><th class="r">Nest egg ({{ view.withdrawal.start }})</th><th class="r">Avg / mo</th><th class="r">Avg / yr</th><th class="r">Total withdrawn</th><th class="r">Ends with</th></tr></thead>
+    <thead><tr><th>Return</th><th class="r">Nest egg ({{ view.withdrawal.start }})</th><th class="r">Net / mo</th><th class="r">Net / yr</th><th class="r">Total withdrawn</th><th class="r">Ends with</th></tr></thead>
     <tbody>
       {% for r in view.comparison %}
       <tr {% if r.label == view.return_label %}style="color:var(--accent)"{% endif %}>
@@ -211,8 +213,7 @@
         <tbody>
           {% for r in view.schedule %}
           <tr><td>{{ r.year }} · {{ r.age }}</td>
-              <td class="r">{{ r.withdrawal | cad }}{% if r.rejected %}
-                  <span class="rdsp-rejected" title="Your requested lump exceeded the PGAP cap (greater of 10% of value or LDAP), so this much couldn’t be withdrawn this year.">−{{ r.rejected | cad }} over cap</span>{% endif %}</td>
+              <td class="r">{% if r.rejected %}<span class="rdsp-rejected" title="Your requested lump exceeded the PGAP cap (greater of 10% of value or LDAP), so this much couldn’t be withdrawn this year.">−{{ r.rejected | cad }} over cap</span>{% endif %}{{ r.withdrawal | cad }}</td>
               <td class="r">{{ r.taxable | cad }}</td><td class="r">{{ r.tax_owed | cad }}</td>
               <td class="r">{{ r.net | cad }}</td><td class="r">{{ r.value | cad }}</td></tr>
           {% endfor %}
@@ -305,17 +306,42 @@ function togglePanel(id, arrowId) {
     const el = document.getElementById('lumpList'); if (!el) return;
     el.innerHTML = '';
     lumps.forEach((l, i) => {
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex;gap:4px;margin-bottom:4px';
-      row.innerHTML = '<input class="form-input" type="number" placeholder="year" value="' + l.year + '" style="width:66px" data-k="year">' +
-        '<input class="form-input" type="number" placeholder="$ amount" value="' + l.amt + '" style="width:96px" data-k="amt">' +
-        '<button type="button" class="btn-delete" title="Remove">✕</button>';
-      row.querySelectorAll('input').forEach(inp => inp.addEventListener('change', e => {
+      const ctl = document.createElement('div');
+      ctl.className = 'ctl rdsp-lump';
+      ctl.innerHTML = '<label>Lump ' + (i + 1) + '</label>' +
+        '<div class="rdsp-lump-row">' +
+          '<input class="form-input" type="number" placeholder="year" value="' + l.year + '" data-k="year">' +
+          '<input class="form-input" type="number" placeholder="$ amount" value="' + l.amt + '" data-k="amt">' +
+          '<button type="button" class="btn-delete" title="Remove">✕</button>' +
+        '</div>';
+      ctl.querySelectorAll('input').forEach(inp => inp.addEventListener('change', e => {
         l[e.target.dataset.k] = e.target.value;
         if (l.year && l.amt) commitLumps();          // only commit once the row is complete
       }));
-      row.querySelector('.btn-delete').addEventListener('click', () => { lumps.splice(i, 1); commitLumps(); });
-      el.appendChild(row);
+      ctl.querySelector('.btn-delete').addEventListener('click', () => { lumps.splice(i, 1); commitLumps(); });
+      el.appendChild(ctl);
+    });
+  }
+
+  // Clickable dataset legend rendered as HTML *above* the chart, so the plot area
+  // stays the same height as the Value view in every mode (value has no legend).
+  function renderChartLegend() {
+    const el = document.getElementById('rdspChartLegend'); if (!el) return;
+    el.innerHTML = '';                 // lives in the header, so the chart stays full size in every view
+    chart.data.datasets.forEach((ds, i) => {
+      if (!ds.label || ds.label.startsWith('_')) return;
+      const off = !chart.isDatasetVisible(i);
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'rdsp-chart-legend-item' + (off ? ' off' : '');
+      item.title = ds.label;           // full label on hover; chip shows the short form
+      item.innerHTML = '<i style="background:' + (ds.backgroundColor || ds.borderColor) + '"></i>' + (ds.legendLabel || ds.label);
+      item.addEventListener('click', () => {
+        chart.setDatasetVisibility(i, !chart.isDatasetVisible(i));
+        chart.update();
+        renderChartLegend();
+      });
+      el.appendChild(item);
     });
   }
   // Seed the year with the withdrawal start (a valid in-range default) so a lump
@@ -326,7 +352,8 @@ function togglePanel(id, arrowId) {
   function syncModeInputs() {
     const m = document.getElementById('modeSel').value;
     document.querySelectorAll('[data-when]').forEach(el => {
-      el.style.display = el.dataset.when.split(',').includes(m) ? '' : 'none';
+      const show = el.dataset.when.split(',').includes(m);
+      el.style.display = show ? (el.dataset.display || '') : 'none';   // data-display lets the lump list use `contents`
     });
   }
 
@@ -387,9 +414,9 @@ function togglePanel(id, arrowId) {
     if (mode === 'tax') {
       const t = C.tax;
       return [
-        { label: 'Balance (pre-withdrawal)', data: t.pre, borderColor: '#9aa7b3', backgroundColor: 'rgba(150,167,184,.20)', pointRadius: 0, fill: 'origin', tension: .2 },
-        { label: 'Tax-free (your contributions)', data: t.free, borderColor: '#00e676', backgroundColor: 'rgba(0,230,118,.28)', pointRadius: 0, fill: 'origin', tension: .2 },
-        { label: 'Taxable (grants + bonds + growth)', data: t.taxable, borderColor: '#ff8c5a', backgroundColor: 'rgba(255,140,90,.30)', pointRadius: 0, fill: '-1', tension: .2 },
+        { label: 'Balance (pre-withdrawal)', legendLabel: 'Balance', data: t.pre, borderColor: '#9aa7b3', backgroundColor: 'rgba(150,167,184,.20)', pointRadius: 0, fill: 'origin', tension: .2 },
+        { label: 'Tax-free (your contributions)', legendLabel: 'Tax-free', data: t.free, borderColor: '#00e676', backgroundColor: 'rgba(0,230,118,.28)', pointRadius: 0, fill: 'origin', tension: .2 },
+        { label: 'Taxable (grants + bonds + growth)', legendLabel: 'Taxable', data: t.taxable, borderColor: '#ff8c5a', backgroundColor: 'rgba(255,140,90,.30)', pointRadius: 0, fill: '-1', tension: .2 },
       ];
     }
     const k = C.composition;
@@ -410,7 +437,7 @@ function togglePanel(id, arrowId) {
         layout: { padding: { top: 18 } },
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { display: mode !== 'value', labels: { color: '#5a7a96', boxWidth: 12, font: { size: 11 } } },
+          legend: { display: false },   // dataset legend is rendered as HTML above the chart (renderChartLegend)
           tooltip: {
             filter: item => !item.dataset.label.startsWith('_'),
             callbacks: {
@@ -438,6 +465,7 @@ function togglePanel(id, arrowId) {
       },
       plugins: [phasePlugin],
     });
+    renderChartLegend();
   }
 
   document.querySelectorAll('.rdsp-viewbtn').forEach(b => b.addEventListener('click', function () {

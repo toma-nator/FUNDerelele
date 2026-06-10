@@ -248,8 +248,17 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     band_lo = run(RETURN_PRESETS[BAND_LOW])
     band_hi = run(RETURN_PRESETS[BAND_HIGH])
 
+    # Marginal tax rate applied to the taxable portion (user-set %, default 20%).
+    try:
+        tax_pct = float(tax_rate) / 100 if tax_rate not in (None, '') else 0.20
+    except ValueError:
+        tax_pct = 0.20
+    tax_pct = max(0.0, min(tax_pct, 0.60))
+
     # ── Preset withdrawal comparison: same withdrawal config, each accumulation
-    # return → different nest egg ("available lump sum") and longevity. ──
+    # return → different nest egg ("available lump sum") and longevity. The avg
+    # monthly/yearly figures are **after tax** (the spendable income); the total
+    # withdrawn stays gross. ──
     compare_rates = list(RETURN_PRESETS.items())
     cur_rate = current_return(actuals, current_value, cy)   # money-weighted return since inception
     if cur_rate is not None:
@@ -259,13 +268,14 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
         pr = run(prate)
         at_start = next((x['value'] for x in pr['rows'] if x['year'] == wd_start_year - 1), current_value)
         twd = sum(x['withdrawal'] for x in pr['rows'])
+        net = twd - int(round(pr['summary']['taxable_total'] * tax_pct))   # after-tax spendable
         ndraw = sum(1 for x in pr['rows'] if x['phase'] == 'decumulation' and x['withdrawal'] > 0)
         comparison.append({
             'label': label, 'rate': prate,
             'value_at_start': D(at_start),
             'total_withdrawn': D(twd),
-            'avg_monthly': D((twd // ndraw // 12) if ndraw else 0),
-            'avg_yearly': D((twd // ndraw) if ndraw else 0),
+            'avg_monthly': D((net // ndraw // 12) if ndraw else 0),
+            'avg_yearly': D((net // ndraw) if ndraw else 0),
             'end_value': D(pr['summary']['final_value']),
             'depletes_age': pr['summary']['depletes_age'],
         })
@@ -310,13 +320,6 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
                   'withdrawal_start': wd_start_year,
                   'depletion': (by + depletes_age) if depletes_age else None}
 
-    # Marginal tax rate applied to the taxable portion (user-set %, default 20%).
-    try:
-        tax_pct = float(tax_rate) / 100 if tax_rate not in (None, '') else 0.20
-    except ValueError:
-        tax_pct = 0.20
-    tax_pct = max(0.0, min(tax_pct, 0.60))
-
     # Withdrawal schedule (drawdown rows only) with the taxable split + after-tax received.
     decum = [pr for pr in proj['rows'] if pr['phase'] == 'decumulation']
     schedule = []
@@ -334,16 +337,19 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     value_at_withdrawal = next((pr['value'] for pr in proj['rows'] if pr['year'] == wd_start_year - 1),
                                current_value)
 
-    # Average monthly withdrawal + whether it's constant or rising over the phase.
+    # Average monthly income, shown **after tax** (the spendable figure) — the total
+    # withdrawn stays gross, but the per-month income is what actually lands in pocket.
     wd_rows = [pr for pr in proj['rows'] if pr['phase'] == 'decumulation' and pr['withdrawal'] > 0]
     n_wd = len(wd_rows)
-    avg_monthly = (total_withdrawn // n_wd // 12) if n_wd else 0
-    steady = wd_rows   # judge the trend on the recurring stream
+    avg_monthly = ((total_withdrawn - total_tax) // n_wd // 12) if n_wd else 0
+
+    def _net(row):                                    # one row's withdrawal net of tax
+        return row['withdrawal'] - int(round(row['taxable'] * tax_pct))
     # Judge the trend on the steady phase, excluding terminal depletion years
     # (where the balance has hit the bequest floor and the payment is just a partial).
-    core = [r for r in steady if r['value'] > bequest_cents + 100] or steady
-    first_m = (core[0]['withdrawal'] // 12) if core else 0
-    last_m = (core[-1]['withdrawal'] // 12) if core else 0
+    core = [r for r in wd_rows if r['value'] > bequest_cents + 100] or wd_rows
+    first_m = (_net(core[0]) // 12) if core else 0
+    last_m = (_net(core[-1]) // 12) if core else 0
     if not core or abs(last_m - first_m) <= max(1, first_m) * 0.05:
         trend = 'about constant'
     else:
@@ -454,7 +460,7 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
             'lumps': wd_lumps or '', 'target': rdsp.to_dollars(withdrawal['target']) if withdrawal['target'] else '',
             'to_age': wd_to_age,
             'bequest': rdsp.to_dollars(bequest_cents) if bequest_cents else '',
-            'draw_label': draw_label, 'draw_presets': list(RETURN_PRESETS.keys()),
+            'draw_label': draw_label, 'draw_rate': draw_rate, 'draw_presets': list(RETURN_PRESETS.keys()),
             'is_pgap': is_pgap, 'non_pgap_from': non_pgap_from,
             'tax_rate': round(tax_pct * 100, 1), 'total_tax': D(total_tax),
         },
