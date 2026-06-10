@@ -41,6 +41,7 @@
     <div class="nav-section">
       <span class="nav-label">ADVANCED</span>
       <a href="{{ url_for('projections') }}"  class="nav-item {% if active=='projections'  %}active{% endif %}"><span class="nav-icon">⤴</span> Projections</a>
+      <a href="{{ url_for('rdsp_tab') }}"     class="nav-item {% if active=='rdsp'         %}active{% endif %}"><span class="nav-icon">◈</span> RDSP</a>
       <a href="{{ url_for('tax') }}"          class="nav-item {% if active=='tax'          %}active{% endif %}"><span class="nav-icon">⊟</span> Tax &amp; ACB</a>
     </div>
 

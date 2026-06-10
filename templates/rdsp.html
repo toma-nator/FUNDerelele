@@ -1,0 +1,453 @@
+{% extends 'base.html' %}
+{% block title %}RDSP — Portfolio Tracker{% endblock %}
+{% block page_title %}RDSP{% endblock %}
+
+{% block content %}
+{% if not view.ok %}
+  <div class="flash flash-info">{{ view.reason }}</div>
+{% else %}
+
+{% set modenames = {'ldap':'LDAP','ldap_dap':'LDAP + DAP','max':'Maximum allowable','to_age':'Deplete by age'} %}
+<!-- Controls -->
+<div class="rdsp-controls">
+  <div class="ctl">
+    <label>Growth return ({{ (view.return_rate*100)|round(1) }}%)</label>
+    <select class="form-input" onchange="setP('return', this.value)">
+      {% for p in view.presets %}<option value="{{ p }}" {% if p == view.return_label %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="ctl">
+    <label>Contribute until</label>
+    <select class="form-input" onchange="setP('until', this.value)">
+      {% for y in view.contribute_until_options %}<option value="{{ y }}" {% if y == view.contribute_until %}selected{% endif %}>{{ y }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="ctl">
+    <label>Withdrawal</label>
+    <select class="form-input" id="modeSel" onchange="setP('mode', this.value)">
+      {% for m in view.withdrawal.modes %}<option value="{{ m }}" {% if m == view.withdrawal.mode %}selected{% endif %}>{{ modenames[m] }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="ctl">
+    <label>Starts ({{ view.withdrawal.floor }}–{{ view.withdrawal.max }})</label>
+    <select class="form-input" onchange="setP('wd_start', this.value)">
+      {% for y in view.withdrawal.start_options %}<option value="{{ y }}" {% if y == view.withdrawal.start %}selected{% endif %}>{{ y }} · age {{ y - view.birth_year }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="ctl" data-when="ldap_dap">
+    <label>Top up to $/yr</label>
+    <input class="form-input" type="number" step="1000" value="{{ view.withdrawal.target }}" placeholder="e.g. 40000"
+           onchange="setP('target', this.value)">
+  </div>
+  <div class="ctl" data-when="ldap_dap" style="min-width:215px">
+    <label>Lump DAPs (year + amount)</label>
+    <div id="lumpList"></div>
+    <button type="button" class="btn btn-sm" onclick="addLump()" style="margin-top:2px">+ Add lump</button>
+  </div>
+  <div class="ctl" data-when="to_age">
+    <label>Deplete by age</label>
+    <input class="form-input" type="number" step="1" value="{{ view.withdrawal.to_age }}"
+           onchange="setP('to_age', this.value)">
+  </div>
+  <div class="ctl">
+    <label>Drawdown return</label>
+    <select class="form-input" onchange="setP('draw', this.value)">
+      {% for p in view.withdrawal.draw_presets %}<option value="{{ p }}" {% if p == view.withdrawal.draw_label %}selected{% endif %}>{{ p }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="ctl">
+    <label>Leave behind (bequest)</label>
+    <input class="form-input" type="number" step="1000" value="{{ view.withdrawal.bequest }}" placeholder="0"
+           onchange="setP('bequest', this.value)">
+  </div>
+  <div class="ctl">
+    <label title="Your marginal rate in retirement — set by your total taxable income that year (the RDSP taxable portion plus any other income like CPP/OAS/benefits). Lower income → lower rate.">Tax rate %</label>
+    <input class="form-input" type="number" step="1" value="{{ view.withdrawal.tax_rate }}" placeholder="20"
+           onchange="setP('tax_rate', this.value)">
+  </div>
+</div>
+
+<!-- Stat cards -->
+<div class="stat-grid" style="grid-template-columns:repeat(5,1fr)">
+  <div class="stat-card">
+    <div class="stat-label">Current value</div>
+    <div class="stat-value">{{ view.stats.current_value | cad }}</div>
+    <div class="stat-sub text-dim">projected {{ view.stats.final_value | cad }} by age {{ view.horizon_age }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Contributions</div>
+    <div class="stat-value">{{ view.stats.contrib_total | cad }} <span class="planned">/ {{ view.stats.contrib_plan | cad }}</span></div>
+    <div class="stat-sub text-dim">{{ (view.stats.contrib_total / view.stats.contrib_cap * 100)|round(0)|int }}% of {{ view.stats.contrib_cap | cad }} cap</div>
+    <div class="rdsp-bar">
+      <span class="plan" style="width:{{ (view.stats.contrib_plan / view.stats.contrib_cap * 100)|round(1) }}%"></span>
+      <span style="width:{{ (view.stats.contrib_total / view.stats.contrib_cap * 100)|round(1) }}%"></span>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Grants</div>
+    <div class="stat-value">{{ view.stats.grant_total | cad }} <span class="planned">/ {{ view.stats.grant_plan | cad }}</span></div>
+    <div class="stat-sub text-dim">{{ (view.stats.grant_total / view.stats.grant_cap * 100)|round(0)|int }}% of {{ view.stats.grant_cap | cad }} cap</div>
+    <div class="rdsp-bar green">
+      <span class="plan" style="width:{{ (view.stats.grant_plan / view.stats.grant_cap * 100)|round(1) }}%"></span>
+      <span style="width:{{ (view.stats.grant_total / view.stats.grant_cap * 100)|round(1) }}%"></span>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Bonds</div>
+    <div class="stat-value">{{ view.stats.bond_total | cad }} <span class="planned">/ {{ view.stats.bond_plan | cad }}</span></div>
+    <div class="stat-sub text-dim">{{ (view.stats.bond_total / view.stats.bond_cap * 100)|round(0)|int }}% of {{ view.stats.bond_cap | cad }} cap</div>
+    <div class="rdsp-bar green">
+      <span class="plan" style="width:{{ (view.stats.bond_plan / view.stats.bond_cap * 100)|round(1) }}%"></span>
+      <span style="width:{{ (view.stats.bond_total / view.stats.bond_cap * 100)|round(1) }}%"></span>
+    </div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Free money</div>
+    <div class="stat-value">{{ view.stats.free_money | cad }}</div>
+    <div class="stat-sub text-dim">{{ view.stats.leverage }}× per $1 contributed</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Nest egg at withdrawal</div>
+    <div class="stat-value">{{ view.stats.value_at_withdrawal | cad }}</div>
+    <div class="stat-sub text-dim">{{ view.withdrawal.start }} · age {{ view.withdrawal.start - view.birth_year }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total withdrawn</div>
+    <div class="stat-value">{{ view.stats.total_withdrawn | cad }}</div>
+    <div class="stat-sub text-dim">over the drawdown phase</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Total tax</div>
+    <div class="stat-value">{{ view.withdrawal.total_tax | cad }}</div>
+    <div class="stat-sub text-dim">on the taxable portion @ {{ view.withdrawal.tax_rate }}%</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">After-tax kept</div>
+    <div class="stat-value">{{ (view.stats.total_withdrawn - view.withdrawal.total_tax) | cad }}</div>
+    <div class="stat-sub text-dim">withdrawals net of tax</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Avg monthly income</div>
+    <div class="stat-value">{{ view.profile.avg_monthly | cad }}/mo</div>
+    <div class="stat-sub text-dim">{{ view.profile.first_monthly | cad }} → {{ view.profile.last_monthly | cad }}/mo · {{ view.profile.trend }}</div>
+  </div>
+</div>
+
+<!-- Chart -->
+<div class="card">
+  <div class="card-header">Projection
+    <span class="card-sub">{{ view.return_label }} {{ (view.return_rate*100)|round(1) }}% · {{ modenames[view.withdrawal.mode] }} from {{ view.withdrawal.start }}</span>
+    <span style="margin-left:auto; display:flex; gap:4px" id="viewBtns">
+      <button type="button" class="btn btn-sm rdsp-viewbtn active" data-view="value">Value</button>
+      <button type="button" class="btn btn-sm rdsp-viewbtn" data-view="composition">Composition</button>
+      <button type="button" class="btn btn-sm rdsp-viewbtn" data-view="tax">Tax</button>
+    </span>
+  </div>
+  <div class="chart-wrap" style="height:380px;padding:18px 22px"><canvas id="rdspChart"></canvas></div>
+  <div class="rdsp-legend" style="padding:0 22px 16px">
+    <span><i style="background:#00c8f0"></i>Actual</span>
+    <span><i style="background:#5fd6f5"></i>Projected</span>
+    <span><i style="background:rgba(0,200,240,.25)"></i>Range (GIC↔Aggressive)</span>
+    <span><i style="background:rgba(150,167,184,.45)"></i>past</span>
+    <span><i style="background:#9aa7b3"></i>today</span>
+    <span><i style="background:#00e676"></i>grant maxed</span>
+    <span><i style="background:#c79bff"></i>last contribution</span>
+    <span><i style="background:rgba(255,180,60,.55)"></i>can't withdraw (holdback)</span>
+    <span><i style="background:#9fc0dc"></i>withdrawals start</span>
+    <span><i style="background:#ff6b6b"></i>funds deplete</span>
+  </div>
+</div>
+
+{% for w in view.warnings %}
+<div class="rdsp-warn">⚠ {{ w }}</div>
+{% endfor %}
+
+<!-- Preset comparison -->
+<div class="card" style="margin-top:16px">
+  <div class="card-header">Withdrawals by return assumption
+    <span class="card-sub">same plan ({{ modenames[view.withdrawal.mode] }} from {{ view.withdrawal.start }}, drawdown @ {{ view.withdrawal.draw_label }}) at each growth return</span>
+  </div>
+  <div class="table-scroll rdsp-plan">
+  <table class="data-table">
+    <thead><tr><th>Return</th><th class="r">Nest egg ({{ view.withdrawal.start }})</th><th class="r">Avg / mo</th><th class="r">Avg / yr</th><th class="r">Total withdrawn</th><th class="r">Ends with</th></tr></thead>
+    <tbody>
+      {% for r in view.comparison %}
+      <tr {% if r.label == view.return_label %}style="color:var(--accent)"{% endif %}>
+        <td>{{ r.label }} ({{ (r.rate*100)|round(0)|int }}%)</td>
+        <td class="r">{{ r.value_at_start | cad }}</td>
+        <td class="r">{{ r.avg_monthly | cad }}</td>
+        <td class="r">{{ r.avg_yearly | cad }}</td>
+        <td class="r">{{ r.total_withdrawn | cad }}</td>
+        <td class="r">{{ r.end_value | cad }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<!-- Withdrawal schedule -->
+{% if view.schedule %}
+<div class="card" style="margin-top:16px">
+  <div class="card-header toggle-header" onclick="togglePanel('wdSchedule','wdScheduleArrow')">
+    Withdrawal schedule
+    <span class="card-sub">
+      {{ view.schedule|length }} yrs ·
+      {% if view.withdrawal.is_pgap %}PGAP, capped at greater of 10% or LDAP{% if view.withdrawal.non_pgap_from %} (non-PGAP from {{ view.withdrawal.non_pgap_from }}){% endif %}
+      {% else %}Non-PGAP, no cap{% endif %}
+    </span>
+    <span class="toggle-arrow" id="wdScheduleArrow">▼</span>
+  </div>
+  <div id="wdSchedule" style="display:none">
+    <div style="padding:10px 20px;font-size:.74rem;color:var(--text-muted);border-bottom:1px solid var(--border-sub)">
+      ⚠ <strong>Early-withdrawal holdback (AHA):</strong> withdraw before <strong>{{ view.chart.milestones.holdback_clear }}</strong>
+      (or before age 60) and ESDC claws back $3 per $1, capped at grants + bonds from the prior 10 years
+      (≈ {{ view.stats.holdback_now | cad }} today). At 60+ there's no repayment. Only the taxable part
+      (grants + bonds + growth) is taxed at your marginal rate; your contributions come out tax-free.
+    </div>
+    <div class="table-scroll rdsp-plan">
+      <table class="data-table">
+        <thead><tr><th>Year · Age</th><th class="r">Withdrawal</th><th class="r">Taxable</th><th class="r">Tax @ {{ view.withdrawal.tax_rate }}%</th><th class="r">You keep</th><th class="r">Remaining</th></tr></thead>
+        <tbody>
+          {% for r in view.schedule %}
+          <tr><td>{{ r.year }} · {{ r.age }}</td><td class="r">{{ r.withdrawal | cad }}</td>
+              <td class="r">{{ r.taxable | cad }}</td><td class="r">{{ r.tax_owed | cad }}</td>
+              <td class="r">{{ r.net | cad }}</td><td class="r">{{ r.value | cad }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Editable plan -->
+<div class="card rdsp-plan" style="margin-top:16px">
+  <div class="card-header toggle-header" onclick="togglePanel('editPlan','editPlanArrow')">
+    Edit plan
+    <span class="card-sub">future contributions, grants &amp; bonds</span>
+    <span class="toggle-arrow" id="editPlanArrow">▼</span>
+  </div>
+  <div id="editPlan" style="display:none">
+  <form method="POST" action="{{ url_for('rdsp_save') }}" style="padding:12px 20px">
+    <input type="hidden" name="return" value="{{ view.return_label }}">
+    <div class="ctl" style="margin-bottom:12px; max-width:240px">
+      <label style="font-size:.66rem; text-transform:uppercase; color:var(--text-muted)">Family net income (for grant/bond)</label>
+      <input class="form-input" type="number" step="1" name="family_income" value="{{ view.family_income }}"
+             placeholder="e.g. 45000">
+    </div>
+    <p style="font-size:.72rem; color:var(--text-muted); margin-bottom:8px">
+      Past years come from your transactions and aren't editable. This is your contribution schedule —
+      set <strong>Contribute until</strong> above to your window, then fill the highlighted years.
+      Grant/bond default to your plan (blank = $0); income-based auto-fill comes later.
+    </p>
+    <table class="data-table">
+      <thead><tr><th>Year</th><th class="r">Contribution</th><th class="r">Grant</th><th class="r">Bond</th></tr></thead>
+      <tbody>
+        {% for r in view.table %}
+        {% set age = r.year - view.birth_year %}
+        {% set contrib_off = r.year > view.contribute_until or age > 59 %}
+        {% set gb_off = age > 49 %}
+        <tr>
+          <td>{{ r.year }} <span style="opacity:.55">· {{ age }}</span><input type="hidden" name="year" value="{{ r.year }}"></td>
+          <td class="r"><input type="number" step="1" name="contribution_{{ r.year }}" value="{{ r.contribution }}"
+                 class="{% if contrib_off %}plan-off{% elif age <= 49 and not r.contribution %}plan-need{% endif %}"></td>
+          <td class="r"><input type="number" step="1" name="grant_{{ r.year }}" placeholder="0"
+                 value="{{ r.grant if r.grant is not none else '' }}" class="{% if gb_off %}plan-off{% endif %}"></td>
+          <td class="r"><input type="number" step="1" name="bond_{{ r.year }}" placeholder="0"
+                 value="{{ r.bond if r.bond is not none else '' }}" class="{% if gb_off %}plan-off{% endif %}"></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="plan-legend">
+      <span><i style="background:rgba(255,180,60,.55)"></i>fill in — within your contribution window</span>
+      <span><i style="background:var(--text-dim);opacity:.4"></i>won't count — past “contribute until” or the age‑49/59 limit</span>
+    </div>
+    <button type="submit" class="btn btn-sm btn-primary" style="margin-top:12px">Save plan</button>
+  </form>
+  </div>
+</div>
+
+<script id="rdspData" type="application/json">{{ view.chart | tojson }}</script>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if view.ok %}
+<script>
+// Collapsible cards — identical to the import page.
+function togglePanel(id, arrowId) {
+  const el = document.getElementById(id);
+  const arrow = document.getElementById(arrowId);
+  const open = el.style.display === 'none';
+  el.style.display = open ? 'block' : 'none';
+  if (arrow) arrow.textContent = open ? '▲' : '▼';
+}
+(function () {
+  const C = JSON.parse(document.getElementById('rdspData').textContent);
+  const money = (window.PT && window.PT.money) || { format: v => '$' + Math.round(v).toLocaleString() };
+  const ctx = document.getElementById('rdspChart').getContext('2d');
+  let mode = 'value', chart;
+
+  // Reload with one query param changed (keeps all the others).
+  window.setP = function (k, v) { const u = new URL(location); u.searchParams.set(k, v); location.href = u.search; };
+
+  // DAP lump editor: a small add/remove list that commits to the `lumps` param.
+  let lumps = ({{ view.withdrawal.lumps | tojson }} || '').split(',')
+    .map(p => p.split(':')).filter(a => a[0] && a[1]).map(a => ({ year: a[0].trim(), amt: a[1].trim() }));
+  function commitLumps() {
+    setP('lumps', lumps.filter(l => l.year && l.amt).map(l => l.year + ':' + l.amt).join(','));
+  }
+  function renderLumps() {
+    const el = document.getElementById('lumpList'); if (!el) return;
+    el.innerHTML = '';
+    lumps.forEach((l, i) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:4px;margin-bottom:4px';
+      row.innerHTML = '<input class="form-input" type="number" placeholder="year" value="' + l.year + '" style="width:66px" data-k="year">' +
+        '<input class="form-input" type="number" placeholder="$ amount" value="' + l.amt + '" style="width:96px" data-k="amt">' +
+        '<button type="button" class="btn-delete" title="Remove">✕</button>';
+      row.querySelectorAll('input').forEach(inp => inp.addEventListener('change', e => {
+        l[e.target.dataset.k] = e.target.value;
+        if (l.year && l.amt) commitLumps();          // only commit once the row is complete
+      }));
+      row.querySelector('.btn-delete').addEventListener('click', () => { lumps.splice(i, 1); commitLumps(); });
+      el.appendChild(row);
+    });
+  }
+  // Seed the year with the withdrawal start (a valid in-range default) so a lump
+  // applies the moment an amount is entered — an empty year is silently dropped.
+  window.addLump = function () { lumps.push({ year: String(C.milestones.withdrawal_start), amt: '' }); renderLumps(); };
+
+  // Show the amount / model-to-age inputs only for the relevant withdrawal mode.
+  function syncModeInputs() {
+    const m = document.getElementById('modeSel').value;
+    document.querySelectorAll('[data-when]').forEach(el => {
+      el.style.display = el.dataset.when.split(',').includes(m) ? '' : 'none';
+    });
+  }
+
+  // Phase shading + milestone markers, drawn with the chart's own scales.
+  const phasePlugin = {
+    id: 'rdspPhase',
+    beforeDatasetsDraw(ch) {
+      const { ctx, chartArea, scales } = ch, xs = scales.x, M = C.milestones;
+      const top = chartArea.top, h = chartArea.height, L = chartArea.left, R = chartArea.right;
+      const px = y => { const i = C.labels.indexOf(y); return i < 0 ? null : xs.getPixelForValue(i); };
+      const xtoday = px(M.current), xlc = px(M.last_contribution), xhc = px(M.holdback_clear),
+            xws = px(M.withdrawal_start), xdep = px(M.depletion);
+      const band = (a, b, style) => { if (a != null && b != null && b > a) { ctx.fillStyle = style; ctx.fillRect(a, top, b - a, h); } };
+      ctx.save();
+      band(L, xtoday, 'rgba(150,167,184,.08)');           // the past
+      band(xtoday || L, xlc, 'rgba(0,200,240,.05)');      // accumulating (future)
+      band(xlc, xhc, 'rgba(255,180,60,.07)');             // can't withdraw (10-yr holdback)
+      band(xhc, xws, 'rgba(0,200,240,.04)');              // can withdraw, still growing
+      band(xws, xdep || R, 'rgba(255,107,107,.05)');      // drawdown
+      ctx.restore();
+    },
+    afterDatasetsDraw(ch) {
+      const { ctx, chartArea, scales } = ch, xs = scales.x, M = C.milestones;
+      const hc = (M.holdback_clear !== M.withdrawal_start) ? M.holdback_clear : null;   // hide when it coincides with the start
+      const marks = [['today', M.current, '#9aa7b3'],
+                     ['grant maxed', M.grant_maxed, '#00e676'],
+                     ['last contrib', M.last_contribution, '#c79bff'],
+                     ['can withdraw', hc, '#ffb43c'],
+                     ['withdrawals', M.withdrawal_start, '#9fc0dc'],
+                     ['deplete', M.depletion, '#ff6b6b']];
+      ctx.save(); ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+      const used = [];
+      marks.forEach(([lbl, yr, col]) => {
+        if (yr == null) return;
+        const i = C.labels.indexOf(yr); if (i < 0) return;
+        const x = xs.getPixelForValue(i);
+        ctx.strokeStyle = col; ctx.setLineDash([4, 3]); ctx.beginPath();
+        ctx.moveTo(x, chartArea.top + 14); ctx.lineTo(x, chartArea.bottom); ctx.stroke(); ctx.setLineDash([]);
+        let row = 0; while (used.some(u => Math.abs(u.x - x) < 48 && u.row === row)) row++;   // stagger overlapping labels
+        used.push({ x, row });
+        ctx.fillStyle = col; ctx.fillText(lbl, x, chartArea.top + 4 + row * 11);
+      });
+      ctx.restore();
+    }
+  };
+
+  function datasets() {
+    if (mode === 'value') {
+      return [
+        { label: '_low', data: C.band_low, borderColor: 'transparent', pointRadius: 0, fill: false },
+        { label: 'Range', data: C.band_high, borderColor: 'transparent', pointRadius: 0,
+          backgroundColor: 'rgba(0,200,240,.08)', fill: '-1' },
+        { label: 'Actual', data: C.actual, borderColor: '#00c8f0', pointRadius: 0, borderWidth: 2, tension: .2, fill: false },
+        { label: 'Projected', data: C.projected, borderColor: '#5fd6f5', borderDash: [6, 4],
+          pointRadius: 0, borderWidth: 2, tension: .2, fill: false },
+      ];
+    }
+    if (mode === 'tax') {
+      const t = C.tax;
+      return [
+        { label: 'Balance (pre-withdrawal)', data: t.pre, borderColor: '#9aa7b3', backgroundColor: 'rgba(150,167,184,.20)', pointRadius: 0, fill: 'origin', tension: .2 },
+        { label: 'Tax-free (your contributions)', data: t.free, borderColor: '#00e676', backgroundColor: 'rgba(0,230,118,.28)', pointRadius: 0, fill: 'origin', tension: .2 },
+        { label: 'Taxable (grants + bonds + growth)', data: t.taxable, borderColor: '#ff8c5a', backgroundColor: 'rgba(255,140,90,.30)', pointRadius: 0, fill: '-1', tension: .2 },
+      ];
+    }
+    const k = C.composition;
+    return [
+      { label: 'Contributions', data: k.contrib, borderColor: '#00c8f0', backgroundColor: 'rgba(0,200,240,.30)', pointRadius: 0, fill: 'origin', tension: .2 },
+      { label: 'Grants + Bonds', data: k.free, borderColor: '#00e676', backgroundColor: 'rgba(0,230,118,.30)', pointRadius: 0, fill: '-1', tension: .2 },
+      { label: 'Growth', data: k.growth, borderColor: '#b98cff', backgroundColor: 'rgba(160,120,255,.30)', pointRadius: 0, fill: '-1', tension: .2 },
+    ];
+  }
+
+  function build() {
+    if (chart) chart.destroy();
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: C.labels, datasets: datasets() },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 18 } },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: mode !== 'value', labels: { color: '#5a7a96', boxWidth: 12, font: { size: 11 } } },
+          tooltip: {
+            filter: item => !item.dataset.label.startsWith('_'),
+            callbacks: {
+              title: items => { const i = items[0].dataIndex; return C.labels[i] + ' · age ' + C.ages[i]; },
+              label: c => (c.dataset.label ? c.dataset.label + ': ' : '') + money.format(c.parsed.y || 0),
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              color: '#5a7a96', maxRotation: 0, autoSkip: true, autoSkipPadding: 28, maxTicksLimit: 14,
+              callback: (v, i) => ['' + C.labels[i], 'age ' + C.ages[i]],
+            }
+          },
+          y: {
+            stacked: mode !== 'value',
+            min: 0,
+            max: C.y_max,                     // hard-pin the top so value/composition/tax share one scale
+            grid: { color: 'rgba(120,160,200,.10)' },
+            ticks: { color: '#5a7a96', callback: v => money.format(v) },
+          }
+        }
+      },
+      plugins: [phasePlugin],
+    });
+  }
+
+  document.querySelectorAll('.rdsp-viewbtn').forEach(b => b.addEventListener('click', function () {
+    mode = this.dataset.view;
+    document.querySelectorAll('.rdsp-viewbtn').forEach(x => x.classList.toggle('active', x === this));
+    build();
+  }));
+
+  syncModeInputs();
+  renderLumps();
+  build();
+})();
+</script>
+{% endif %}
+{% endblock %}

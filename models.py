@@ -93,6 +93,20 @@ class TickerMap(db.Model):
     ticker = db.Column(db.String(20), nullable=False)           # real yfinance ticker symbol
 
 
+class RDSPPlanYear(db.Model):
+    """One future year of the RDSP plan: the user's intended contribution and the
+    grant/bond it earns. Past/current years (≤ the current year) are NOT stored —
+    the RDSP tab derives those live from real transactions. Amounts are dollars
+    (the rdsp.py engine works in cents and converts at the boundary). A null
+    grant/bond means "let the rules engine compute it" rather than an override."""
+    __tablename__ = 'rdsp_plan_years'
+    year = db.Column(db.Integer, primary_key=True)
+    contribution = db.Column(db.Float, default=0)
+    grant = db.Column(db.Float)   # None → compute from CDSG rules
+    bond = db.Column(db.Float)    # None → compute from CDSB rules
+    locked = db.Column(db.Boolean, default=False)  # reserved: pin a row against re-seeding
+
+
 class RecurringRule(db.Model):
     """A transaction template that repeats on a schedule. The engine in
     recurring.py materializes concrete Transaction rows from these up to today."""

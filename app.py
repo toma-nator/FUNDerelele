@@ -13,7 +13,7 @@ app.secret_key = os.environ.get('SECRET_KEY', 'midnight-terminal-dev')
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
-from models import db, Transaction, PriceCache, Account, Setting, GIC, WatchlistItem, PortfolioSnapshot, TickerMap, RecurringRule
+from models import db, Transaction, PriceCache, Account, Setting, GIC, WatchlistItem, PortfolioSnapshot, TickerMap, RecurringRule, RDSPPlanYear
 db.init_app(app)
 
 def run_migrations():
@@ -986,6 +986,58 @@ def charts():
                 if a.name in used]
     return render_template('charts.html', active='charts',
                            groups=catalog_grouped(), accounts=accounts)
+
+
+# ── RDSP ──────────────────────────────────────────────────────────────────────
+
+def _rdsp_args():
+    a = request.args
+    return dict(return_label=a.get('return', 'Target'), contribute_until_year=a.get('until', type=int),
+                mode=a.get('mode', 'ldap'), wd_start=a.get('wd_start', type=int),
+                wd_lumps=a.get('lumps'), wd_target=a.get('target'), wd_to_age=a.get('to_age', type=int),
+                draw_label=a.get('draw', 'Low'), bequest=a.get('bequest'), tax_rate=a.get('tax_rate'))
+
+
+@app.route('/rdsp')
+def rdsp_tab():
+    from rdsp_view import get_rdsp_view
+    return render_template('rdsp.html', active='rdsp', view=get_rdsp_view(**_rdsp_args()))
+
+
+@app.route('/rdsp/data')
+def rdsp_data():
+    from rdsp_view import get_rdsp_view
+    return jsonify(get_rdsp_view(**_rdsp_args()))
+
+
+@app.route('/rdsp/save', methods=['POST'])
+def rdsp_save():
+    # Persist the family-income input and any edited future-year plan rows.
+    income = request.form.get('family_income', '').strip()
+    s = Setting.query.get('rdsp_family_income')
+    if s:
+        s.value = income
+    else:
+        db.session.add(Setting(key='rdsp_family_income', value=income))
+
+    def num(name):
+        v = request.form.get(name, '').strip()
+        try:
+            return float(v) if v != '' else None
+        except ValueError:
+            return None
+
+    for year in request.form.getlist('year', type=int):
+        row = RDSPPlanYear.query.get(year)
+        if not row:
+            row = RDSPPlanYear(year=year)
+            db.session.add(row)
+        row.contribution = num(f'contribution_{year}') or 0
+        row.grant = num(f'grant_{year}')   # blank → None → engine computes
+        row.bond = num(f'bond_{year}')
+    db.session.commit()
+    flash('RDSP plan saved.', 'success')
+    return redirect(url_for('rdsp_tab', **{'return': request.form.get('return', 'Target')}))
 
 
 @app.route('/charts/data/<chart_id>')
