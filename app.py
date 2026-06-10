@@ -995,7 +995,10 @@ def _rdsp_args():
     return dict(return_label=a.get('return', 'Target'), contribute_until_year=a.get('until', type=int),
                 mode=a.get('mode', 'ldap'), wd_start=a.get('wd_start', type=int),
                 wd_lumps=a.get('lumps'), wd_target=a.get('target'), wd_to_age=a.get('to_age', type=int),
-                draw_label=a.get('draw', 'Low'), bequest=a.get('bequest'), tax_rate=a.get('tax_rate'))
+                draw_label=a.get('draw', 'Low'), bequest=a.get('bequest'), tax_rate=a.get('tax_rate'),
+                draw_style=a.get('draw_style', 'flat'), glide_start_age=a.get('g_start'),
+                glide_length=a.get('g_len'), glide_target=a.get('g_target'),
+                glide_safe_return=a.get('g_safe'), glide_current=a.get('g_current'))
 
 
 @app.route('/rdsp')
@@ -1094,7 +1097,22 @@ def rebalancer():
     except ValueError:
         deploy_cash = None
     view = request.args.get('view', '').strip()
-    data = get_rebalancer_data(account=account, dimension=dimension, mode=mode, deploy_cash=deploy_cash)
+    # `seed` ("Bucket:pct,Bucket:pct") pre-fills targets without saving — the RDSP
+    # glide-path hand-off uses it to seed a Blended-Risk split for review.
+    seed = request.args.get('seed', '').strip()
+    targets_override = None
+    if seed:
+        ov = {}
+        for part in seed.split(','):
+            b, _, p = part.partition(':')
+            try:
+                if b.strip() and p.strip():
+                    ov[b.strip()] = float(p)
+            except ValueError:
+                pass
+        targets_override = ov or None
+    data = get_rebalancer_data(account=account, dimension=dimension, mode=mode,
+                               deploy_cash=deploy_cash, targets_override=targets_override)
     # Overall mode is the default landing view (like the Accounts overview);
     # picking an account chip switches to that account's rebalancer.
     overall_mode = (view == 'overall') or (account is None)

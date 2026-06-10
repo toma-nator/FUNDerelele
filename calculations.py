@@ -1425,8 +1425,11 @@ def _watchlist_by_bucket(dimension):
     return out
 
 
-def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_cash=None):
-    """Per-account rebalancing analysis + trade recommendations."""
+def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_cash=None,
+                        targets_override=None):
+    """Per-account rebalancing analysis + trade recommendations. `targets_override`
+    (a {bucket: pct} dict) pre-fills the targets without persisting them — used by
+    the RDSP glide-path hand-off to seed a Blended-Risk split for review."""
     from price_service import get_holdings_metadata
 
     if dimension not in REBAL_DIMENSIONS:
@@ -1495,7 +1498,7 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
     cash = cash_by.get(account, 0.0)
     avail_cash = max(0.0, cash)
     invested = sum(h['market_value_cad'] for h in holdings)
-    targets = get_rebal_targets(account, dimension)   # {bucket: pct}
+    targets = dict(targets_override) if targets_override else get_rebal_targets(account, dimension)   # {bucket: pct}
 
     # For Asset Type, cash is itself an asset class held in the account, so it's
     # a bucket and percentages are of the whole account. For sector/market-cap/
@@ -1525,6 +1528,17 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
             current[b] = current.get(b, 0) + h['market_value_cad'] * frac
     if cash_as_bucket and cash > 0:
         current['Cash'] = current.get('Cash', 0) + cash
+
+    # A partial seed (the RDSP glide hand-off only sets Very Low) leaves the rest of
+    # the money where it is: spread the remaining % across the other buckets by their
+    # CURRENT weights, rather than forcing it into one bucket.
+    if targets_override:
+        remaining = 100.0 - sum(targets.values())
+        others = {b: v for b, v in current.items() if b not in targets and v > 0}
+        others_sum = sum(others.values())
+        if remaining > 0.05 and others_sum > 0:
+            for b, v in others.items():
+                targets[b] = round(v / others_sum * remaining, 1)
 
     targets_set = bool(targets)
     target_total = round(sum(targets.values()), 1)

@@ -112,11 +112,28 @@ def test_level_payment_to_age_zero_rate():
 
 # ── Glide path ──────────────────────────────────────────────────────────────────
 def test_glide_steps_monotonic_to_target():
-    steps = glide_steps(2030, 2043, current_safe_pct=30, target_safe_pct=80, n_steps=5)
-    assert steps[0]['safe_pct'] == 30
-    assert steps[-1]['year'] == 2043 and steps[-1]['safe_pct'] == 80
+    steps = glide_steps(2044, 2054, current_safe_pct=30, target_safe_pct=80)
+    assert steps[0]['year'] == 2044 and steps[0]['safe_pct'] == 30
+    assert steps[-1]['year'] == 2054 and steps[-1]['safe_pct'] == 80
+    assert len(steps) == 11                      # one row per year, inclusive
     pcts = [s['safe_pct'] for s in steps]
     assert pcts == sorted(pcts)                 # never steps backward
+
+
+def test_blended_return_endpoints_and_midpoint():
+    from rdsp import blended_return
+    assert blended_return(0, 0.09, 0.04) == 0.09          # all growth
+    assert blended_return(100, 0.09, 0.04) == 0.04        # fully safe
+    assert abs(blended_return(50, 0.10, 0.04) - 0.07) < 1e-9
+
+
+def test_project_return_by_year_overrides_flat_rate():
+    # A per-year return map drives growth in both phases, overriding the flat rate.
+    rby = {2027: 0.10, 2028: 0.0}
+    res = project(2027, D(100_000), 1994, plan={}, return_rate=0.05,
+                  last_contribution_year=2026, end_year=2028, return_by_year=rby)
+    assert res['rows'][0]['value'] == D(110_000)          # used 10%, not the flat 5%
+    assert res['rows'][1]['value'] == D(110_000)          # used 0%, value unchanged
 
 
 # ── project: accumulation ───────────────────────────────────────────────────────

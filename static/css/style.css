@@ -1300,6 +1300,16 @@ tr[data-status="closed"] td { opacity: .72; }
 .rdsp-lump-row { display: flex; gap: 4px; align-items: center; }
 .rdsp-lump .form-input { width: 70px; }
 .rdsp-lump .form-input[data-k="amt"] { width: 94px; }
+
+/* Glide-path mini visualization: one bar per year, filled to its safe %. */
+.glide-viz { display: flex; align-items: flex-end; gap: 3px; height: 70px;
+  padding: 14px 22px 8px; }
+.glide-bar { flex: 1; height: 100%; background: var(--bg-base); border-radius: 2px;
+  display: flex; align-items: flex-end; overflow: hidden; }
+.glide-bar > span { display: block; width: 100%; background: var(--accent-dim); border-radius: 2px; }
+.glide-bar.now > span { background: var(--accent); }
+.glide-now { background: rgba(0,200,240,.07); }
+.glide-now td:first-child { color: var(--accent); font-weight: 600; }
 .rdsp-plan td:first-child { color: var(--text-dim); font-family: var(--mono); }
 .rdsp-plan input { width: 100%; max-width: 112px; background: var(--bg-surface); color: var(--text); font-size: .78rem;
                    border: 1px solid var(--border-sub); border-radius: 4px; padding: 4px 7px; text-align: right; }

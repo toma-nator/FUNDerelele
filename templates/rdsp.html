@@ -52,10 +52,37 @@
            onchange="setP('to_age', this.value)">
   </div>
   <div class="ctl">
+    <label>Drawdown style</label>
+    <select class="form-input" id="styleSel" onchange="setP('draw_style', this.value)">
+      <option value="flat" {% if view.glide.style == 'flat' %}selected{% endif %}>Flat return</option>
+      <option value="glide" {% if view.glide.style == 'glide' %}selected{% endif %}>Glide (de-risk)</option>
+    </select>
+  </div>
+  <div class="ctl" data-style="flat">
     <label>Drawdown return ({{ (view.withdrawal.draw_rate*100)|round(1) }}%)</label>
     <select class="form-input" onchange="setP('draw', this.value)">
       {% for p in view.withdrawal.draw_presets %}<option value="{{ p }}" {% if p == view.withdrawal.draw_label %}selected{% endif %}>{{ p }}</option>{% endfor %}
     </select>
+  </div>
+  <div class="ctl" data-style="glide">
+    <label>De-risk from age</label>
+    <input class="form-input" type="number" step="1" value="{{ view.glide.start_age }}" onchange="setP('g_start', this.value)">
+  </div>
+  <div class="ctl" data-style="glide">
+    <label>Glide length (yrs)</label>
+    <input class="form-input" type="number" step="1" value="{{ view.glide.length }}" onchange="setP('g_len', this.value)">
+  </div>
+  <div class="ctl" data-style="glide">
+    <label>Target safe %</label>
+    <input class="form-input" type="number" step="5" value="{{ view.glide.target }}" onchange="setP('g_target', this.value)">
+  </div>
+  <div class="ctl" data-style="glide">
+    <label>Full-safe return %</label>
+    <input class="form-input" type="number" step="0.5" value="{{ view.glide.safe_return }}" onchange="setP('g_safe', this.value)">
+  </div>
+  <div class="ctl" data-style="glide">
+    <label title="Today's safe-sleeve % from cash + GICs + bond look-through. Override if you like.">Current safe %</label>
+    <input class="form-input" type="number" step="1" value="{{ view.glide.current }}" onchange="setP('g_current', this.value)">
   </div>
   <div class="ctl">
     <label>Leave behind (bequest)</label>
@@ -157,6 +184,7 @@
     <span><i style="background:rgba(255,180,60,.55)"></i>can't withdraw (holdback)</span>
     <span><i style="background:#9fc0dc"></i>withdrawals start</span>
     <span><i style="background:#ff6b6b"></i>funds deplete</span>
+    {% if view.glide.style == 'glide' %}<span><i style="background:#b98cff"></i>de-risking window</span>{% endif %}
   </div>
 </div>
 
@@ -216,6 +244,54 @@
               <td class="r">{% if r.rejected %}<span class="rdsp-rejected" title="Your requested lump exceeded the PGAP cap (greater of 10% of value or LDAP), so this much couldn’t be withdrawn this year.">−{{ r.rejected | cad }} over cap</span>{% endif %}{{ r.withdrawal | cad }}</td>
               <td class="r">{{ r.taxable | cad }}</td><td class="r">{{ r.tax_owed | cad }}</td>
               <td class="r">{{ r.net | cad }}</td><td class="r">{{ r.value | cad }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- De-risking glide path -->
+{% if view.glide.style == 'glide' %}
+<div class="card" style="margin-top:16px">
+  <div class="card-header toggle-header" onclick="togglePanel('glidePanel','glideArrow')">
+    De-risking glide path
+    <span class="card-sub">
+      age {{ view.glide.begin_year - view.birth_year }} → {{ view.glide.finish_age }} ·
+      {{ view.glide.current }}% → {{ view.glide.target }}% safe ·
+      return {{ view.glide.growth_rate }}% → {{ view.glide.safe_return }}%
+    </span>
+    <span class="toggle-arrow" id="glideArrow">▼</span>
+  </div>
+  <div id="glidePanel" style="display:none">
+    <div style="padding:10px 20px;font-size:.74rem;color:var(--text-muted);border-bottom:1px solid var(--border-sub)">
+      Gradually shifts toward safe assets (cash · GICs · bonds) from age
+      <strong>{{ view.glide.begin_year - view.birth_year }}</strong> to <strong>{{ view.glide.finish_age }}</strong>,
+      lowering the expected return from {{ view.glide.growth_rate }}% to {{ view.glide.safe_return }}% as it goes.
+      The <span style="color:var(--accent)">highlighted</span> year is your next move — hand it to the
+      Rebalancer (Blended Risk: safe → Low, growth → High) to act on it.
+    </div>
+    <div class="glide-viz">
+      {% for r in view.glide.rows %}
+      <div class="glide-bar{% if r.is_current %} now{% endif %}" title="{{ r.year }} · age {{ r.age }} — {{ r.safe_pct }}% safe / {{ r.ret }}% return">
+        <span style="height:{{ r.safe_pct }}%"></span>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="table-scroll rdsp-plan">
+      <table class="data-table">
+        <thead><tr><th>Year · Age</th><th class="r">Safe %</th><th class="r">Growth %</th><th class="r">Exp. return</th><th></th></tr></thead>
+        <tbody>
+          {% for r in view.glide.rows %}
+          <tr{% if r.is_current %} class="glide-now"{% endif %}>
+            <td>{{ r.year }} · {{ r.age }}</td>
+            <td class="r">{{ r.safe_pct }}%</td>
+            <td class="r">{{ r.growth_pct }}%</td>
+            <td class="r">{{ r.ret }}%</td>
+            <td class="r"><a class="btn btn-sm{% if r.is_current %} rdsp-addlump{% endif %}"
+                 href="{{ url_for('rebalancer', account=view.glide.rebalancer_account, dimension='blend', seed=r.seed) }}">→ Rebalancer</a></td>
+          </tr>
           {% endfor %}
         </tbody>
       </table>
@@ -357,6 +433,14 @@ function togglePanel(id, arrowId) {
     });
   }
 
+  // Show the flat-return vs glide controls based on the drawdown style.
+  function syncStyleInputs() {
+    const s = document.getElementById('styleSel').value;
+    document.querySelectorAll('[data-style]').forEach(el => {
+      el.style.display = el.dataset.style === s ? '' : 'none';
+    });
+  }
+
   // Phase shading + milestone markers, drawn with the chart's own scales.
   const phasePlugin = {
     id: 'rdspPhase',
@@ -364,14 +448,17 @@ function togglePanel(id, arrowId) {
       const { ctx, chartArea, scales } = ch, xs = scales.x, M = C.milestones;
       const top = chartArea.top, h = chartArea.height, L = chartArea.left, R = chartArea.right;
       const px = y => { const i = C.labels.indexOf(y); return i < 0 ? null : xs.getPixelForValue(i); };
-      const xtoday = px(M.current), xlc = px(M.last_contribution), xhc = px(M.holdback_clear),
+      const xtoday = px(M.current), xhs = px(M.holdback_start), xhc = px(M.holdback_clear),
             xws = px(M.withdrawal_start), xdep = px(M.depletion);
       const band = (a, b, style) => { if (a != null && b != null && b > a) { ctx.fillStyle = style; ctx.fillRect(a, top, b - a, h); } };
       ctx.save();
+      // De-risking window goes down FIRST so the withdrawal/holdback phase shading
+      // layers on top and keeps priority; the two markers below still delineate it.
+      if (C.glide) band(px(C.glide.begin), px(C.glide.end), 'rgba(160,120,255,.10)');
       band(L, xtoday, 'rgba(150,167,184,.08)');           // the past
-      band(xtoday || L, xlc, 'rgba(0,200,240,.05)');      // accumulating (future)
-      band(xlc, xhc, 'rgba(255,180,60,.07)');             // can't withdraw (10-yr holdback)
-      band(xhc, xws, 'rgba(0,200,240,.04)');              // can withdraw, still growing
+      band(xtoday || L, xhs, 'rgba(0,200,240,.05)');      // still receiving grants/bonds
+      band(xhs, xhc, 'rgba(255,180,60,.07)');             // 10-yr holdback (from the last grant/bond)
+      band(xhc, xws, 'rgba(0,200,240,.04)');              // holdback cleared, still growing
       band(xws, xdep || R, 'rgba(255,107,107,.05)');      // drawdown
       ctx.restore();
     },
@@ -384,6 +471,7 @@ function togglePanel(id, arrowId) {
                      ['can withdraw', hc, '#ffb43c'],
                      ['withdrawals', M.withdrawal_start, '#9fc0dc'],
                      ['deplete', M.depletion, '#ff6b6b']];
+      if (C.glide) marks.push(['de-risk start', C.glide.begin, '#b98cff'], ['de-risked', C.glide.end, '#b98cff']);
       ctx.save(); ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
       const used = [];
       marks.forEach(([lbl, yr, col]) => {
@@ -475,6 +563,7 @@ function togglePanel(id, arrowId) {
   }));
 
   syncModeInputs();
+  syncStyleInputs();
   renderLumps();
   build();
 })();

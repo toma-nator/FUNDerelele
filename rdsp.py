@@ -181,22 +181,31 @@ def level_payment_to_age(value_cents: int, age: int, to_age: int, rate: float,
 
 
 # ── Glide path ──────────────────────────────────────────────────────────────────
-def glide_steps(start_year: int, withdrawal_year: int, current_safe_pct: float,
-                target_safe_pct: float, n_steps: int = 5) -> list:
-    """A gradual, multi-step shift of the *safe* allocation %, from `current` today
-    up to `target` by the withdrawal year. Returns [{'year', 'safe_pct'}], evenly
-    spaced over the last `n_steps` years before withdrawal (not a single jump).
+def glide_steps(begin_year: int, end_year: int, current_safe_pct: float,
+                target_safe_pct: float) -> list:
+    """Per-year de-risking glide: `safe_pct` ramps linearly from `current` at
+    `begin_year` to `target` at `end_year` (one row per year, inclusive). The RDSP
+    'glide' drawdown style uses this — high-risk at the start, low-risk by the end.
+
+    Returns [{'year', 'safe_pct'}]. Years outside [begin_year, end_year] are the
+    caller's concern (hold `current` before the window, `target` after).
     """
-    n_steps = max(1, n_steps)
-    first_step_year = max(start_year, withdrawal_year - n_steps)
-    span = withdrawal_year - first_step_year or 1
+    span = max(1, end_year - begin_year)
     out = []
     for i in range(span + 1):
-        y = first_step_year + i
         frac = i / span
-        out.append({'year': y,
+        out.append({'year': begin_year + i,
                     'safe_pct': round(current_safe_pct + (target_safe_pct - current_safe_pct) * frac, 2)})
     return out
+
+
+def blended_return(safe_pct: float, growth_return: float, safe_return: float) -> float:
+    """Expected return for a safe/growth split. `safe_pct` is 0–100 (the % in the
+    safe sleeve). As the glide raises safe_pct the return falls from `growth_return`
+    toward `safe_return`. Used to turn a glide schedule into a per-year return.
+    """
+    s = max(0.0, min(safe_pct, 100.0)) / 100.0
+    return safe_return * s + growth_return * (1.0 - s)
 
 
 # ── Drivers ─────────────────────────────────────────────────────────────────────
@@ -206,7 +215,7 @@ def project(start_year: int, start_value_cents: int, birth_year: int, *,
             entitlement_start_year: int | None = None,
             withdrawal=None, end_year: int | None = None,
             start_contrib_cents: int = 0, start_grant_cents: int = 0,
-            start_bond_cents: int = 0) -> dict:
+            start_bond_cents: int = 0, return_by_year: dict | None = None) -> dict:
     """Year-by-year RDSP timeline: accumulation, then (optional) decumulation.
 
     `plan[year]` = {'contribution': cents, 'grant': cents|None, 'bond': cents|None}.
@@ -286,7 +295,11 @@ def project(start_year: int, start_value_cents: int, birth_year: int, *,
         pgap = False
         if withdrawal and year >= withdrawal['start_year']:
             phase = 'decumulation'
+            # In glide mode the per-year return (return_by_year) overrides the flat
+            # drawdown rate; flat mode falls back to the single withdrawal rate.
             draw_rate = withdrawal.get('rate', return_rate)
+            if return_by_year:
+                draw_rate = return_by_year.get(year, draw_rate)
             grown = _grow(value, draw_rate)               # FMV at the start of the year
             bequest = withdrawal.get('bequest', 0)
             ldap_amt = ldap_payment(grown, age)
@@ -332,8 +345,10 @@ def project(start_year: int, start_value_cents: int, birth_year: int, *,
             growth = grown - value
             value = grown - withdrawal_amt                 # AHA clawback is warning-only, not deducted
         else:
-            # Accumulation: grow, then add the year's inflows.
-            grown = _grow(value, return_rate)
+            # Accumulation: grow, then add the year's inflows. The glide can begin
+            # before withdrawals, so the per-year return applies here too.
+            acc_rate = return_by_year.get(year, return_rate) if return_by_year else return_rate
+            grown = _grow(value, acc_rate)
             growth = grown - value
             value = grown + contribution + grant + bond
 

@@ -154,9 +154,45 @@ def _parse_lumps(s):
     return out
 
 
+# ── Glide-path (de-risking drawdown style) ───────────────────────────────────────
+GLIDE_FLOOR_AGE      = 50     # earliest age to begin de-risking
+GLIDE_DEFAULT_LEN    = 10     # default glide length (years)
+GLIDE_FINISH_CAP_AGE = 70     # fully de-risked by, at the latest
+GLIDE_TARGET_DEFAULT = 80.0   # default % safe at the end of the glide
+FULL_SAFE_RETURN     = 0.04   # "full-safe" return floor (GIC-level)
+SAFE_BLEND_BUCKETS = {'Very Low'}   # the genuinely defensive end of the Blended-Risk scale
+# (deliberately NOT 'Low' — broad equity ETFs land there but are still equities, so
+# counting them would make a de-risking glide trivial.)
+
+
+def current_safe_pct(names):
+    """Today's safe-sleeve % for the RDSP accounts, tied to the Rebalancer's
+    **Blended Risk** classification so the glide and the hand-off agree: cash + GICs
+    (risk-free) plus holdings sitting in the Very Low risk bucket, ÷ total."""
+    from calculations import (get_cash_by_account, get_gic_value_by_account,
+                              get_holdings, _bucket_weights)
+    from price_service import get_holdings_metadata
+    cash = sum(get_cash_by_account().get(n, 0.0) for n in names)
+    gic = sum(get_gic_value_by_account().get(n, {}).get('value', 0.0) for n in names)
+    holdings = [h for h in get_holdings() if h['account'] in names]
+    meta = get_holdings_metadata([h['ticker'] for h in holdings])
+    safe_holdings = invested = 0.0
+    for h in holdings:
+        mv = h['market_value_cad'] or 0
+        if mv <= 0:
+            continue
+        invested += mv
+        w = _bucket_weights(h, meta.get(h['ticker'], {}), 'blend')
+        safe_holdings += mv * sum(v for k, v in w.items() if k in SAFE_BLEND_BUCKETS)
+    total = cash + gic + invested
+    return round((cash + gic + safe_holdings) / total * 100, 1) if total > 0 else 0.0
+
+
 def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
                   mode='ldap', wd_start=None, wd_lumps=None, wd_target=None, wd_to_age=None,
-                  draw_label='Low', bequest=None, tax_rate=None):
+                  draw_label='Low', bequest=None, tax_rate=None,
+                  draw_style='flat', glide_start_age=None, glide_length=None,
+                  glide_target=None, glide_safe_return=None, glide_current=None):
     """Assemble the full RDSP payload (dollars) for the template/JSON endpoint."""
     names = rdsp_accounts()
     if not names:
@@ -211,8 +247,11 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
 
     # Withdrawals can start once the holdback clears (last grant/bond + 10) and must
     # begin by age 60. Default to the earliest (holdback-clear), cap at 60.
+    # Only count grants/bonds the engine would actually pay — they stop at age 49,
+    # so a plan entry past that can't extend the holdback. (Actuals are real → kept.)
     last_gb_year = max([y for y, r in actuals.items() if r.get('grant') or r.get('bond')]
-                       + [r.year for r in rows if (r.grant or 0) or (r.bond or 0)] + [cy])
+                       + [r.year for r in rows if ((r.grant or 0) or (r.bond or 0))
+                          and (r.year - by) <= rdsp.GRANT_BOND_LAST_AGE] + [cy])
     wd_floor = last_gb_year + rdsp.HOLDBACK_YEARS
     wd_max = by + MANDATORY_LDAP_AGE
     if wd_floor > wd_max:
@@ -233,16 +272,57 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     actual_grant = sum(r.get('grant', 0) for r in actuals.values())
     actual_bond = sum(r.get('bond', 0) for r in actuals.values())
 
+    # ── Drawdown style: flat (fixed rate) or glide (de-risking ramp) ──
+    draw_style = 'glide' if draw_style == 'glide' else 'flat'
+
+    def _int(v, default):
+        try:
+            return int(v) if v not in (None, '') else default
+        except (TypeError, ValueError):
+            return default
+
+    def _float(v, default):
+        try:
+            return float(v) if v not in (None, '') else default
+        except (TypeError, ValueError):
+            return default
+
+    g_start_age = max(0, _int(glide_start_age, GLIDE_FLOOR_AGE))
+    g_length = max(1, _int(glide_length, GLIDE_DEFAULT_LEN))
+    g_target = max(0.0, min(_float(glide_target, GLIDE_TARGET_DEFAULT), 100.0))
+    g_safe_ret = _float(glide_safe_return, FULL_SAFE_RETURN * 100) / 100
+    g_current = max(0.0, min(_float(glide_current, current_safe_pct(names)), 100.0))
+
+    # The glide is its own schedule (not anchored to withdrawal): begin at the
+    # start-age (≥ today), run `length` years, but be finished by the cap age.
+    glide_begin = max(cy, by + g_start_age)
+    glide_end = max(glide_begin, min(by + GLIDE_FINISH_CAP_AGE, glide_begin + g_length))
+    glide_step_rows = rdsp.glide_steps(glide_begin, glide_end, g_current, g_target)
+    glide_safe_at = {s['year']: s['safe_pct'] for s in glide_step_rows}
+
+    def glide_rby(growth_rate):
+        """Per-year return for a growth assumption while gliding (None in flat mode):
+        current allocation before the window, target after, ramp between — blended
+        with the full-safe return."""
+        if draw_style != 'glide':
+            return None
+        out = {}
+        for y in range(cy + 1, end_year + 1):
+            s = g_current if y <= glide_begin else (g_target if y >= glide_end else glide_safe_at.get(y, g_current))
+            out[y] = rdsp.blended_return(s, growth_rate, g_safe_ret)
+        return out
+
     def run(r):
         # P1 uses the plan's grant/bond values (Excel-seeded, reconciled to the caps);
         # income-driven auto-compute of the schedule is Phase 3, so don't pass income
         # into the projection (a blank grant/bond just means $0 here). `r` is the
-        # accumulation return; the drawdown return is fixed by `withdrawal['rate']`.
+        # accumulation return; in flat mode the drawdown return is `withdrawal['rate']`,
+        # in glide mode the per-year return (return_by_year) drives both phases.
         return rdsp.project(cy + 1, current_value, by, plan=plan, family_income_cents=None,
                             return_rate=r, last_contribution_year=last_contribution_year,
                             end_year=end_year, withdrawal=withdrawal,
                             start_contrib_cents=actual_contrib, start_grant_cents=actual_grant,
-                            start_bond_cents=actual_bond)
+                            start_bond_cents=actual_bond, return_by_year=glide_rby(r))
 
     proj = run(rate)
     band_lo = run(RETURN_PRESETS[BAND_LOW])
@@ -316,7 +396,8 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     last_contrib = max((t['year'] for t in timeline if t['contribution'] > 0), default=cy)
     depletes_age = proj['summary']['depletes_age']
     milestones = {'current': cy, 'grant_maxed': grant_maxed, 'last_contribution': last_contrib,
-                  'holdback_clear': wd_floor,
+                  'holdback_start': last_gb_year,   # last grant/bond — the 10-yr AHA clock starts here
+                  'holdback_clear': wd_floor,        # = last_gb_year + 10
                   'withdrawal_start': wd_start_year,
                   'depletion': (by + depletes_age) if depletes_age else None}
 
@@ -440,6 +521,35 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     table = [{'year': r.year, 'contribution': r.contribution or 0,
               'grant': r.grant, 'bond': r.bond} for r in rows]
 
+    # ── Glide-path playbook payload ──
+    # Per-year safe/growth split + implied return, plus a Rebalancer seed that sets
+    # ONLY the Very Low (safe) target — the Rebalancer spreads the rest across the
+    # current buckets. The earliest upcoming year is the actionable hand-off.
+    glide_rows = []
+    if draw_style == 'glide':
+        actionable_year = glide_step_rows[0]['year'] if glide_step_rows else None
+        for s in glide_step_rows:
+            safe = s['safe_pct']
+            grow = round(100 - safe, 1)
+            glide_rows.append({
+                'year': s['year'], 'age': s['year'] - by,
+                'safe_pct': safe, 'growth_pct': grow,
+                'ret': round(rdsp.blended_return(safe, rate, g_safe_ret) * 100, 2),
+                'seed': f'Very Low:{safe}',
+                'is_current': s['year'] == actionable_year,
+            })
+    glide = {
+        'style': draw_style,
+        'start_age': g_start_age, 'length': g_length, 'finish_age': glide_end - by,
+        'begin_year': glide_begin, 'end_year': glide_end,
+        'target': round(g_target, 1), 'current': round(g_current, 1),
+        'safe_return': round(g_safe_ret * 100, 2),
+        'growth_label': return_label, 'growth_rate': round(rate * 100, 1),
+        'floor_age': GLIDE_FLOOR_AGE, 'cap_age': GLIDE_FINISH_CAP_AGE,
+        'rebalancer_account': names[0],
+        'rows': glide_rows,
+    }
+
     return {
         'ok': True,
         'accounts': names,
@@ -467,6 +577,7 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
         'schedule': schedule,
         'comparison': comparison,
         'profile': profile,
+        'glide': glide,
         'chart': {
             'labels': labels, 'ages': ages, 'n_actual': n_actual, 'y_max': y_max,
             'actual': actual_line, 'projected': proj_line,
@@ -478,6 +589,7 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
             },
             'tax': {'pre': tax_pre, 'free': tax_free, 'taxable': tax_able},
             'milestones': milestones,
+            'glide': {'begin': glide_begin, 'end': glide_end} if draw_style == 'glide' else None,
             'last_actual_year': cy,
         },
         'stats': {k: (v if k in ('leverage', 'depletes_age') else D(v)) for k, v in stats.items()},
