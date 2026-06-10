@@ -22,15 +22,15 @@ Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈92 ideas)
+## Backlog at a glance (≈93 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
 | Charts | ~41 | ~26 finance-useful + ~15 fun/easter-egg (3 % charts now shipped) |
-| Per-tab feature enhancements | ~21 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX |
+| Per-tab feature enhancements | ~22 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX, RDSP |
 | New tabs (big features) | 9 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt |
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
-| UI/UX polish | 6 | Restore-alerts, sidebar reorder, sparkline, chart descriptions/hide/star, daily-swing widget, trend indicator |
+| UI/UX polish | 6 | Restore-alerts, sidebar hide/reorder tabs, sparkline, chart descriptions/hide/star, daily-swing widget, trend indicator |
 | Infrastructure / hardening | 4 | Test suite, yfinance resilience, income tax, README screenshots |
 | Account / data model | 1 | Savings account (recurring-interest) |
 | Canadian rules | 1 | RRSP room |
@@ -142,16 +142,26 @@ multi-series chart. Would also pair with a true historical FX overlay (the parke
 
 **Priority:** Impact: Low · Effort: medium
 
-## Sidebar — drag to reorder tabs
+## Sidebar — tab management (hide + reorder)
 
-Let the user drag the nav items in the sidebar (`base.html`) into whatever order
-they prefer, persisted in localStorage (per browser, like the dashboard/charts
-layouts). Each `.nav-item` becomes draggable; on drop, reorder within its section
-and save the order; restore on load. Keep the section grouping (MAIN / ANALYTICS /
-ADVANCED / TOOLS) or allow free reordering — decide during design. Effort: small–
-medium (HTML5 drag-and-drop or a tiny up/down control in an "edit nav" mode).
+Let the user **hide tabs they don't use** and reorder the rest, persisted in
+localStorage (per browser, like the dashboard/charts layouts). The clean,
+no-scroll sidebar is a feature today — the value here is curating it, not adding
+chrome.
 
-**Priority:** Impact: Low · Effort: small–medium
+- **Hide (the main want):** a per-tab show/hide toggle in an "edit nav" mode so
+  the sidebar only shows the tabs that matter to this user. Concrete use case:
+  **hide Tax & ACB and surface RDSP instead** for the primary user, while a second
+  user (the brother) keeps **RDSP hidden**. Effectively a per-browser tab profile.
+- **Reorder:** drag `.nav-item`s (or up/down controls) within their section;
+  save the order, restore on load. Keep the MAIN/ANALYTICS/ADVANCED/TOOLS grouping
+  or allow free reordering — decide during design.
+- **Keep it clean:** default to all-visible; hiding/reordering is opt-in via the
+  edit mode so the sidebar never grows clutter or needs scrolling.
+- **Effort:** small–medium — a hidden/ordered list in localStorage + an edit-nav
+  toggle in `base.html` (HTML5 drag-and-drop or simple controls).
+
+**Priority:** Impact: Low–Med · Effort: small–medium
 
 ## Dashboard — hero sparkline visual polish
 
@@ -568,6 +578,25 @@ carry-forward** math and the two-phase accumulate→decumulate / LDAP projection
   two-phase (accumulate → decumulate) projection and a glide-path model.
 
 **Priority:** Impact: Med–High _(the tracked account is an RDSP)_ · Effort: large
+
+## RDSP — reconsider the "Tax" chart view
+
+The RDSP projection chart has three cycleable views (Value / Composition / Tax).
+The **Tax** view splits the drawdown balance into tax-free (your contributions,
+green) vs taxable (grants + bonds + all growth, orange). It's **correct** per
+RC4460 — but in practice it reads almost entirely taxable (contributions are only
+~8% of the balance at withdrawal), so it may not earn its place as its own view.
+
+- **Parked decision:** consider **dropping the Tax chart view** (keep Value +
+  Composition) if it stays low-value — the per-year tax detail already lives in the
+  withdrawal schedule table and the Total tax / After-tax kept stat cards. **Keep it
+  for now**; revisit after living with the tab.
+- **If kept:** the math is right (only personal contributions are tax-free); no
+  code change needed beyond what's shipped.
+- **Effort:** tiny — removing it is deleting one view button + the `tax` branch in
+  `datasets()`; the `chart.tax` payload could stay or go.
+
+**Priority:** Impact: Low · Effort: tiny
 
 ## Pre-public hardening — parked items
 

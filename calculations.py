@@ -175,6 +175,15 @@ def get_cash_by_account_currency():
             native = (net_cad / rate) if rate else net_cad
         pools = result.setdefault(acc, {})
         pools[ccy] = pools.get(ccy, 0.0) + native
+    # Snap to whole cents and drop sub-cent foreign "dust". Reconstructing native
+    # amounts (net_cad / booked rate) leaves tiny float residue, so a foreign pool
+    # that should be exactly $0 lingers at e.g. 0.004 USD — which then revalues at
+    # live FX and tips the rounded CAD total by a cent. Real cash is whole cents.
+    for pools in result.values():
+        for c in list(pools):
+            pools[c] = round(pools[c], 2)
+            if c != 'CAD' and abs(pools[c]) < 0.005:
+                del pools[c]
     return result
 
 

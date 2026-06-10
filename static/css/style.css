@@ -1258,3 +1258,35 @@ option { background: var(--bg-card); color: var(--text); }
   vertical-align: middle;
 }
 tr[data-status="closed"] td { opacity: .72; }
+
+/* ── RDSP tab ───────────────────────────────────────────────────────────────── */
+.rdsp-controls { display: flex; flex-wrap: wrap; gap: 12px 18px; align-items: flex-end; margin-bottom: 16px;
+                 background: var(--bg-surface); border: 1px solid var(--border-sub);
+                 border-radius: var(--radius); padding: 12px 16px; }
+.rdsp-controls .ctl { display: flex; flex-direction: column; gap: 4px; }
+.rdsp-controls label { font-size: .66rem; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+.rdsp-controls input[type=number] { -moz-appearance: textfield; }
+.rdsp-controls input[type=number]::-webkit-outer-spin-button,
+.rdsp-controls input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.rdsp-viewbtn.active { background: var(--accent-dim); border-color: var(--accent); color: #fff; }
+.stat-value .planned { color: var(--text-muted); font-weight: 400; font-size: .7em; }
+.rdsp-bar { position: relative; height: 4px; border-radius: 3px; background: var(--bg-base); margin-top: 8px; overflow: hidden; }
+.rdsp-bar > span { position: absolute; left: 0; top: 0; height: 100%; background: var(--accent); }
+.rdsp-bar > span.plan { background: rgba(0, 200, 240, .30); }
+.rdsp-bar.green > span { background: var(--green); }
+.rdsp-bar.green > span.plan { background: rgba(0, 230, 118, .30); }
+.rdsp-warn { background: rgba(255, 180, 60, .08); border: 1px solid rgba(255, 180, 60, .30); color: #ffce80;
+             border-radius: var(--radius); padding: 8px 12px; font-size: .78rem; margin-top: 6px; }
+.rdsp-rejected { margin-left: 8px; font-size: .68rem; color: #ffb43c; white-space: nowrap; cursor: help; }
+.rdsp-plan td:first-child { color: var(--text-dim); font-family: var(--mono); }
+.rdsp-plan input { width: 100%; max-width: 112px; background: var(--bg-surface); color: var(--text); font-size: .78rem;
+                   border: 1px solid var(--border-sub); border-radius: 4px; padding: 4px 7px; text-align: right; }
+.rdsp-plan input:focus { border-color: var(--accent-dim); outline: none; }
+.rdsp-plan input[type=number] { -moz-appearance: textfield; }
+.rdsp-plan input::-webkit-outer-spin-button, .rdsp-plan input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.rdsp-plan input.plan-off { opacity: .3; text-decoration: line-through; }       /* shouldn't be filled */
+.rdsp-plan input.plan-need { border-color: rgba(255,180,60,.65); background: rgba(255,180,60,.10); }  /* fill me in */
+.plan-legend { font-size: .7rem; color: var(--text-muted); margin-top: 10px; display: flex; gap: 16px; flex-wrap: wrap; }
+.plan-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.rdsp-legend { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: .65rem; color: var(--text-muted); }
+.rdsp-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
