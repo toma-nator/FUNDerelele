@@ -384,6 +384,52 @@
   </div>
 </div>
 
+<!-- Glide Lab — allocation-based flat-vs-glide de-risk analyzer (Model C) -->
+<div class="card rdsp-glidelab" style="margin-top:16px">
+  <div class="card-header">Glide Lab
+    <span class="card-sub">de-risking as pure allocation — both plans share the stock &amp; safe returns and differ only in the mix</span>
+  </div>
+  <div class="rdsp-gl-controls">
+    <div class="ctl"><label>Stock return %/yr</label>
+      <input class="form-input" type="number" step="0.5" value="7" data-gl="gl_stock" onchange="refreshGlideLab()"></div>
+    <div class="ctl"><label>Safe return %/yr</label>
+      <input class="form-input" type="number" step="0.5" value="4" data-gl="gl_safe" onchange="refreshGlideLab()"></div>
+    <div class="ctl"><label>Flat retirement mix (% safe)</label>
+      <input class="form-input" type="number" step="5" min="0" max="100" value="40" id="glFlatmix" data-gl="gl_flatmix" onchange="refreshGlideLab()">
+      <div class="rdsp-gl-presets">
+        <button type="button" onclick="setGlFlatmix(10)">Aggressive</button>
+        <button type="button" onclick="setGlFlatmix(40)">Balanced</button>
+        <button type="button" onclick="setGlFlatmix(70)">Conservative</button>
+      </div>
+    </div>
+    <div class="ctl"><label>Glide target (% safe)</label>
+      <input class="form-input" type="number" step="5" min="0" max="100" value="{{ view.glide.target }}" data-gl="g_target" onchange="refreshGlideLab()"></div>
+    <div class="ctl"><label>Shock</label>
+      <select class="form-input" data-gl="s_shape" onchange="refreshGlideLab()">
+        <option value="crash"  {% if view.stress.shape == 'crash'  %}selected{% endif %}>Sharp crash</option>
+        <option value="decade" {% if view.stress.shape == 'decade' %}selected{% endif %}>Lost decade</option>
+        <option value="none"   {% if view.stress.shape == 'none'   %}selected{% endif %}>No shock</option>
+      </select></div>
+    <div class="ctl"><label>Crash severity %</label>
+      <input class="form-input" type="number" step="5" min="5" max="90" value="{{ view.stress.severity }}" data-gl="s_depth" onchange="refreshGlideLab()"></div>
+    <div class="ctl"><label>Timing</label>
+      <select class="form-input" data-gl="s_when" onchange="refreshGlideLab()">
+        <option value="early" {% if view.stress.timing == 'early' %}selected{% endif %}>Early</option>
+        <option value="mid"   {% if view.stress.timing == 'mid'   %}selected{% endif %}>Mid</option>
+        <option value="late"  {% if view.stress.timing == 'late'  %}selected{% endif %}>Late</option>
+      </select></div>
+  </div>
+  <div class="rdsp-gl-tiles" id="glLabTiles"></div>
+  <div class="rdsp-gl-views">
+    <button type="button" class="btn btn-sm rdsp-viewbtn gl-viewbtn active" data-glview="value">Value paths</button>
+    <button type="button" class="btn btn-sm rdsp-viewbtn gl-viewbtn" data-glview="alloc">Allocation</button>
+    <button type="button" class="btn btn-sm rdsp-viewbtn gl-viewbtn" data-glview="breakeven">Break-even</button>
+    <button type="button" class="btn btn-sm rdsp-viewbtn gl-viewbtn" data-glview="dial">Cost vs protection</button>
+  </div>
+  <div class="chart-wrap" style="height:340px;padding:14px 18px"><canvas id="glideLabChart"></canvas></div>
+  <div class="rdsp-gl-caption" id="glLabCaption">Loading…</div>
+</div>
+
 <!-- Editable plan -->
 <div class="card rdsp-plan" style="margin-top:16px">
   <div class="card-header toggle-header" onclick="togglePanel('editPlan','editPlanArrow')">
@@ -669,6 +715,167 @@ function togglePanel(id, arrowId) {
   syncStyleInputs();
   renderLumps();
   build();
+})();
+
+// ── Glide Lab (lazy AJAX; allocation-based flat-vs-glide) ──
+(function () {
+  const canvas = document.getElementById('glideLabChart');
+  if (!canvas) return;
+  let glChart, glData, glMode = 'value';
+  const dollars = n => '$' + Math.round(n).toLocaleString();
+  // Plan identity on the value/alloc charts (glide purple, flat white); win/lose
+  // green/red used only on the break-even & dial; cyan = withdrawal marker.
+  const COL = { glide: '#b98cff', flat: '#9aa7b3', win: '#00e676', loss: '#ff6b6b', cyan: '#00c8f0' };
+  Chart.defaults.font.family = "'Inter', system-ui, sans-serif";   // match the app font
+
+  // Vertical markers: glide window, withdrawal start, and the crash year.
+  const glideMarkers = {
+    id: 'glideMarkers',
+    afterDatasetsDraw(chart) {
+      const m = chart.$markers; if (!m) return;
+      const { ctx, chartArea, scales } = chart;
+      const ages = chart.$ages || chart.data.labels;
+      const marks = [
+        ['Glide starts', m.glide_begin, COL.glide],
+        ['Glide ends',   m.glide_end,   '#8a72c4'],
+        ['Withdrawals',  m.withdrawal,  COL.cyan],
+        ['Crash',        m.crash,       COL.loss],
+      ];
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.font = "600 10px 'Inter', sans-serif";
+      const used = [];
+      marks.forEach(([label, age, col]) => {
+        if (age == null) return;
+        const i = ages.indexOf(age); if (i < 0) return;
+        const x = scales.x.getPixelForValue(i);
+        ctx.strokeStyle = col; ctx.globalAlpha = .5; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.moveTo(x, chartArea.top + 12); ctx.lineTo(x, chartArea.bottom); ctx.stroke();
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+        let row = 0; while (used.some(u => Math.abs(u.x - x) < 56 && u.row === row)) row++;
+        used.push({ x, row });
+        ctx.fillStyle = col; ctx.fillText(label, x, chartArea.top + 8 + row * 11);
+      });
+      ctx.restore();
+    },
+  };
+
+  window.setGlFlatmix = function (v) { document.getElementById('glFlatmix').value = v; refreshGlideLab(); };
+
+  // Merge the tab's current params (withdrawal start, contributions, …) with the
+  // lab's own inputs, so the projection setup matches the tab but the mix/shock are local.
+  function glParams() {
+    const u = new URLSearchParams(location.search);
+    document.querySelectorAll('[data-gl]').forEach(el => { if (el.value !== '') u.set(el.dataset.gl, el.value); });
+    return u.toString();
+  }
+
+  window.refreshGlideLab = function () {
+    document.getElementById('glLabCaption').textContent = 'Calculating…';
+    fetch('/rdsp/glide-lab?' + glParams()).then(r => r.json()).then(g => {
+      if (!g || !g.value) { document.getElementById('glLabCaption').textContent = 'No data.'; return; }
+      glData = g; renderTiles(g); drawChart();
+    }).catch(() => { document.getElementById('glLabCaption').textContent = 'Could not load.'; });
+  };
+
+  function tile(label, val, sub) {
+    return '<div class="gl-tile"><span class="gl-tile-l">' + label + '</span><span class="gl-tile-v">' + val +
+      '</span><span class="gl-tile-s">' + (sub || '') + '</span></div>';
+  }
+  function renderTiles(g) {
+    const c = g.crash_year, t = g.totals, be = g.breakeven.point;
+    const cyVal = c ? c.flat + '% / ' + c.glide + '%' : '—';
+    const cySub = c ? 'flat / glide · age ' + c.age : (g.shape === 'decade' ? 'n/a for a lost decade' : 'no shock');
+    const beTile = g.shape === 'none' ? '—' : (be == null ? 'never' : be + '%');
+    document.getElementById('glLabTiles').innerHTML =
+      tile('Crash-year hit', cyVal, cySub) +
+      tile('Worst-year income', dollars(g.floor.flat) + ' / ' + dollars(g.floor.glide), 'flat / glide, under shock') +
+      tile('Break-even crash chance', beTile, 'glide pays off above this') +
+      tile('Income, no shock', dollars(t.calm_flat) + ' / ' + dollars(t.calm_glide), 'flat / glide, lifetime');
+  }
+
+  const grid = { color: 'rgba(120,160,200,.10)' };
+  const axisTitle = txt => ({ display: true, text: txt, color: '#5a7a96' });
+  const baseOpts = () => ({
+    responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+    layout: { padding: { top: 22 } },
+    plugins: { legend: { labels: { color: '#c8d8e8', boxWidth: 12, font: { size: 11 } } } },
+  });
+
+  function drawChart() {
+    if (glChart) { glChart.destroy(); glChart = null; }
+    const g = glData; if (!g) return;
+    const cap = document.getElementById('glLabCaption');
+    let cfg, text, ages = null, years = null;
+
+    if (glMode === 'value' || glMode === 'alloc') {
+      const isVal = glMode === 'value';
+      ages = isVal ? g.value.ages : g.alloc.ages;
+      years = isVal ? g.value.labels : g.alloc.years;
+      const datasets = isVal
+        ? [{ label: 'Flat (no de-risk)', data: g.value.flat, borderColor: COL.flat, borderWidth: 2, pointRadius: 0, tension: .2 },
+           { label: 'Glide (de-risk)', data: g.value.glide, borderColor: COL.glide, borderWidth: 2, pointRadius: 0, tension: .2 }]
+        : [{ label: 'Flat % safe', data: g.alloc.flat_safe, borderColor: COL.flat, borderWidth: 2, pointRadius: 0, stepped: true },
+           { label: 'Glide % safe', data: g.alloc.glide_safe, borderColor: COL.glide, borderWidth: 2, pointRadius: 0, tension: .1 }];
+      const o = baseOpts();
+      o.plugins.tooltip = { callbacks: {
+        title: i => { const k = i[0].dataIndex; return years[k] + ' · age ' + ages[k]; },
+        label: c => c.dataset.label + ': ' + (isVal ? dollars(c.parsed.y) : c.parsed.y + '% safe') } };
+      o.scales = {
+        x: { grid: { display: false }, ticks: { color: '#5a7a96', maxTicksLimit: 12,
+             callback: function (v, i) { const a = this.chart.data.labels[i], y = this.chart.$years; return y ? [y[i] + '', 'age ' + a] : 'age ' + a; } } },
+        y: isVal ? { min: 0, grid, ticks: { color: '#5a7a96', callback: v => '$' + Math.round(v / 1000) + 'k' } }
+                 : { min: 0, max: 100, grid, ticks: { color: '#5a7a96', callback: v => v + '%' } },
+      };
+      cfg = { type: 'line', data: { labels: ages, datasets }, options: o, plugins: [glideMarkers] };
+      text = isVal ? 'Balance over time — the gap after the crash is what de-risking preserved (or cost).'
+                   : '% held in safe assets. The flat plan steps down at withdrawal; the glide ramps across its window.';
+
+    } else if (glMode === 'breakeven') {
+      const be = g.breakeven;
+      const o = baseOpts(); o.plugins.legend = { display: false };
+      o.plugins.tooltip = { callbacks: { title: i => i[0].label + '% chance of a severe crash', label: c => 'Glide − Flat: ' + dollars(c.parsed.y) } };
+      o.scales = {
+        x: { title: axisTitle('Chance of a severe crash (%)'), grid, ticks: { color: '#5a7a96', callback: function (v, i) { return this.chart.data.labels[i] + '%'; } } },
+        y: { title: axisTitle('$ glide − flat'), grid, ticks: { color: '#5a7a96', callback: v => dollars(v) } },
+      };
+      cfg = { type: 'line', data: { labels: be.p, datasets: [
+        { label: 'Glide − Flat', data: be.ev, borderColor: COL.win, borderWidth: 2, pointRadius: 0, tension: .1,
+          segment: { borderColor: c => c.p1.parsed.y >= 0 ? COL.win : COL.loss } }] }, options: o };
+      text = be.point == null ? 'Gliding loses at every probability for this shock — it never breaks even.'
+                              : 'Above ≈' + be.point + '% chance of this shock happening, gliding comes out ahead (where the line crosses $0).';
+
+    } else { // dial
+      const d = g.dial, cur = g.glide_target;
+      const near = d.reduce((a, b) => Math.abs(b.target - cur) < Math.abs(a.target - cur) ? b : a).target;
+      const bord = d.map(x => x.target === near ? '#c8d8e8' : 'rgba(0,0,0,0)');
+      const bw = d.map(x => x.target === near ? 2 : 0);
+      const o = baseOpts();
+      o.plugins.tooltip = { callbacks: { title: i => i[0].label + '% safe target', label: c => c.dataset.label + ': ' + dollars(c.parsed.y) } };
+      o.scales = {
+        x: { title: axisTitle('Glide target (% safe)'), grid: { display: false }, ticks: { color: '#5a7a96', callback: function (v, i) { return this.chart.data.labels[i] + '%'; } } },
+        y: { title: axisTitle('$ vs flat'), grid, ticks: { color: '#5a7a96', callback: v => dollars(v) } },
+      };
+      cfg = { type: 'bar', data: { labels: d.map(x => x.target), datasets: [
+        { label: 'Certain calm cost', data: d.map(x => x.cost), backgroundColor: 'rgba(255,107,107,.6)', borderColor: bord, borderWidth: bw },
+        { label: 'Crash payoff', data: d.map(x => x.payoff), backgroundColor: 'rgba(0,230,118,.55)', borderColor: bord, borderWidth: bw }] }, options: o };
+      text = 'How hard you de-risk (your current target is outlined): red = income given up for certain, green = what the chosen shock pays back.';
+    }
+
+    glChart = new Chart(canvas.getContext('2d'), cfg);
+    glChart.$markers = (glMode === 'value' || glMode === 'alloc') ? g.markers : null;
+    glChart.$ages = ages; glChart.$years = years;
+    glChart.update();
+    cap.textContent = text;
+  }
+
+  document.querySelectorAll('.gl-viewbtn').forEach(b => b.addEventListener('click', function () {
+    glMode = this.dataset.glview;
+    document.querySelectorAll('.gl-viewbtn').forEach(x => x.classList.toggle('active', x === this));
+    drawChart();
+  }));
+
+  refreshGlideLab();
 })();
 </script>
 {% endif %}

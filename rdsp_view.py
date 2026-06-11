@@ -21,6 +21,60 @@ HORIZON_AGE = 83                            # project growth out to this age
 # so this is a hand-calibrated, editable table (Settings → RDSP equity exposure).
 EQUITY_SAFE_DEFAULTS = {'Safe': 100, 'Low': 45, 'Target': 10, 'Growth': 5, 'Aggressive': 0, 'Current': 0}
 
+# Glide Lab defaults (allocation-based comparison): stock/safe asset returns and the
+# flat plan's fixed retirement safe %.
+GL_STOCK_DEFAULT = 7.0
+GL_SAFE_DEFAULT = 4.0
+GL_FLATMIX_DEFAULT = 40.0
+
+
+# ── Glide Lab (allocation-based flat-vs-glide de-risk analyzer) ───────────────────
+# Pure helpers (no DB/closures) so the comparison math is unit-testable. Both plans
+# share the same stock & safe returns and differ ONLY in their allocation (safe %)
+# over time: return(y) = safe%(y)·safe_rate + (1 − safe%(y))·equity(y).
+def _gl_shock_equity(y, start, shape, severity, decade_len):
+    """Equity-sleeve return in year `y` under a shock (None = a normal year)."""
+    if shape == 'crash':
+        if y == start:     return -severity / 100.0
+        if y == start + 1: return -severity / 200.0          # partial bounce
+    elif shape == 'decade':
+        if start <= y < start + decade_len:
+            return rdsp.LOST_DECADE_RETURN
+    return None
+
+
+def _gl_return_map(years, safe_at, stock_rate, safe_rate, shape='none', start=0,
+                   severity=0.0, decade_len=10):
+    """Per-year return map for an allocation path: each year the safe % earns
+    `safe_rate` and the rest earns `stock_rate` (or the shocked equity in a shock)."""
+    out = {}
+    for y in years:
+        eq = _gl_shock_equity(y, start, shape, severity, decade_len)
+        out[y] = rdsp.blended_return(safe_at(y), stock_rate if eq is None else eq, safe_rate)
+    return out
+
+
+def _gl_glide_safe(begin, end, current, target):
+    """safe%(y) for a glide: `current` before the window, ramping to `target` across it."""
+    steps = {s['year']: s['safe_pct'] for s in rdsp.glide_steps(begin, end, current, target)}
+    return lambda y: current if y <= begin else (target if y >= end else steps.get(y, current))
+
+
+def _gl_flat_safe(wd_start_year, flat_safe):
+    """safe%(y) for the flat plan: 100% stocks until withdrawal, then a fixed mix."""
+    return lambda y: 0.0 if y < wd_start_year else flat_safe
+
+
+def glide_lab_breakeven(calm_diff, crash_diff):
+    """Crash probability in [0,1] where E[glide − flat] income = 0, given the certain
+    calm difference and the (avg) crash difference. None if gliding never breaks even
+    in that range. E(p) = (1−p)·calm_diff + p·crash_diff."""
+    denom = calm_diff - crash_diff
+    if denom == 0:
+        return None
+    p = calm_diff / denom
+    return p if 0.0 <= p <= 1.0 else None
+
 
 # ── Settings + accounts ─────────────────────────────────────────────────────────
 def _setting(key, default=''):
@@ -212,7 +266,8 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
                   draw_label='Target', bequest=None, tax_rate=None,
                   draw_style='flat', glide_start_age=None, glide_length=None,
                   glide_target=None, glide_safe_return=None, glide_current=None,
-                  stress_shape='crash', stress_timing=None, stress_severity=None, stress_decade_len=None):
+                  stress_shape='crash', stress_timing=None, stress_severity=None, stress_decade_len=None,
+                  gl_stock=None, gl_safe=None, gl_flatmix=None, include_glide_lab=False):
     """Assemble the full RDSP payload (dollars) for the template/JSON endpoint."""
     names = rdsp_accounts()
     if not names:
@@ -314,6 +369,11 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     # Default the glide's starting safe % to ~0 (any cash on hand is treated as
     # temporary / to-be-invested); override in the control to reflect a real safe sleeve.
     g_current = max(0.0, min(_float(glide_current, 0.0), 100.0))
+
+    # Glide Lab asset assumptions (allocation-based comparison; shared by both plans).
+    gl_stock_rate = _float(gl_stock, GL_STOCK_DEFAULT) / 100.0
+    gl_safe_rate = _float(gl_safe, GL_SAFE_DEFAULT) / 100.0
+    gl_flat_safe = max(0.0, min(_float(gl_flatmix, GL_FLATMIX_DEFAULT), 100.0))
 
     # The glide is its own schedule (not anchored to withdrawal): begin at the
     # start-age (≥ today), run `length` years, but be finished by the cap age.
@@ -616,10 +676,15 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
         """(flat, glide) per-year returns under a `shape` shock starting at `start`."""
         flat, glide = {}, {}
         for y in range(cy + 1, end_year + 1):
+            # Growth sleeve earns the accumulation `rate` until withdrawals begin, then the
+            # `draw_rate` — identical for BOTH arms. So the growth assumption no longer feeds
+            # the glide's retirement returns differently from the flat's; the glide differs
+            # from the flat purely in ALLOCATION (its de-risking safe %), not in equity return.
+            growth = rate if y < wd_start_year else draw_rate
             eq = _shock_equity(y, start, shape)
             if eq is None:                                          # normal year — returns unchanged
-                flat[y] = draw_rate if y >= wd_start_year else rate
-                glide[y] = rdsp.blended_return(_safe_at(y), rate, g_safe_ret)
+                flat[y] = growth
+                glide[y] = rdsp.blended_return(_safe_at(y), growth, g_safe_ret)
             else:                                                   # shock year — equity sleeve takes the hit
                 flat[y] = rdsp.blended_return(flat_safe_pct, eq, g_safe_ret)
                 glide[y] = rdsp.blended_return(_safe_at(y), eq, g_safe_ret)
@@ -761,6 +826,68 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
         'scenarios': scenarios,
     }
 
+    # ── Glide Lab: allocation-based flat-vs-glide comparison (Model C) ──
+    # Computed only on request (heavier than the rest of the tab). Both plans share
+    # gl_stock_rate / gl_safe_rate and differ only in their safe-% allocation path.
+    glide_lab = None
+    if include_glide_lab:
+        gl_years = list(range(cy + 1, end_year + 1))
+        flat_at = _gl_flat_safe(wd_start_year, gl_flat_safe)
+        glide_at = _gl_glide_safe(glide_begin, glide_end, g_current, g_target)
+        has_shock = s_shape != 'none'
+        # The SELECTED shock at the SELECTED timing drives every view/KPI, so shape &
+        # timing both update everything (not an averaged, hard-coded crash).
+        shock = (s_shape, shock_start) if has_shock else ('none', 0)
+
+        def _lab_map(safe_at, shape, start):
+            return _gl_return_map(gl_years, safe_at, gl_stock_rate, gl_safe_rate,
+                                  shape, start, s_depth, s_decade_len)
+
+        fpath = project_rby(_lab_map(flat_at, *shock))['rows']
+        gpath = project_rby(_lab_map(glide_at, *shock))['rows']
+        calm_f, calm_g = _income(_lab_map(flat_at, 'none', 0)), _income(_lab_map(glide_at, 'none', 0))
+        shock_f, shock_g = _income(_lab_map(flat_at, *shock)), _income(_lab_map(glide_at, *shock))
+        calm_diff = calm_g['total'] - calm_f['total']
+        crash_diff = shock_g['total'] - shock_f['total']
+        be = glide_lab_breakeven(calm_diff, crash_diff) if has_shock else None
+
+        # Cost-vs-protection dial: vary the glide's target safe % (cost = calm, payoff = this shock)
+        dial = []
+        for tgt in range(0, 101, 20):
+            gs = _gl_glide_safe(glide_begin, glide_end, g_current, float(tgt))
+            cost = _income(_lab_map(gs, 'none', 0))['total'] - calm_f['total']
+            pay = (_income(_lab_map(gs, *shock))['total'] - shock_f['total']) if has_shock else 0
+            dial.append({'target': tgt, 'cost': D(cost), 'payoff': D(pay)})
+
+        # Crash-year zoom: the one-year hit (crash only — a lost decade has no single dramatic year)
+        crash_year = None
+        if s_shape == 'crash':
+            cy_eq = -s_depth / 100.0
+            crash_year = {'age': shock_start - by,
+                          'flat': round(rdsp.blended_return(flat_at(shock_start), cy_eq, gl_safe_rate) * 100, 1),
+                          'glide': round(rdsp.blended_return(glide_at(shock_start), cy_eq, gl_safe_rate) * 100, 1)}
+
+        glide_lab = {
+            'stock_rate': round(gl_stock_rate * 100, 1), 'safe_rate': round(gl_safe_rate * 100, 1),
+            'flat_safe': round(gl_flat_safe, 1), 'glide_target': round(g_target, 1),
+            'shape': s_shape, 'severity': round(s_depth), 'timing': s_when,
+            'value': {'labels': [r['year'] for r in gpath], 'ages': [r['age'] for r in gpath],
+                      'flat': [D(r['value']) for r in fpath], 'glide': [D(r['value']) for r in gpath]},
+            'alloc': {'ages': [y - by for y in gl_years], 'years': gl_years,
+                      'flat_safe': [flat_at(y) for y in gl_years], 'glide_safe': [glide_at(y) for y in gl_years]},
+            'breakeven': {'p': list(range(0, 101, 5)),
+                          'ev': [round(D((1 - p / 100) * calm_diff + (p / 100) * crash_diff)) for p in range(0, 101, 5)],
+                          'point': round(be * 100) if be is not None else None},
+            'dial': dial,
+            'crash_year': crash_year,
+            'markers': {'withdrawal': wd_start_year - by, 'glide_begin': glide_begin - by,
+                        'glide_end': glide_end - by, 'crash': (shock_start - by) if has_shock else None},
+            # Worst-year after-tax income UNDER THE SHOCK (de-risking's real job is raising it)
+            'floor': {'flat': D(shock_f['worst']), 'glide': D(shock_g['worst'])},
+            'totals': {'calm_flat': D(calm_f['total']), 'calm_glide': D(calm_g['total']),
+                       'crash_flat': D(shock_f['total']), 'crash_glide': D(shock_g['total'])},
+        }
+
     return {
         'ok': True,
         'accounts': names,
@@ -790,6 +917,7 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
         'profile': profile,
         'glide': glide,
         'stress': stress,
+        'glide_lab': glide_lab,
         'chart': {
             'labels': labels, 'ages': ages, 'n_actual': n_actual, 'y_max': y_max,
             'actual': actual_line, 'projected': proj_line,

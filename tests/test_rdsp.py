@@ -16,6 +16,9 @@ from rdsp import (
     CDSB_LIFETIME_MAX, CONTRIBUTION_LIFETIME_CAP, CDSB_FULL,
     apply_stress, LOST_DECADE_RETURN,
 )
+from rdsp_view import (
+    _gl_shock_equity, _gl_return_map, _gl_glide_safe, _gl_flat_safe, glide_lab_breakeven,
+)
 
 D = to_cents  # dollars → cents shorthand
 
@@ -300,6 +303,48 @@ def test_reconcile_excel_matches_caps():
     assert rec['grant_total'] == CDSG_LIFETIME_MAX        # plan maxes the $70k CDSG cap
     assert rec['contrib_total'] <= CONTRIBUTION_LIFETIME_CAP
     assert rec['warnings'] == []
+
+
+# ── Glide Lab helpers (allocation-based comparison) ──────────────────────────────
+def test_gl_shock_equity_crash_and_decade():
+    assert _gl_shock_equity(2050, 2050, 'crash', 50, 10) == -0.50    # full hit
+    assert _gl_shock_equity(2051, 2050, 'crash', 50, 10) == -0.25    # partial bounce
+    assert _gl_shock_equity(2052, 2050, 'crash', 50, 10) is None     # over
+    assert _gl_shock_equity(2050, 2050, 'decade', 0, 7) == LOST_DECADE_RETURN
+    assert _gl_shock_equity(2056, 2050, 'decade', 0, 7) == LOST_DECADE_RETURN
+    assert _gl_shock_equity(2057, 2050, 'decade', 0, 7) is None      # past the decade
+    assert _gl_shock_equity(2050, 2050, 'none', 50, 10) is None      # no shock
+
+
+def test_gl_flat_safe_steps_at_withdrawal():
+    at = _gl_flat_safe(2043, 40.0)
+    assert at(2042) == 0.0       # 100% stocks before withdrawal
+    assert at(2043) == 40.0      # one step to the retirement mix at withdrawal
+    assert at(2060) == 40.0
+
+
+def test_gl_glide_safe_ramps():
+    at = _gl_glide_safe(2050, 2060, 0.0, 80.0)
+    assert at(2049) == 0.0       # before the window
+    assert at(2050) == 0.0       # window start = current
+    assert at(2060) == 80.0      # window end = target
+    assert at(2065) == 80.0      # after = target
+    assert 0.0 < at(2055) < 80.0 # ramps in between
+
+
+def test_gl_return_map_blend():
+    # 50% safe @ 4%, stock @ 8% -> 0.5*4 + 0.5*8 = 6%
+    m = _gl_return_map([2040], lambda y: 50.0, 0.08, 0.04)
+    assert abs(m[2040] - 0.06) < 1e-9
+    # crash year: only the equity sleeve takes the hit -> 0.5*4% + 0.5*(-50%)
+    m2 = _gl_return_map([2040], lambda y: 50.0, 0.08, 0.04, 'crash', 2040, 50, 10)
+    assert abs(m2[2040] - (0.5 * 0.04 + 0.5 * -0.50)) < 1e-9
+
+
+def test_glide_lab_breakeven():
+    assert abs(glide_lab_breakeven(-900, 100) - 0.9) < 1e-9   # cost 900, gain 100 -> 90%
+    assert glide_lab_breakeven(-900, -100) is None            # glide loses even in a crash
+    assert glide_lab_breakeven(50, 200) is None               # glide wins regardless (no break-even)
 
 
 # ── standalone runner (no pytest needed) ─────────────────────────────────────────

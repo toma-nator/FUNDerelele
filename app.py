@@ -1115,7 +1115,8 @@ def _rdsp_args():
                 glide_length=a.get('g_len'), glide_target=a.get('g_target'),
                 glide_safe_return=a.get('g_safe'), glide_current=a.get('g_current'),
                 stress_shape=a.get('s_shape', 'crash'), stress_timing=a.get('s_when'),
-                stress_severity=a.get('s_depth'), stress_decade_len=a.get('s_dlen'))
+                stress_severity=a.get('s_depth'), stress_decade_len=a.get('s_dlen'),
+                gl_stock=a.get('gl_stock'), gl_safe=a.get('gl_safe'), gl_flatmix=a.get('gl_flatmix'))
 
 
 @app.route('/rdsp')
@@ -1128,6 +1129,15 @@ def rdsp_tab():
 def rdsp_data():
     from rdsp_view import get_rdsp_view
     return jsonify(get_rdsp_view(**_rdsp_args()))
+
+
+@app.route('/rdsp/glide-lab')
+def rdsp_glide_lab():
+    # Lazy: the allocation-based Glide Lab is heavier than the rest of the tab, so the
+    # section fetches it on demand (keeps the main page load light).
+    from rdsp_view import get_rdsp_view
+    view = get_rdsp_view(**_rdsp_args(), include_glide_lab=True)
+    return jsonify(view.get('glide_lab') or {})
 
 
 @app.route('/rdsp/save', methods=['POST'])
