@@ -208,6 +208,36 @@ def blended_return(safe_pct: float, growth_return: float, safe_return: float) ->
     return safe_return * s + growth_return * (1.0 - s)
 
 
+LOST_DECADE_YEARS  = 10       # a prolonged-stagnation stress spans this many years
+LOST_DECADE_RETURN = 0.005    # near-zero nominal return during the "lost decade"
+
+
+def apply_stress(base_by_year: dict, shape: str, start_year: int, severity: float) -> dict:
+    """A copy of `base_by_year` (year → return) with a market stress applied from
+    `start_year` — used by the sequence-of-returns stress test.
+
+    shape 'crash' : `start_year` returns -severity, the next year -severity/2 (a
+                    sharp drop + partial bounce), then the base path resumes.
+    shape 'decade': `start_year` .. +9 are flattened to LOST_DECADE_RETURN
+                    (a Japan-style lost decade), then the base path resumes.
+    Only years already in `base_by_year` are touched (so it's horizon-clamped).
+    """
+    out = dict(base_by_year)
+    if shape == 'decade':
+        for i in range(LOST_DECADE_YEARS):
+            y = start_year + i
+            if y in out:
+                out[y] = LOST_DECADE_RETURN
+    elif shape == 'crash':
+        s = abs(severity)
+        if start_year in out:
+            out[start_year] = -s
+        if start_year + 1 in out:
+            out[start_year + 1] = -s / 2
+    # any other shape (e.g. 'none') → no shock, unchanged copy
+    return out
+
+
 # ── Drivers ─────────────────────────────────────────────────────────────────────
 def project(start_year: int, start_value_cents: int, birth_year: int, *,
             plan: dict, family_income_cents: int | None = None,

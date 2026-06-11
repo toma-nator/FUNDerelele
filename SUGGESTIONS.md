@@ -22,12 +22,12 @@ Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈94 ideas)
+## Backlog at a glance (≈98 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
 | Charts | ~41 | ~26 finance-useful + ~15 fun/easter-egg (3 % charts now shipped) |
-| Per-tab feature enhancements | ~23 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX, RDSP |
+| Per-tab feature enhancements | ~27 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX, RDSP |
 | New tabs (big features) | 9 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt |
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
 | UI/UX polish | 6 | Restore-alerts, sidebar hide/reorder tabs, sparkline, chart descriptions/hide/star, daily-swing widget, trend indicator |
@@ -598,24 +598,80 @@ deliberate simplification and is fine for now. Two refinements parked:
 
 **Priority:** Impact: Low–Med · Effort: small (rate selector) / medium (true withholding)
 
-## RDSP — reconsider the "Tax" chart view
+## RDSP — stress test: multiple / double-dip crashes (parked)
 
-The RDSP projection chart has three cycleable views (Value / Composition / Tax).
-The **Tax** view splits the drawdown balance into tax-free (your contributions,
-green) vs taxable (grants + bonds + all growth, orange). It's **correct** per
-RC4460 — but in practice it reads almost entirely taxable (contributions are only
-~8% of the balance at withdrawal), so it may not earn its place as its own view.
+The stress test offers two shock archetypes — **sharp crash** (V-shaped, recovers) and
+**lost decade** (prolonged stagnation, now length-adjustable) — which bracket sequence
+risk. Parked: **multiple crashes** or a **crash-recover-crash double-dip**. They're
+really just a deeper/longer drawdown, which the severity + timing controls already
+approximate, so they'd add panel clutter for marginal insight. Revisit only if a
+specific "two hits in a decade" scenario is wanted.
 
-- **Parked decision:** consider **dropping the Tax chart view** (keep Value +
-  Composition) if it stays low-value — the per-year tax detail already lives in the
-  withdrawal schedule table and the Total tax / After-tax kept stat cards. **Keep it
-  for now**; revisit after living with the tab.
-- **If kept:** the math is right (only personal contributions are tax-free); no
-  code change needed beyond what's shipped.
-- **Effort:** tiny — removing it is deleting one view button + the `tax` branch in
-  `datasets()`; the `chart.tax` payload could stay or go.
+**Priority:** Impact: Low · Effort: small
 
-**Priority:** Impact: Low · Effort: tiny
+## RDSP — stress test chart lines (shipped: matched flat/glide overlay pair)
+
+The Value chart now draws a **matched pair** of balance paths under the selected
+shock — **Glide** (purple dashed) and **Flat** (red dashed) — so the gap between
+them shows what de-risking preserves. The crash pair swaps out for the lost-decade
+pair when a stagnation is selected, and both react live to the severity /
+stagnation-length controls. Drops out entirely on "No shock". Built on
+`chart.stress_glide` + `_stress_line` in `rdsp_view`, drawn in the chart
+`datasets()`.
+
+Parked refinements:
+- Only draw the glide line **when the gap to flat is large** — in a mild crash the
+  glide barely dips and the two lines nearly overlap.
+- A dedicated **lost-decade visual** — a 10-yr stagnation is a gradual divergence,
+  not a dramatic dip, so the flattened line can read as noise vs the crash V.
+
+**Priority:** Impact: Low · Effort: tiny _(shipped; refinements parked)_
+
+## RDSP — stress test "years below needed income" metric (parked)
+
+The sequence-of-returns stress test compares flat vs glide on after-tax income,
+worst-year income, biggest 1-yr income drop, and ending value. A useful addition,
+parked: a **"years below $X needed income"** row — given a user-entered *minimum
+income I need in retirement*, count how many drawdown years each plan falls short
+under the shock. Powerful (it frames the glide's steadier floor as "fewer lean
+years") but needs one new input (a needed-income control). Build when the stress
+test gets more attention.
+
+**Priority:** Impact: Low–Med · Effort: small _(one input + a count per scenario)_
+
+## RDSP — "Return %" chart view (parked)
+
+A 4th cycleable view on the RDSP projection chart (next to Value / Composition /
+Income / Tax): a single line of the **per-year expected return %** over the
+horizon. In flat-drawdown mode it's a flat line; in **glide** mode it visibly
+slopes down through the de-risking window (growth rate → full-safe ~4%), making
+the glide's effect on returns tangible at a glance.
+
+- **Data:** trivial — the engine already knows each year's rate (`return_by_year`
+  in glide mode, the flat `return_rate`/`draw_rate` otherwise). Add a
+  `chart.return_pct` array and a builder branch; uses the existing **percent**
+  formatting path (a separate y-axis in %, not the CAD balance scale).
+- **Why parked:** nice-to-have visualization of an assumption, less practically
+  useful than the Income view (which shipped). Build after the early-crash stress
+  test if wanted.
+
+**Priority:** Impact: Low · Effort: small
+
+## RDSP — remove the "Tax" chart view (decided: drop it)
+
+The projection chart's **Tax** view splits the drawdown balance into tax-free
+(contributions, green) vs taxable (grants + bonds + growth, orange). It's correct
+per RC4460 but reads almost entirely taxable (contributions are ~8% of the balance
+at withdrawal), so it's low-signal. With the **Income** view now shipped (and more
+useful), the user decided to **drop the Tax view**.
+
+- **Action:** remove the Tax toggle button + the `tax` branch in `datasets()`; the
+  per-year tax detail already lives in the withdrawal schedule table and the Total
+  tax / After-tax kept stat cards. The `chart.tax` payload can go too (or stay
+  harmlessly). Leaves Value / Composition / Income.
+- **Effort:** tiny — a few deletions, no logic change.
+
+**Priority:** Impact: Low · Effort: tiny _(user decided to remove)_
 
 ## Pre-public hardening — parked items
 

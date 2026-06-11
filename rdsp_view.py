@@ -11,16 +11,35 @@ import rdsp
 
 # Return presets (labels → annual rate). "Current" is computed from the account's
 # realized money-weighted return, so it isn't in this fixed table.
-RETURN_PRESETS = {'GIC': 0.04, 'Low': 0.05, 'Target': 0.07, 'Growth': 0.09, 'Aggressive': 0.11}
+RETURN_PRESETS = {'Safe': 0.04, 'Low': 0.05, 'Target': 0.07, 'Growth': 0.09, 'Aggressive': 0.11}
 DEFAULT_PRESET = 'Target'
-BAND_LOW, BAND_HIGH = 'GIC', 'Aggressive'   # the shaded range cone
+BAND_LOW, BAND_HIGH = 'Safe', 'Aggressive'  # the shaded range cone
 HORIZON_AGE = 83                            # project growth out to this age
+
+# Stress test — the safe % each FLAT (no-glide) drawdown preset implies for crash
+# exposure (equity = 100 − this). Return level is only a rough proxy for crash risk,
+# so this is a hand-calibrated, editable table (Settings → RDSP equity exposure).
+EQUITY_SAFE_DEFAULTS = {'Safe': 100, 'Low': 45, 'Target': 10, 'Growth': 5, 'Aggressive': 0, 'Current': 0}
 
 
 # ── Settings + accounts ─────────────────────────────────────────────────────────
 def _setting(key, default=''):
     s = Setting.query.get(key)
     return s.value if (s and s.value not in (None, '')) else default
+
+
+def equity_safe_map():
+    """{drawdown preset → implied safe %} for the stress test's flat plan. User-editable
+    via Settings (`rdsp_equity_map` JSON), falling back to the calibrated defaults."""
+    import json
+    raw = _setting('rdsp_equity_map')
+    if raw:
+        try:
+            user = {k: max(0.0, min(float(v), 100.0)) for k, v in json.loads(raw).items()}
+            return {**EQUITY_SAFE_DEFAULTS, **user}
+        except (ValueError, TypeError):
+            pass
+    return dict(EQUITY_SAFE_DEFAULTS)
 
 
 def rdsp_accounts():
@@ -190,9 +209,10 @@ def current_safe_pct(names):
 
 def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
                   mode='ldap', wd_start=None, wd_lumps=None, wd_target=None, wd_to_age=None,
-                  draw_label='Low', bequest=None, tax_rate=None,
+                  draw_label='Target', bequest=None, tax_rate=None,
                   draw_style='flat', glide_start_age=None, glide_length=None,
-                  glide_target=None, glide_safe_return=None, glide_current=None):
+                  glide_target=None, glide_safe_return=None, glide_current=None,
+                  stress_shape='crash', stress_timing=None, stress_severity=None, stress_decade_len=None):
     """Assemble the full RDSP payload (dollars) for the template/JSON endpoint."""
     names = rdsp_accounts()
     if not names:
@@ -232,7 +252,7 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     # ── Decumulation config ──
     if mode not in WITHDRAWAL_MODES:
         mode = 'ldap'
-    draw_rate = RETURN_PRESETS.get(draw_label, RETURN_PRESETS['Low'])
+    draw_rate = RETURN_PRESETS.get(draw_label, RETURN_PRESETS['Target'])
 
     # Is the plan ever non-PGAP? (personal contributions overtake government money).
     # "deplete by age N" is only legal/offered then.
@@ -291,7 +311,9 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     g_length = max(1, _int(glide_length, GLIDE_DEFAULT_LEN))
     g_target = max(0.0, min(_float(glide_target, GLIDE_TARGET_DEFAULT), 100.0))
     g_safe_ret = _float(glide_safe_return, FULL_SAFE_RETURN * 100) / 100
-    g_current = max(0.0, min(_float(glide_current, current_safe_pct(names)), 100.0))
+    # Default the glide's starting safe % to ~0 (any cash on hand is treated as
+    # temporary / to-be-invested); override in the control to reflect a real safe sleeve.
+    g_current = max(0.0, min(_float(glide_current, 0.0), 100.0))
 
     # The glide is its own schedule (not anchored to withdrawal): begin at the
     # start-age (≥ today), run `length` years, but be finished by the cap age.
@@ -300,17 +322,19 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     glide_step_rows = rdsp.glide_steps(glide_begin, glide_end, g_current, g_target)
     glide_safe_at = {s['year']: s['safe_pct'] for s in glide_step_rows}
 
-    def glide_rby(growth_rate):
-        """Per-year return for a growth assumption while gliding (None in flat mode):
-        current allocation before the window, target after, ramp between — blended
-        with the full-safe return."""
-        if draw_style != 'glide':
-            return None
+    def glide_map(growth_rate):
+        """Full per-year return for a glide at `growth_rate`: current allocation
+        before the window, target after, ramp between — blended with the full-safe
+        return. Built regardless of selected style (the stress test compares both)."""
         out = {}
         for y in range(cy + 1, end_year + 1):
             s = g_current if y <= glide_begin else (g_target if y >= glide_end else glide_safe_at.get(y, g_current))
             out[y] = rdsp.blended_return(s, growth_rate, g_safe_ret)
         return out
+
+    def glide_rby(growth_rate):
+        """The glide map only when glide is the selected style (None → flat)."""
+        return glide_map(growth_rate) if draw_style == 'glide' else None
 
     def run(r):
         # P1 uses the plan's grant/bond values (Excel-seeded, reconciled to the caps);
@@ -323,6 +347,14 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
                             end_year=end_year, withdrawal=withdrawal,
                             start_contrib_cents=actual_contrib, start_grant_cents=actual_grant,
                             start_bond_cents=actual_bond, return_by_year=glide_rby(r))
+
+    def project_rby(rby):
+        """Run the current plan with an explicit per-year return map (the stress test)."""
+        return rdsp.project(cy + 1, current_value, by, plan=plan, family_income_cents=None,
+                            return_rate=rate, last_contribution_year=last_contribution_year,
+                            end_year=end_year, withdrawal=withdrawal,
+                            start_contrib_cents=actual_contrib, start_grant_cents=actual_grant,
+                            start_bond_cents=actual_bond, return_by_year=rby)
 
     proj = run(rate)
     band_lo = run(RETURN_PRESETS[BAND_LOW])
@@ -518,6 +550,11 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     tax_able = [D(max(0, t['value'] - proj_tfb.get(t['year'], 0))) if t['year'] >= wd_start_year else None
                 for t in timeline]
 
+    # Income view: each drawdown year's withdrawal split into after-tax kept + tax.
+    sched_by_year = {s['year']: s for s in schedule}
+    income_net = [sched_by_year[t['year']]['net'] if t['year'] in sched_by_year else None for t in timeline]
+    income_tax = [sched_by_year[t['year']]['tax_owed'] if t['year'] in sched_by_year else None for t in timeline]
+
     table = [{'year': r.year, 'contribution': r.contribution or 0,
               'grant': r.grant, 'bond': r.bond} for r in rows]
 
@@ -550,6 +587,180 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
         'rows': glide_rows,
     }
 
+    # ── Sequence-of-returns stress test ──
+    # Same plan under a badly-timed downturn, comparing the flat drawdown vs the glide.
+    # The shock hits the EQUITY sleeve only, so each plan's equity exposure decides the
+    # blow: the glide's is 1 − safe%(year); the flat's is 1 − the safe % its drawdown
+    # preset implies (the editable equity table). In a shock year the equity return is
+    # −crash (or ~0 in a lost decade) and the safe sleeve keeps earning the safe rate.
+    s_shape = stress_shape if stress_shape in ('none', 'crash', 'decade') else 'crash'
+    s_depth = max(5.0, min(_float(stress_severity, 35.0), 90.0))
+    s_decade_len = int(max(3, min(_float(stress_decade_len, 7), 15)))
+    STRESS_TIMING_OFFSET = {'early': 0, 'mid': 8, 'late': 16}
+
+    def _safe_at(y):
+        return g_current if y <= glide_begin else (g_target if y >= glide_end else glide_safe_at.get(y, g_current))
+
+    # Flat plan's safe % ← the editable equity table (keyed by the drawdown preset).
+    flat_safe_pct = equity_safe_map().get(draw_label, 0.0)
+
+    def _shock_equity(y, start, shape):
+        if shape == 'crash':
+            if y == start:     return -s_depth / 100
+            if y == start + 1: return -s_depth / 200                # partial bounce
+        elif shape == 'decade':
+            if start <= y < start + s_decade_len: return rdsp.LOST_DECADE_RETURN
+        return None
+
+    def _paths(start, shape):
+        """(flat, glide) per-year returns under a `shape` shock starting at `start`."""
+        flat, glide = {}, {}
+        for y in range(cy + 1, end_year + 1):
+            eq = _shock_equity(y, start, shape)
+            if eq is None:                                          # normal year — returns unchanged
+                flat[y] = draw_rate if y >= wd_start_year else rate
+                glide[y] = rdsp.blended_return(_safe_at(y), rate, g_safe_ret)
+            else:                                                   # shock year — equity sleeve takes the hit
+                flat[y] = rdsp.blended_return(flat_safe_pct, eq, g_safe_ret)
+                glide[y] = rdsp.blended_return(_safe_at(y), eq, g_safe_ret)
+        return flat, glide
+
+    def _avg_income(rby):
+        """Average after-tax yearly income across the drawdown for a return path."""
+        pr = project_rby(rby)
+        rows = pr['rows']
+        n = sum(1 for r in rows if r['phase'] == 'decumulation' and r['withdrawal'] > 0)
+        net = sum(r['withdrawal'] for r in rows) - int(round(pr['summary']['taxable_total'] * tax_pct))
+        return (net / n) if n else 0.0
+
+    # No-shock baseline — the pure income cost of de-risking, crash aside.
+    flat_calm, glide_calm = _paths(0, 'none')
+    flat_calm_inc, glide_calm_inc = _avg_income(flat_calm), _avg_income(glide_calm)
+
+    # Auto BEST-case timing: default to whichever crash timing the glide benefits from
+    # most (its largest after-tax income edge over the flat plan) — i.e. when de-risking
+    # pays off best. Honour an explicit pick from the dropdown.
+    timings = ['early', 'mid', 'late']
+    if stress_timing in timings:
+        s_when, auto_timing = stress_timing, False
+    elif s_shape == 'none':
+        s_when, auto_timing = 'early', False
+    else:
+        def _glide_edge(t):
+            fp, gp = _paths(wd_start_year + STRESS_TIMING_OFFSET[t], s_shape)
+            return _avg_income(gp) - _avg_income(fp)
+        s_when, auto_timing = max(timings, key=_glide_edge), True
+
+    shock_start = wd_start_year + STRESS_TIMING_OFFSET[s_when]
+    flat_stress, glide_stress = _paths(shock_start, s_shape)
+
+    # Chart overlay: a matched pair of balance paths under the selected shock — the
+    # FLAT (un-de-risked) plan and the GLIDE (de-risked) plan — so the gap between
+    # them shows what de-risking preserves. The crash pair swaps out for the
+    # lost-decade pair when a stagnation is selected.
+    def _stress_line(rby):
+        vals = {pr['year']: pr['value'] for pr in project_rby(rby)['rows']}
+        out = []
+        for i, t in enumerate(timeline):
+            if i < n_actual - 1:
+                out.append(None)
+            elif i == n_actual - 1:
+                out.append(D(t['value']))                          # join at the last actual point
+            else:
+                out.append(D(vals.get(t['year'], 0)))
+        return out
+
+    if s_shape == 'none':
+        stress_flat_line, stress_glide_line, stress_chart_label = None, None, ''
+    else:
+        stress_flat_line = _stress_line(flat_stress)
+        stress_glide_line = _stress_line(glide_stress)
+        stress_chart_label = f"{round(s_depth)}% crash" if s_shape == 'crash' else f"{s_decade_len}-yr stagnation"
+
+    def _income(rby):
+        pr = project_rby(rby)
+        rows = pr['rows']
+        decum = [r for r in rows if r['phase'] == 'decumulation' and r['withdrawal'] > 0]
+        n = len(decum)
+        incomes = [r['withdrawal'] - int(round(r['taxable'] * tax_pct)) for r in decum]   # per-year after-tax
+        net = sum(r['withdrawal'] for r in rows) - int(round(pr['summary']['taxable_total'] * tax_pct))
+        drops = [incomes[i - 1] - incomes[i] for i in range(1, len(incomes))]
+        return {'avg_monthly': (net // n // 12) if n else 0, 'avg_yearly': (net // n) if n else 0,
+                'total': net, 'ending': pr['summary']['final_value'],
+                'worst': min(incomes) if incomes else 0,
+                'drop': max([d for d in drops if d > 0] or [0])}   # biggest 1-yr income fall
+
+    F, G = _income(flat_stress), _income(glide_stress)
+
+    def _pct(f, g):
+        return round((g - f) / f * 100, 1) if f else 0.0
+
+    def _c0(c):
+        return f"${rdsp.to_dollars(c):,.0f}"
+
+    def _ck(c):
+        d = rdsp.to_dollars(c)
+        return f"${d / 1000:,.0f}k" if abs(d) >= 1000 else _c0(c)
+
+    def _metric(label, key, higher_better=True, cell=None):
+        f, g = F[key], G[key]
+        better = (g >= f) if higher_better else (g <= f)
+        return {'label': label, 'flat': cell(F) if cell else _c0(f),
+                'glide': cell(G) if cell else _c0(g), 'diff_pct': _pct(f, g),
+                'cls': 'text-green' if better else 'text-red'}
+
+    def _income_cell(d):
+        return f"{_c0(d['avg_monthly'])}/mo · {_c0(d['avg_yearly'])}/yr · {_ck(d['total'])} total"
+
+    stress_metrics = [
+        _metric('After-tax income', 'avg_yearly', cell=_income_cell),
+        _metric('Worst-year income', 'worst'),
+        _metric('Biggest 1-yr income drop', 'drop', higher_better=False),
+        _metric('Ends with (bequest)', 'ending'),
+    ]
+
+    # ── Break-even: income Δ no-crash / payoff (this shock) / equivalent flat allocation ──
+    # Both signed glide − flat (positive = gliding gives more income), so the two read consistently.
+    nocrash_pct = round((glide_calm_inc - flat_calm_inc) / flat_calm_inc * 100, 1) if flat_calm_inc else 0.0
+    flat_shock_inc, glide_shock_inc = _avg_income(flat_stress), _avg_income(glide_stress)
+    payoff_pct = (round((glide_shock_inc - flat_shock_inc) / flat_shock_inc * 100, 1)
+                  if s_shape != 'none' and flat_shock_inc else None)
+
+    def _flat_s_income(s):                                     # a static flat portfolio at s% safe
+        return _avg_income({y: rdsp.blended_return(s, rate, g_safe_ret) for y in range(cy + 1, end_year + 1)})
+    lo, hi = 0.0, 100.0                                        # bisect for the safe % whose income matches the glide
+    for _ in range(12):
+        mid = (lo + hi) / 2
+        if _flat_s_income(mid) > glide_calm_inc:
+            lo = mid
+        else:
+            hi = mid
+    breakeven_safe = round((lo + hi) / 2)
+
+    # ── Scenario summary: glide vs flat after-tax income, every shock × timing ──
+    def _scenario(shape, when):
+        if shape == 'none':
+            fi, gi = flat_calm_inc, glide_calm_inc
+        else:
+            fp, gp = _paths(wd_start_year + STRESS_TIMING_OFFSET[when], shape)
+            fi, gi = _avg_income(fp), _avg_income(gp)
+        diff = round((gi - fi) / fi * 100, 1) if fi else 0.0
+        return {'diff_pct': diff, 'cls': 'text-green' if diff >= 0 else 'text-red'}
+    scenarios = [{'label': 'No shock', **_scenario('none', None)}]
+    for shape, name in [('crash', 'Sharp crash'), ('decade', 'Lost decade')]:
+        scenarios += [{'label': f'{name} — {w}', **_scenario(shape, w)} for w in timings]
+
+    stress = {
+        'shape': s_shape, 'timing': s_when, 'severity': round(s_depth), 'auto_timing': auto_timing,
+        'shock_start_year': shock_start, 'shock_start_age': shock_start - by,
+        'decade_years': s_decade_len,
+        'flat_rate': round(draw_rate * 100, 1), 'flat_label': draw_label, 'flat_safe': round(flat_safe_pct, 1),
+        'glide_desc': f"age {glide_begin - by}→{glide_end - by}, {round(g_target)}% safe",
+        'metrics': stress_metrics,
+        'nocrash_pct': nocrash_pct, 'payoff_pct': payoff_pct, 'breakeven_safe': breakeven_safe,
+        'scenarios': scenarios,
+    }
+
     return {
         'ok': True,
         'accounts': names,
@@ -578,6 +789,7 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
         'comparison': comparison,
         'profile': profile,
         'glide': glide,
+        'stress': stress,
         'chart': {
             'labels': labels, 'ages': ages, 'n_actual': n_actual, 'y_max': y_max,
             'actual': actual_line, 'projected': proj_line,
@@ -588,6 +800,8 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
                 'growth': [D(t['cum_growth']) for t in timeline],
             },
             'tax': {'pre': tax_pre, 'free': tax_free, 'taxable': tax_able},
+            'income': {'net': income_net, 'tax': income_tax},
+            'stress_flat': stress_flat_line, 'stress_glide': stress_glide_line, 'stress_label': stress_chart_label,
             'milestones': milestones,
             'glide': {'begin': glide_begin, 'end': glide_end} if draw_style == 'glide' else None,
             'last_actual_year': cy,

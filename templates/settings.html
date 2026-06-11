@@ -102,6 +102,24 @@
       </div>
     </div>
 
+    <!-- RDSP stress test — equity exposure per drawdown preset -->
+    <div style="border-top:1px solid var(--border-sub);padding:16px 20px">
+      <label style="display:block;margin-bottom:4px">RDSP stress test — equity exposure</label>
+      <p style="font-size:.72rem;color:var(--text-muted);margin-bottom:10px">
+        The RDSP stress test hits the <em>equity</em> sleeve in a crash. For the flat (no-glide) plan, this
+        sets how much of each drawdown-return preset counts as <strong>safe</strong> (the rest is equity the
+        crash hits). It's an estimate — a higher return usually means more equity, so less safe. Tune to taste.
+      </p>
+      <div class="form-row" style="padding:0;flex-wrap:wrap;gap:10px">
+        {% for preset in ['Safe','Low','Target','Growth','Aggressive','Current'] %}
+        <div class="form-group" style="min-width:96px">
+          <label>{{ preset }} safe %</label>
+          <input class="form-input mono" name="eq_{{ preset }}" type="number" step="5" min="0" max="100" value="{{ rdsp_equity_map[preset] }}">
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
     <div style="padding:16px 20px">
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>

@@ -1278,6 +1278,8 @@ tr[data-status="closed"] td { opacity: .72; }
 .rdsp-warn { background: rgba(255, 180, 60, .08); border: 1px solid rgba(255, 180, 60, .30); color: #ffce80;
              border-radius: var(--radius); padding: 8px 12px; font-size: .78rem; margin-top: 6px; }
 .rdsp-rejected { margin-right: 8px; font-size: .68rem; color: #ffb43c; white-space: nowrap; cursor: help; }
+.rdsp-breakeven { margin: 0 20px 8px; padding: 8px 12px; font-size: .82rem; color: var(--text);
+             background: rgba(0,200,240,.06); border: 1px solid var(--accent-dim); border-radius: var(--radius); }
 
 /* Clickable dataset legend above the projection chart (keeps the plot area the
    same height in Value / Composition / Tax). */

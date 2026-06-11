@@ -171,6 +171,7 @@
       <span style="display:flex; gap:4px" id="viewBtns">
         <button type="button" class="btn btn-sm rdsp-viewbtn active" data-view="value">Value</button>
         <button type="button" class="btn btn-sm rdsp-viewbtn" data-view="composition">Composition</button>
+        <button type="button" class="btn btn-sm rdsp-viewbtn" data-view="income">Income</button>
         <button type="button" class="btn btn-sm rdsp-viewbtn" data-view="tax">Tax</button>
       </span>
     </span>
@@ -195,7 +196,7 @@
 <!-- Preset comparison -->
 <div class="card" style="margin-top:16px">
   <div class="card-header">Withdrawals by return assumption
-    <span class="card-sub">same plan ({{ modenames[view.withdrawal.mode] }} from {{ view.withdrawal.start }}, drawdown @ {{ view.withdrawal.draw_label }}) at each growth return · averages after tax @ {{ view.withdrawal.tax_rate }}%</span>
+    <span class="card-sub">same plan ({{ modenames[view.withdrawal.mode] }} from {{ view.withdrawal.start }}, {% if view.glide.style == 'glide' %}glide to {{ view.glide.safe_return }}% safe{% else %}drawdown @ {{ view.withdrawal.draw_label }}{% endif %}) at each growth return · averages after tax @ {{ view.withdrawal.tax_rate }}%</span>
   </div>
   <div class="table-scroll rdsp-plan">
   <table class="data-table">
@@ -299,6 +300,89 @@
   </div>
 </div>
 {% endif %}
+
+<!-- Sequence-of-returns stress test -->
+<div class="card" style="margin-top:16px">
+  <div class="card-header toggle-header" onclick="togglePanel('stressPanel','stressArrow')">
+    Sequence-of-returns stress test
+    <span class="card-sub">how a badly-timed downturn hits your plan — flat vs glide</span>
+    <span class="toggle-arrow" id="stressArrow">▼</span>
+  </div>
+  <div id="stressPanel" style="display:none">
+    <div class="rdsp-controls" style="padding:14px 20px 2px; margin:0">
+      <div class="ctl">
+        <label>Shock</label>
+        <select class="form-input" onchange="setP('s_shape', this.value)">
+          <option value="none" {% if view.stress.shape == 'none' %}selected{% endif %}>No shock</option>
+          <option value="crash" {% if view.stress.shape == 'crash' %}selected{% endif %}>Sharp crash</option>
+          <option value="decade" {% if view.stress.shape == 'decade' %}selected{% endif %}>Lost decade</option>
+        </select>
+      </div>
+      {% if view.stress.shape != 'none' %}
+      <div class="ctl">
+        <label>Timing{% if view.stress.auto_timing %} <span style="color:var(--accent)">· best for glide</span>{% endif %}</label>
+        <select class="form-input" onchange="setP('s_when', this.value)">
+          {% for t in ['early','mid','late'] %}<option value="{{ t }}" {% if view.stress.timing == t %}selected{% endif %}>{{ t|capitalize }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      {% if view.stress.shape == 'crash' %}
+      <div class="ctl">
+        <label>Crash depth %</label>
+        <input class="form-input" type="number" step="5" value="{{ view.stress.severity }}" onchange="setP('s_depth', this.value)">
+      </div>
+      {% endif %}
+      {% if view.stress.shape == 'decade' %}
+      <div class="ctl">
+        <label>Stagnation years</label>
+        <input class="form-input" type="number" step="1" value="{{ view.stress.decade_years }}" onchange="setP('s_dlen', this.value)">
+      </div>
+      {% endif %}
+    </div>
+    <div style="padding:2px 20px 10px;font-size:.74rem;color:var(--text-muted)">
+      {% if view.stress.shape == 'none' %}<strong>No downturn</strong> — the baseline cost of de-risking.
+      {% elif view.stress.shape == 'crash' %}A <strong>{{ view.stress.severity }}%</strong> crash starting at <strong>age {{ view.stress.shock_start_age }}</strong> ({{ view.stress.shock_start_year }}).
+      {% else %}A <strong>~{{ view.stress.decade_years }}-year</strong> stagnation starting at <strong>age {{ view.stress.shock_start_age }}</strong> ({{ view.stress.shock_start_year }}).{% endif %}
+      Same plan. <strong>Flat</strong> = no de-risk at your {{ view.stress.flat_label }} {{ view.stress.flat_rate }}% return (~{{ (100 - view.stress.flat_safe)|round|int }}% equity, so the crash hits it that much);
+      <strong>Glide</strong> = de-risk ({{ view.stress.glide_desc }}). Income is after tax.{% if view.stress.auto_timing and view.stress.shape != 'none' %} Timing auto-set to where de-risking helps most — change it above.{% endif %}
+    </div>
+    <div class="rdsp-breakeven">
+      <strong>Gliding</strong>
+      <span class="{{ 'text-green' if view.stress.nocrash_pct >= 0 else 'text-red' }}">{{ '+' if view.stress.nocrash_pct >= 0 else '' }}{{ view.stress.nocrash_pct }}%</span>
+      {% if view.stress.payoff_pct is not none %}income, no {{ 'crash' if view.stress.shape == 'crash' else 'stagnation' }} ·
+      <span class="{{ 'text-green' if view.stress.payoff_pct >= 0 else 'text-red' }}">{{ '+' if view.stress.payoff_pct >= 0 else '' }}{{ view.stress.payoff_pct }}%</span> income, if {{ 'crash' if view.stress.shape == 'crash' else 'stagnation' }}{% else %}income vs staying flat{% endif %}
+      <span class="text-dim">· ≡ staying flat at {{ view.stress.breakeven_safe }}% safe</span>
+    </div>
+    <div class="table-scroll rdsp-plan">
+      <table class="data-table">
+        <thead><tr><th>After the shock</th><th class="r">Flat (no de-risk)</th><th class="r">Glide (de-risk)</th><th class="r">Glide vs Flat</th></tr></thead>
+        <tbody>
+          {% for m in view.stress.metrics %}
+          <tr>
+            <td>{{ m.label }}</td>
+            <td class="r">{{ m.flat }}</td>
+            <td class="r">{{ m.glide }}</td>
+            <td class="r {{ m.cls }}">{{ '+' if m.diff_pct >= 0 else '' }}{{ m.diff_pct }}{% if m.is_pp %} pp{% else %}%{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-header" style="border-top:1px solid var(--border-sub);border-bottom:none">Across every scenario
+      <span class="card-sub">glide's after-tax income vs the flat plan — green = de-risking pays off</span>
+    </div>
+    <div class="table-scroll rdsp-plan">
+      <table class="data-table">
+        <thead><tr><th>Scenario</th><th class="r">Glide income vs flat</th></tr></thead>
+        <tbody>
+          {% for s in view.stress.scenarios %}
+          <tr><td>{{ s.label }}</td><td class="r {{ s.cls }}">{{ '+' if s.diff_pct >= 0 else '' }}{{ s.diff_pct }}%</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 
 <!-- Editable plan -->
 <div class="card rdsp-plan" style="margin-top:16px">
@@ -490,13 +574,29 @@ function togglePanel(id, arrowId) {
 
   function datasets() {
     if (mode === 'value') {
-      return [
+      const ds = [
         { label: '_low', data: C.band_low, borderColor: 'transparent', pointRadius: 0, fill: false },
         { label: 'Range', data: C.band_high, borderColor: 'transparent', pointRadius: 0,
           backgroundColor: 'rgba(0,200,240,.08)', fill: '-1' },
         { label: 'Actual', data: C.actual, borderColor: '#00c8f0', pointRadius: 0, borderWidth: 2, tension: .2, fill: false },
         { label: 'Projected', data: C.projected, borderColor: '#5fd6f5', borderDash: [6, 4],
           pointRadius: 0, borderWidth: 2, tension: .2, fill: false },
+      ];
+      if (C.stress_flat) {
+        const shock = C.stress_label || 'crash';
+        const short = /stag/.test(shock) ? 'stag' : 'crash';
+        ds.push({ label: 'Glide + ' + shock, legendLabel: 'Glide+' + short,
+          data: C.stress_glide, borderColor: '#b98cff', borderDash: [4, 3], pointRadius: 0, borderWidth: 2, tension: .2, fill: false });
+        ds.push({ label: 'Flat + ' + shock, legendLabel: 'Flat+' + short,
+          data: C.stress_flat, borderColor: '#ff6b6b', borderDash: [4, 3], pointRadius: 0, borderWidth: 2, tension: .2, fill: false });
+      }
+      return ds;
+    }
+    if (mode === 'income') {
+      const inc = C.income;   // each drawdown year's withdrawal as stacked bars
+      return [
+        { type: 'bar', label: 'After-tax kept', legendLabel: 'Kept', data: inc.net, backgroundColor: 'rgba(0,230,118,.55)', borderWidth: 0, stack: 'inc' },
+        { type: 'bar', label: 'Tax', data: inc.tax, backgroundColor: 'rgba(255,140,90,.6)', borderWidth: 0, stack: 'inc' },
       ];
     }
     if (mode === 'tax') {
@@ -536,6 +636,7 @@ function togglePanel(id, arrowId) {
         },
         scales: {
           x: {
+            stacked: mode === 'income',       // stack the income bars at each year
             grid: { display: false },
             ticks: {
               color: '#5a7a96', maxRotation: 0, autoSkip: true, autoSkipPadding: 28, maxTicksLimit: 14,
@@ -545,7 +646,9 @@ function togglePanel(id, arrowId) {
           y: {
             stacked: mode !== 'value',
             min: 0,
-            max: C.y_max,                     // hard-pin the top so value/composition/tax share one scale
+            // Value/Composition/Tax share the balance scale; Income is a yearly flow
+            // (much smaller), so it auto-scales to its own data.
+            max: mode === 'income' ? undefined : C.y_max,
             grid: { color: 'rgba(120,160,200,.10)' },
             ticks: { color: '#5a7a96', callback: v => money.format(v) },
           }

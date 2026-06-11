@@ -14,6 +14,7 @@ from rdsp import (
     bond_for_year, holdback_amount, ldap_payment, level_payment_to_age, glide_steps,
     project, reconcile_excel, HIGH_TIER, LOW_TIER, ANNUAL_GRANT_MAX, CDSG_LIFETIME_MAX,
     CDSB_LIFETIME_MAX, CONTRIBUTION_LIFETIME_CAP, CDSB_FULL,
+    apply_stress, LOST_DECADE_RETURN,
 )
 
 D = to_cents  # dollars → cents shorthand
@@ -125,6 +126,37 @@ def test_blended_return_endpoints_and_midpoint():
     assert blended_return(0, 0.09, 0.04) == 0.09          # all growth
     assert blended_return(100, 0.09, 0.04) == 0.04        # fully safe
     assert abs(blended_return(50, 0.10, 0.04) - 0.07) < 1e-9
+
+
+def test_apply_stress_crash():
+    base = {2043: 0.06, 2044: 0.06, 2045: 0.06}
+    s = apply_stress(base, 'crash', 2043, 0.30)
+    assert s[2043] == -0.30 and s[2044] == -0.15 and s[2045] == 0.06   # bounce, then base resumes
+    assert base[2043] == 0.06                                          # original untouched (copy)
+
+
+def test_apply_stress_lost_decade():
+    base = {y: 0.06 for y in range(2043, 2060)}
+    s = apply_stress(base, 'decade', 2045, 0.30)
+    assert all(s[y] == LOST_DECADE_RETURN for y in range(2045, 2055))  # 10 flat years
+    assert s[2043] == 0.06 and s[2055] == 0.06                         # outside the window unchanged
+
+
+def test_apply_stress_horizon_clamped():
+    base = {2043: 0.06}
+    s = apply_stress(base, 'crash', 2043, 0.40)
+    assert s == {2043: -0.40}                                          # +1 year not in base → not added
+
+
+def test_stress_early_crash_depletes_sooner():
+    # Same plan; a crash at the start of drawdown depletes sooner than smooth returns.
+    base = {y: 0.05 for y in range(2043, 2080)}
+    crash = apply_stress(base, 'crash', 2043, 0.40)
+    common = dict(plan={}, return_rate=0.05, last_contribution_year=2033, end_year=2080,
+                  withdrawal={'start_year': 2043, 'mode': 'max', 'rate': 0.05})
+    smooth = project(2043, D(200_000), 1994, return_by_year=base, **common)
+    shocked = project(2043, D(200_000), 1994, return_by_year=crash, **common)
+    assert shocked['summary']['final_value'] < smooth['summary']['final_value']
 
 
 def test_project_return_by_year_overrides_flat_rate():
