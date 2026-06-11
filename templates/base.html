@@ -19,36 +19,28 @@
       <img src="{{ static_v('img/logo.png') }}" alt="Portfolio Tracker" class="brand-logo">
     </div>
 
-    <div class="nav-section">
-      <span class="nav-label">MAIN</span>
-      <a href="{{ url_for('dashboard') }}"    class="nav-item {% if active=='dashboard'    %}active{% endif %}"><span class="nav-icon">⬡</span> Dashboard</a>
-      <a href="{{ url_for('holdings') }}"     class="nav-item {% if active=='holdings'     %}active{% endif %}"><span class="nav-icon">◧</span> Holdings</a>
-      <a href="{{ url_for('transactions') }}" class="nav-item {% if active=='transactions' %}active{% endif %}"><span class="nav-icon">⇄</span> Transactions</a>
-      <a href="{{ url_for('accounts') }}"     class="nav-item {% if active=='accounts'     %}active{% endif %}"><span class="nav-icon">▣</span> Accounts</a>
-    </div>
-
-    <div class="nav-section">
-      <span class="nav-label">ANALYTICS</span>
-      <a href="{{ url_for('performance') }}"  class="nav-item {% if active=='performance'  %}active{% endif %}"><span class="nav-icon">↗</span> Performance</a>
-      <a href="{{ url_for('charts') }}"       class="nav-item {% if active=='charts'       %}active{% endif %}"><span class="nav-icon">◔</span> Charts</a>
-      <a href="{{ url_for('dividends') }}"    class="nav-item {% if active=='dividends'    %}active{% endif %}"><span class="nav-icon">◎</span> Dividends</a>
-      <a href="{{ url_for('cashflows') }}"   class="nav-item {% if active=='cashflows'   %}active{% endif %}"><span class="nav-icon">⬇</span> Cash Flows</a>
-      <a href="{{ url_for('gics') }}"         class="nav-item {% if active=='gics'         %}active{% endif %}"><span class="nav-icon">▤</span> GICs</a>
-      <a href="{{ url_for('rebalancer') }}"   class="nav-item {% if active=='rebalancer'   %}active{% endif %}"><span class="nav-icon">⇌</span> Rebalancer</a>
-      <a href="{{ url_for('watchlist') }}"    class="nav-item {% if active=='watchlist'    %}active{% endif %}"><span class="nav-icon">◉</span> Watchlist</a>
-    </div>
-
-    <div class="nav-section">
-      <span class="nav-label">ADVANCED</span>
-      <a href="{{ url_for('projections') }}"  class="nav-item {% if active=='projections'  %}active{% endif %}"><span class="nav-icon">⤴</span> Projections</a>
-      <a href="{{ url_for('rdsp_tab') }}"     class="nav-item {% if active=='rdsp'         %}active{% endif %}"><span class="nav-icon">◈</span> RDSP</a>
-      <a href="{{ url_for('tax') }}"          class="nav-item {% if active=='tax'          %}active{% endif %}"><span class="nav-icon">⊟</span> Tax &amp; ACB</a>
-    </div>
-
-    <div class="nav-section">
-      <span class="nav-label">TOOLS</span>
-      <a href="{{ url_for('import_page') }}"  class="nav-item {% if active=='import'       %}active{% endif %}"><span class="nav-icon">↑</span> Import{% if unmapped_count %} <span class="nav-badge">{{ unmapped_count }}</span>{% endif %}</a>
-      <a href="{{ url_for('settings') }}"     class="nav-item {% if active=='settings'     %}active{% endif %}"><span class="nav-icon">≡</span> Settings</a>
+    <div class="sidebar-nav" id="sidebarNav">
+      {% for section in nav_sections %}
+      <div class="nav-section" data-section="{{ section.id }}">
+        <span class="nav-label">{{ section.id }}</span>
+        {% for item in section['items'] %}
+        {% set pinned = item.id == 'settings' %}
+        <a href="{{ url_for(item.endpoint) }}" data-tab="{{ item.id }}" draggable="false"
+           class="nav-item {% if active==item.id %}active{% endif %}{% if item.hidden %} nav-hidden{% endif %}{% if pinned %} nav-pinned{% endif %}">
+          <span class="nav-icon">{{ item.icon }}</span>
+          <span class="nav-text">{{ item.label }}</span>
+          {% if item.id == 'import' and unmapped_count %}<span class="nav-badge">{{ unmapped_count }}</span>{% endif %}
+          {% if pinned %}
+          <span class="nav-customize-gear" id="navCustomizeBtn" role="button" tabindex="0"
+                title="Customize sidebar — reorder &amp; hide tabs"
+                onclick="event.preventDefault(); event.stopPropagation(); toggleCustomize();">⚙</span>
+          {% else %}
+          <span class="nav-hide" role="button" title="{{ 'Tab hidden — click to show' if item.hidden else 'Hide this tab' }}">⊘</span>
+          {% endif %}
+        </a>
+        {% endfor %}
+      </div>
+      {% endfor %}
     </div>
   </nav>
 

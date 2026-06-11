@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash
 from datetime import datetime
+import json
 import os
 
 app = Flask(__name__)
@@ -114,6 +115,101 @@ def inject_unmapped_count():
     except Exception:
         n = 0
     return {'unmapped_count': n}
+
+
+# ── Sidebar navigation (data-driven so it can be reordered / hidden per user) ────
+NAV_SECTION_ORDER = ['MAIN', 'ANALYTICS', 'ADVANCED', 'TOOLS']
+
+# The full tab catalog. `id` matches each page's `active` token; `endpoint` is the
+# Flask route. The order/section here is only the default — it's overridden per
+# user by the `sidebar_layout` setting (drag-to-reorder + hide, edited from the
+# sidebar footer's Customize button).
+NAV_TABS = [
+    {'id': 'dashboard',    'section': 'MAIN',      'endpoint': 'dashboard',    'icon': '⬡', 'label': 'Dashboard'},
+    {'id': 'holdings',     'section': 'MAIN',      'endpoint': 'holdings',     'icon': '◧', 'label': 'Holdings'},
+    {'id': 'transactions', 'section': 'MAIN',      'endpoint': 'transactions', 'icon': '⇄', 'label': 'Transactions'},
+    {'id': 'accounts',     'section': 'MAIN',      'endpoint': 'accounts',     'icon': '▣', 'label': 'Accounts'},
+    {'id': 'performance',  'section': 'ANALYTICS', 'endpoint': 'performance',  'icon': '↗', 'label': 'Performance'},
+    {'id': 'charts',       'section': 'ANALYTICS', 'endpoint': 'charts',       'icon': '◔', 'label': 'Charts'},
+    {'id': 'dividends',    'section': 'ANALYTICS', 'endpoint': 'dividends',    'icon': '◎', 'label': 'Dividends'},
+    {'id': 'cashflows',    'section': 'ANALYTICS', 'endpoint': 'cashflows',    'icon': '⬇', 'label': 'Cash Flows'},
+    {'id': 'gics',         'section': 'ANALYTICS', 'endpoint': 'gics',         'icon': '▤', 'label': 'GICs'},
+    {'id': 'rebalancer',   'section': 'ANALYTICS', 'endpoint': 'rebalancer',   'icon': '⇌', 'label': 'Rebalancer'},
+    {'id': 'watchlist',    'section': 'ANALYTICS', 'endpoint': 'watchlist',    'icon': '◉', 'label': 'Watchlist'},
+    {'id': 'projections',  'section': 'ADVANCED',  'endpoint': 'projections',  'icon': '⤴', 'label': 'Projections'},
+    {'id': 'rdsp',         'section': 'ADVANCED',  'endpoint': 'rdsp_tab',     'icon': '◈', 'label': 'RDSP'},
+    {'id': 'tax',          'section': 'ADVANCED',  'endpoint': 'tax',          'icon': '⊟', 'label': 'Tax & ACB'},
+    {'id': 'import',       'section': 'TOOLS',     'endpoint': 'import_page',  'icon': '↑', 'label': 'Import'},
+    {'id': 'settings',     'section': 'TOOLS',     'endpoint': 'settings',     'icon': '≡', 'label': 'Settings'},
+]
+_TAB_BY_ID = {t['id']: t for t in NAV_TABS}
+
+
+def _load_sidebar_layout():
+    """Return (sections, hidden): the per-section ordered tab lists and the hidden
+    id set, from the saved `sidebar_layout` setting. Unknown ids are dropped and any
+    tab missing from the save (e.g. one added in a later release) is appended to its
+    default section, so the nav self-heals instead of silently dropping tabs."""
+    saved = {}
+    raw = Setting.query.get('sidebar_layout')
+    if raw and raw.value:
+        try:
+            saved = json.loads(raw.value)
+        except (ValueError, TypeError):
+            saved = {}
+    if not isinstance(saved, dict):
+        saved = {}
+    saved_sections = saved.get('sections', {}) or {}
+    hidden = set(saved.get('hidden', []) or [])
+
+    placed = set()
+    sections = {sec: [] for sec in NAV_SECTION_ORDER}
+    for sec in NAV_SECTION_ORDER:
+        for tid in saved_sections.get(sec, []):
+            if tid in _TAB_BY_ID and tid not in placed:
+                sections[sec].append(_TAB_BY_ID[tid])
+                placed.add(tid)
+    for t in NAV_TABS:                       # append any tab not placed by the save
+        if t['id'] not in placed:
+            sections[t['section']].append(t)
+            placed.add(t['id'])
+    return sections, hidden
+
+
+@app.context_processor
+def inject_nav():
+    sections, hidden = _load_sidebar_layout()
+    nav_sections = [
+        {'id': sec, 'items': [{**t, 'hidden': t['id'] in hidden} for t in sections[sec]]}
+        for sec in NAV_SECTION_ORDER
+    ]
+    return {'nav_sections': nav_sections}
+
+
+@app.route('/sidebar-layout', methods=['POST'])
+def save_sidebar_layout():
+    """Persist the user's drag-reordered / hidden sidebar. Validates ids against the
+    catalog so a stale or tampered payload can't inject junk tabs."""
+    data = request.get_json(silent=True) or {}
+    incoming = data.get('sections', {}) or {}
+    valid, seen = set(_TAB_BY_ID), set()
+    sections = {}
+    for sec in NAV_SECTION_ORDER:
+        ids = []
+        for tid in incoming.get(sec, []) or []:
+            if tid in valid and tid not in seen:
+                ids.append(tid)
+                seen.add(tid)
+        sections[sec] = ids
+    hidden = [t for t in (data.get('hidden') or []) if t in valid]
+    payload = json.dumps({'sections': sections, 'hidden': hidden})
+    s = Setting.query.get('sidebar_layout')
+    if s:
+        s.value = payload
+    else:
+        db.session.add(Setting(key='sidebar_layout', value=payload))
+    db.session.commit()
+    return jsonify(ok=True)
 
 
 @app.context_processor

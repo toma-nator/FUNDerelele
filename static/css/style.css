@@ -53,10 +53,29 @@ body {
   flex-direction: column;
   position: fixed;
   top: 0; left: 0; bottom: 0;
-  overflow-y: auto;
+  overflow: hidden;                 /* the brand + footer stay pinned; only .sidebar-nav scrolls */
   z-index: 100;
   transition: transform .22s ease;
 }
+
+/* Only the nav list scrolls, so the brand divider always lines up with the topbar's
+   no matter how many tabs there are. scrollbar-gutter reserves the track permanently
+   so the list doesn't shift sideways the moment a scrollbar appears. */
+.sidebar-nav {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;                              /* Firefox */
+  scrollbar-color: var(--border-sub) transparent;
+}
+.sidebar-nav::-webkit-scrollbar { width: 7px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: var(--border-sub); border-radius: 4px;
+  border: 1px solid transparent; background-clip: padding-box;   /* thin, inset thumb */
+}
+.sidebar-nav::-webkit-scrollbar-thumb:hover { background: var(--border); background-clip: padding-box; }
 
 .sidebar-collapsed .sidebar {
   transform: translateX(-100%);
@@ -69,13 +88,26 @@ body {
 .main { transition: margin-left .22s ease; }
 
 .sidebar-brand {
-  height: var(--topbar-h);          /* match topbar so the divider lines up */
+  height: var(--topbar-h);          /* same height as topbar; the shared divider line (body::before) sits at the bottom */
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
   padding: 0 18px;
-  border-bottom: 1px solid var(--border);
+}
+
+/* One continuous header divider spanning brand + topbar. A single fixed element
+   (not two separate bottom-borders) so it can't sub-pixel-drift at any zoom, font
+   size, scroll state, or when the sidebar is collapsed. */
+body::before {
+  content: "";
+  position: fixed;
+  top: calc(var(--topbar-h) - 1px);
+  left: 0; right: 0;
+  height: 1px;
+  background: var(--border);
+  z-index: 101;
+  pointer-events: none;
 }
 
 .brand-logo {
@@ -101,6 +133,7 @@ body {
 }
 
 .nav-item {
+  position: relative;                 /* anchors the absolutely-positioned customize controls */
   display: flex;
   align-items: center;
   gap: 9px;
@@ -161,7 +194,6 @@ body {
 .topbar {
   height: var(--topbar-h);
   background: var(--bg-surface);
-  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -659,6 +691,49 @@ tr.wl-hit-sell td:first-child { box-shadow: inset 3px 0 0 var(--red); }
 .nav-badge { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 4px;
              background: var(--yellow); color: #1a1200; border-radius: 9px;
              font-size: .68rem; font-weight: 700; text-align: center; line-height: 16px; }
+
+.nav-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── Customize mode ── */
+/* Right-edge controls (gear / ⊘) are absolutely positioned and vertically centred,
+   so revealing them in customize mode causes ZERO reflow — the row never changes
+   size. They sit in the same 16px box, lined up with the column of tab icons. */
+.nav-customize-gear,
+.nav-hide {
+  position: absolute;
+  right: 14px; top: 50%; transform: translateY(-50%);
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; line-height: 1; cursor: pointer;
+}
+
+/* Gear: the always-visible entry point pinned on the Settings row. */
+.nav-customize-gear {
+  font-size: .85rem; color: var(--text-dim);
+  border-radius: var(--radius-sm); transition: color .15s, background .15s;
+}
+.nav-customize-gear:hover { color: var(--text); background: var(--bg-hover); }
+body.customizing .nav-customize-gear { color: var(--accent); }   /* the ✓ glows accent while editing */
+
+/* Hide toggle: a ⊘ that only shows while customizing — dim, then theme-red once
+   the tab is hidden. Faded via opacity (still absolute) so there's no layout shift. */
+.nav-hide {
+  font-size: .5rem; color: var(--text-dim);
+  opacity: 0; pointer-events: none;
+  transition: color .15s, opacity .15s;
+}
+.nav-hide:hover { color: var(--text); }
+body.customizing .nav-hide { opacity: 1; pointer-events: auto; }
+
+body.customizing .nav-item { cursor: grab; user-select: none; }
+body.customizing .nav-item.active { background: rgba(0,200,240,.06); }   /* don't let active read as draggable-locked */
+body.customizing .nav-item.nav-pinned { cursor: default; }               /* Settings stays put */
+body.customizing .nav-badge { display: none; }                           /* avoid overlap with the absolute ⊘ */
+.nav-item.dragging { opacity: .4; }
+.nav-section.drop-target { background: rgba(0,200,240,.04); }
+
+/* Hidden tabs vanish normally, but reappear (dimmed) while customizing so you can restore them */
+.nav-hidden { display: none; }
+body.customizing .nav-hidden { display: flex; opacity: .45; }
 
 /* Permanent inline callouts (not auto-dismissed like .flash) */
 .callout { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius-sm);
