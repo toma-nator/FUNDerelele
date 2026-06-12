@@ -1,3 +1,10 @@
+<div class="wgt-subhead">
+  Show
+  {% for opt in ['5', '10', 'all'] %}
+  <a href="#" class="count-toggle{% if count == opt %} active{% endif %}" data-count="{{ opt }}">{{ 'All' if opt == 'all' else opt }}</a>
+  {% endfor %}
+  <span class="text-muted">of {{ total_n }}</span>
+</div>
 <table class="data-table mini">
   <thead>
     <tr><th>Ticker</th><th>Account</th><th class="r">Mkt Value</th><th class="r">G/L</th><th class="r">% Port</th></tr>

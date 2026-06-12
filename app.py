@@ -313,8 +313,12 @@ def dashboard_widget():
     fn = dash.HTML_WIDGET_FNS.get(wid)
     if not fn:
         return jsonify({'kind': 'error', 'error': 'Unknown widget'})
-    ctx = (fn(request.args.get('basis', 'contrib'), request.args.get('cols', ''))
-           if wid == 'account_highlights' else fn())
+    if wid == 'account_highlights':
+        ctx = fn(request.args.get('basis', 'contrib'), request.args.get('cols', ''))
+    elif wid == 'top_holdings':
+        ctx = fn(request.args.get('count', '5'))
+    else:
+        ctx = fn()
     html = render_template(f'widgets/{wid}.html', **ctx)
     return jsonify({'kind': 'html', 'title': dash.HTML_WIDGET_NAMES.get(wid, wid), 'html': html})
 

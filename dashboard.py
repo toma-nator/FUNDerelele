@@ -252,14 +252,19 @@ def w_account_highlights(basis='contrib', cols_csv=''):
     return {'accounts': accounts, 'cols': selected, 'available': available, 'basis': basis}
 
 
-def w_top_holdings():
+def w_top_holdings(count='5'):
     hs = get_holdings()
     total = sum(h['market_value_cad'] or 0 for h in hs) or 1
-    hs = sorted(hs, key=lambda h: (h['market_value_cad'] or 0), reverse=True)[:10]
-    return {'rows': [{'ticker': h['ticker'], 'account': h['account'],
+    hs = sorted(hs, key=lambda h: (h['market_value_cad'] or 0), reverse=True)
+    total_n = len(hs)
+    # count is '5' / '10' / 'all' (default 5); anything else falls back to 5.
+    n = total_n if count == 'all' else (int(count) if str(count).isdigit() else 5)
+    shown = hs[:n]
+    return {'count': count, 'total_n': total_n,
+            'rows': [{'ticker': h['ticker'], 'account': h['account'],
                       'mv': _cad(h['market_value_cad'] or 0),
                       'gl': _signed(h['unrealized_gl'] or 0), 'gl_cls': _cls(h['unrealized_gl'] or 0),
-                      'pct': f"{(h['market_value_cad'] or 0) / total * 100:.1f}%"} for h in hs]}
+                      'pct': f"{(h['market_value_cad'] or 0) / total * 100:.1f}%"} for h in shown]}
 
 
 def w_recent_transactions():

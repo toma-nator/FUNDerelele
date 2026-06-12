@@ -254,6 +254,7 @@
       if (!w.cols) w.cols = DEFAULT_AH_COLS.slice();
       url += '&cols=' + w.cols.join(',');
     }
+    if (w.id === 'top_holdings') url += '&count=' + (w.count || '5');
     fetch(url).then(r => r.json()).then(d => {
       if (wcharts[idx]) { wcharts[idx].destroy(); delete wcharts[idx]; }
       if (d.kind === 'error') { body.innerHTML = '<div class="empty-row">' + (d.error || 'Error') + '</div>'; return; }
@@ -269,6 +270,10 @@
         if (bt) bt.addEventListener('click', (e) => {
           e.preventDefault(); w.basis = bt.dataset.basis; saveWidgets(); loadWidget(card, w, idx);
         });
+        // Top Holdings: 5 / 10 / All count toggle
+        body.querySelectorAll('.count-toggle').forEach(ct => ct.addEventListener('click', (e) => {
+          e.preventDefault(); w.count = ct.dataset.count; saveWidgets(); loadWidget(card, w, idx);
+        }));
         // Account Highlights: add / remove per-account columns
         const add = body.querySelector('.ah-addcol');
         if (add) add.addEventListener('change', () => {

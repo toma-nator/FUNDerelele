@@ -286,10 +286,12 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
     """Assemble the full RDSP payload (dollars) for the template/JSON endpoint."""
     names = rdsp_accounts()
     if not names:
-        return {'ok': False, 'reason': 'No account is set to type RDSP. Set one on the Accounts page.'}
+        return {'ok': False, 'reason_kind': 'no_rdsp',
+                'reason': 'No account is set to type RDSP yet.'}
     by = birth_year()
     if not by:
-        return {'ok': False, 'reason': 'Set your birth year in Settings to project ages, grants and withdrawals.'}
+        return {'ok': False, 'reason_kind': 'no_birth_year',
+                'reason': 'Set your birth year in Settings to project ages, grants and withdrawals.'}
 
     cy = date.today().year
     seed_plan_if_empty(cy)

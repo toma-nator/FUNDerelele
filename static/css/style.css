@@ -921,8 +921,19 @@ a.hero-delta:hover { text-decoration: underline; }
 .te-btn:hover { color: var(--text); border-color: var(--accent); }
 .te-btn.te-x:hover { color: var(--red); border-color: var(--red); }
 
-.wgt-subhead { font-size: .72rem; color: var(--text-dim); padding: 4px 0 8px; }
+/* Widget control subheads (basis / count toggles) — only in Customize mode,
+   like the Account Highlights column controls, to keep the dashboard clean. */
+.wgt-subhead { display: none; font-size: .72rem; color: var(--text-dim); padding: 4px 0 8px; }
+.dash-editing .wgt-subhead { display: block; }
 .wgt-subhead .basis-toggle { color: var(--accent); text-decoration: none; }
+.wgt-subhead .count-toggle {
+  color: var(--text-dim); text-decoration: none; padding: 1px 6px;
+  margin: 0 1px; border-radius: 4px; border: 1px solid transparent;
+}
+.wgt-subhead .count-toggle:hover { color: var(--accent); }
+.wgt-subhead .count-toggle.active {
+  color: var(--accent); border-color: var(--accent); background: rgba(0,200,240,.10);
+}
 /* Account Highlights column controls — only in Customize mode */
 .ah-addcol-wrap { display: none; }
 .dash-editing .ah-addcol-wrap { display: inline; }
