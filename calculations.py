@@ -1023,7 +1023,7 @@ def get_gic_stats(account_filter=None, show_matured=False):
 # ── Tax & ACB ─────────────────────────────────────────────────────────────────
 
 # Registered (tax-sheltered) account types — capital gains here are not taxable.
-REGISTERED_TYPES = {'TFSA', 'RRSP', 'FHSA', 'RDSP', 'RESP', 'LIRA', 'LRSP', 'RRIF'}
+REGISTERED_TYPES = {'TFSA', 'RRSP', 'FHSA', 'RDSP', 'RESP', 'LIRA', 'LRSP', 'LIF', 'RRIF'}
 
 
 def _tax_rate(key, default):

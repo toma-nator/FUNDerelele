@@ -22,22 +22,36 @@ Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈99 ideas)
+## Backlog at a glance (≈108 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
-| Charts | ~41 | ~26 finance-useful + ~15 fun/easter-egg (3 % charts now shipped) |
-| Per-tab feature enhancements | ~28 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX, RDSP |
-| New tabs (big features) | 9 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt |
+| Charts | ~44 | ~26 finance-useful + ~15 fun/easter-egg (incl. composition-over-time, RDSP widget, top movers) |
+| Per-tab feature enhancements | ~29 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX, RDSP (incl. ⭐ nest-egg floor) |
+| New tabs (big features) | 11 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt, Retirement (RRSP), Market research |
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
 | UI/UX polish | 6 | Restore-alerts, sidebar hide/reorder tabs, sparkline, chart descriptions/hide/star, daily-swing widget, trend indicator |
-| Infrastructure / hardening | 4 | Test suite, yfinance resilience, income tax, README screenshots |
-| Account / data model | 1 | Savings account (recurring-interest) |
+| Infrastructure / hardening | 6 | Test suite, yfinance resilience, income tax, README screenshots, budget-app integration, robust sample data |
+| Account / data model | 2 | Savings account (recurring-interest), curate available account types |
 | Canadian rules | 1 | RRSP room |
 | Internationalization | 1 | German → Spanish → French |
 | Branding | 1 | Remaining: favicon, title prefix, accent flow-through, per-holding logos (core logo shipped) |
 
 _Keep this table and the Priority tags in sync whenever suggestions are added or removed._
+
+## Account-type special rules — coverage tracker
+
+Which account types have type-specific logic beyond the generic "registered = tax-sheltered" flag.
+Available types: Non-Reg, TFSA, RRSP, FHSA, RDSP, RESP, LIRA, RRIF (keeping all; possibly add LIF + Savings/HISA).
+
+| Type | Special rules implemented | Depth |
+|---|---|---|
+| **RDSP** | grants/bonds, 10-yr holdback, LDAP/DAP drawdown, projections, Glide Lab | **full** |
+| **TFSA** | contribution-room tracking (annual limits + anchor) | partial |
+| **FHSA** | contribution-room anchor | partial (less fleshed than TFSA) |
+| Non-Reg / RRSP / RESP / LIRA / RRIF | none yet — only the generic tax-sheltered flag | — |
+
+Keep in sync as rules are added (e.g. RRSP room, RESP/CESG grants, RRIF minimum withdrawals, LIF payout).
 
 ## Watchlist alerts — multiple tiers per ticker
 
@@ -1044,3 +1058,76 @@ interest transaction each month.
   and recurring-transaction items already parked.
 
 **Priority:** Impact: Med · Effort: medium _(rides on the ⭐ recurring-transaction engine)_
+
+## ⭐ RDSP/Retirement — target nest-egg + minimum-income floor (TOP near-term pick)
+
+A **target nest-egg number** that guarantees a chosen **minimum retirement income**, with
+an option to keep that income **safe from all but the most severe crashes**. The income
+figure is **editable now** (eventually fed from a separate budgeting app). Plugs straight
+into the Glide Lab: instead of "most efficient hedge for the modeled crash", it answers
+**"how much must I de-risk to protect $X/yr of income through retirement?"** — turning the
+break-even/worst-year-floor machinery into a goal-seek on a needed-income floor.
+
+**Priority:** Impact: High · Effort: medium _(reuses the Glide Lab floor/break-even engine)_
+
+## Retirement tab — generalize the RDSP tab to RRSP (and other retirement accounts)
+
+Let the RDSP tab's accumulation→drawdown projection, glide/flat de-risking, and income/tax
+modeling also serve **RRSP** (then RRIF/LIRA/LIF), renaming it a **"Retirement" tab**. RRSP
+lacks RDSP's grants/holdback but shares everything else; the Glide Lab applies directly.
+
+**Priority:** Impact: High · Effort: large
+
+## Portfolio composition over time
+
+Show not just **value** over time but how the **mix** evolved — asset type, allocation,
+beta, blended risk — as a stacked-area / multi-line view, per account or overall. (Extends
+the parked rolling-beta-over-time chart into a full composition history.)
+
+**Priority:** Impact: Med · Effort: medium–large
+
+## Budget / account-manager app integration (much later)
+
+Two-way link with an external budgeting app: pull **automatic transactions** with
+**selectable note categories** + extras. User already has a preferred budget app; the main
+win is auto-transactions instead of manual entry.
+
+**Priority:** Impact: Med · Effort: large (external integration)
+
+## Robust "generate sample" / demo data
+
+A sample-data generator that exercises **all** features and special accounts/tabs (RDSP,
+GICs, glide, every account type, recurring rules, etc.) so the demo shows the whole app.
+Replaces/expands the current sample button.
+
+**Priority:** Impact: Low–Med · Effort: medium
+
+## Settings — curate available account types
+
+A Settings option to pick **which account types appear in the dropdown** (hide unused ones).
+All types kept in the model; this just trims the picker. Available now: Non-Reg, TFSA, RRSP,
+FHSA, RDSP, RESP, LIRA, LIF, RRIF, Savings.
+
+**Priority:** Impact: Low · Effort: small
+
+## Market research — sector growth (tab or widget)
+
+Best-performing market **sectors over 1 / 5 / 10 / 25 years**, plus current growth-by-sector.
+Could be a dedicated tab or a dashboard widget/chart. Needs a market/sector index data source.
+
+**Priority:** Impact: Med · Effort: medium–large (needs external data)
+
+## Dashboard/Charts — surface the RDSP projection
+
+Make the **RDSP projection** (and maybe the Glide-Lab flat-vs-glide overlay) available as a
+selectable **dashboard widget** and/or **Charts-tab** chart, so it's visible without opening
+the RDSP tab.
+
+**Priority:** Impact: Low–Med · Effort: small–medium
+
+## Top movers — biggest gainers/losers
+
+Biggest gainers & losers over **day / week / month / year / all-time**, as a dashboard widget
+and/or chart. Needs per-holding historical price deltas.
+
+**Priority:** Impact: Med · Effort: medium _(needs historical deltas)_

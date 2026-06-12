@@ -518,7 +518,7 @@ def update_cash(name):
 
 
 # Account types — registered ones are tax-sheltered (see Tax & ACB tab).
-ACCOUNT_TYPES = ['Non-Reg', 'TFSA', 'RRSP', 'FHSA', 'RDSP', 'RESP', 'LIRA', 'RRIF']
+ACCOUNT_TYPES = ['Non-Reg', 'TFSA', 'RRSP', 'FHSA', 'RDSP', 'RESP', 'LIRA', 'LIF', 'RRIF', 'Savings']
 
 
 @app.route('/accounts/<name>/breakdown')
