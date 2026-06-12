@@ -34,6 +34,15 @@ def compute_amounts(txn_type, qty, price, amount_in, fees, rate):
     return amount_native, amount_cad, net_cad
 
 
+def _nav_on(series, d):
+    """Last close on/before date `d` from a pre-fetched NAV Series (or None)."""
+    if series is None or getattr(series, 'empty', True):
+        return None
+    import pandas as pd
+    before = series[series.index <= pd.Timestamp(d)]
+    return float(before.iloc[-1]) if not before.empty else None
+
+
 def _add_months(d, n):
     """Step `d` forward n months, clamping the day to the target month's length
     (Jan 31 + 1mo → Feb 28/29)."""
@@ -72,17 +81,44 @@ def generate_due(as_of=None):
     except Exception:
         fx = 1.365
 
+    # Dollar-based Buy/Reinvest rules (mutual-fund PACs) need each occurrence valued
+    # at that day's NAV. Pre-fetch each ticker's close series once.
+    nav_series = {}
+    for rule in rules:
+        if (rule.dollar_based and rule.type in ('Buy', 'Reinvest')
+                and rule.ticker and rule.ticker != 'CASH' and rule.ticker not in nav_series):
+            try:
+                from price_service import fetch_nav_series
+                nav_series[rule.ticker] = fetch_nav_series(rule.ticker)
+            except Exception:
+                nav_series[rule.ticker] = None
+
     created, tickers = 0, set()
     for rule in rules:
         while (rule.active and rule.next_date and rule.next_date <= as_of
                and (not rule.end_date or rule.next_date <= rule.end_date)):
             rate = fx if rule.currency == 'USD' else 1.0
-            an, ac, nc = compute_amounts(rule.type, rule.qty or 0, rule.price or 0,
+            qty, price = rule.qty or 0, rule.price or 0
+            # Dollar-based: derive units from the NAV on this occurrence's date so a
+            # fixed $X PAC buys the right number of units each period.
+            if rule.dollar_based and rule.type in ('Buy', 'Reinvest') and rule.amount:
+                series = nav_series.get(rule.ticker)
+                nav = _nav_on(series, rule.next_date)
+                if not nav and series is not None and not series.empty:
+                    nav = float(series.iloc[0])   # date precedes history → earliest known NAV
+                if not nav:
+                    from price_service import get_nav_on
+                    nav = get_nav_on(rule.ticker, rule.next_date) or get_nav_on(rule.ticker)
+                if not nav and rule.price:        # last resort: a manually-entered NAV
+                    nav = rule.price
+                if nav:
+                    price, qty = nav, rule.amount / nav
+            an, ac, nc = compute_amounts(rule.type, qty, price,
                                          rule.amount or 0, rule.fees or 0, rate)
             tkr = rule.ticker or 'CASH'
             db.session.add(Transaction(
                 date=rule.next_date, ticker=tkr, account=rule.account, type=rule.type,
-                qty=rule.qty or 0, price=rule.price or 0, currency=rule.currency,
+                qty=qty, price=price, currency=rule.currency,
                 amount_native=an, amount_cad=ac, fees_cad=rule.fees or 0, net_cad=nc,
                 notes=rule.notes or '', subtype=rule.subtype or '', recurring_id=rule.id))
             created += 1

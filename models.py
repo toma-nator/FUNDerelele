@@ -130,17 +130,24 @@ class RecurringRule(db.Model):
     count_remaining = db.Column(db.Integer)              # optional remaining occurrences
     active = db.Column(db.Boolean, default=True)
     last_run = db.Column(db.Date)
+    # Buy/Reinvest by a fixed $ amount (mutual-fund PAC): qty is derived from the
+    # NAV on each occurrence date rather than being fixed.
+    dollar_based = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def short(self):
+        """Account-less description of the rule (for grouped lists)."""
+        if self.dollar_based and self.type in ('Buy', 'Reinvest'):
+            return f"{self.type} ${self.amount:,.2f} of {self.ticker}"
+        if self.type in ('Buy', 'Sell', 'Reinvest'):
+            return f"{self.type} {self.qty:g} {self.ticker} @ ${self.price:,.2f}"
+        if self.type == 'Split':
+            return f"Split {self.ticker} +{self.qty:g}"
+        tail = '' if (self.ticker or 'CASH') == 'CASH' else f" · {self.ticker}"
+        return f"{self.type} ${self.amount:,.2f} {self.currency}{tail}"
 
     @property
     def summary(self):
         """Short human description for the recurring-rules list."""
-        freq = (self.frequency or '').capitalize()
-        if self.type in ('Buy', 'Sell', 'Reinvest'):
-            body = f"{self.type} {self.qty:g} {self.ticker} @ ${self.price:,.2f}"
-        elif self.type == 'Split':
-            body = f"Split {self.ticker} +{self.qty:g}"
-        else:
-            tail = '' if (self.ticker or 'CASH') == 'CASH' else f" · {self.ticker}"
-            body = f"{self.type} ${self.amount:,.2f} {self.currency}{tail}"
-        return f"{freq}: {body} → {self.account}"
+        return f"{(self.frequency or '').capitalize()}: {self.short} → {self.account}"

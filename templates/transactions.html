@@ -48,12 +48,15 @@
         </div>
       </div>
       <div class="form-row">
+        <div class="form-group" id="grp-dollarbuy" style="display:none;align-self:flex-end;min-width:auto">
+          <label class="perf-check"><input type="checkbox" name="dollar_based" id="dollarBased" onchange="updateTxnForm()"> By&nbsp;$&nbsp;amount</label>
+        </div>
         <div class="form-group" id="grp-qty">
           <label id="qtyLabel">Quantity</label>
           <input type="number" name="qty" class="form-input mono" placeholder="0" step="any" min="0" />
         </div>
         <div class="form-group" id="grp-price">
-          <label>Price per Share</label>
+          <label id="priceLabel">Price per Share</label>
           <input type="number" name="price" class="form-input mono" placeholder="0.00" step="any" min="0" />
         </div>
         <div class="form-group" id="grp-amount" style="display:none">
@@ -129,30 +132,36 @@
 
     {% if recurring_rules %}
     <div class="recurring-list" style="margin-top:18px">
-      <div class="card-sub" style="margin-bottom:8px">Recurring rules ({{ recurring_rules | length }})</div>
+      <div class="card-sub" style="margin-bottom:8px">Recurring payments ({{ recurring_rules | length }}) — grouped by account; click <strong>Stop</strong> to end one anytime</div>
       <table class="data-table">
         <thead>
-          <tr><th>Rule</th><th>Next</th><th>Status</th><th></th></tr>
+          <tr><th>Payment</th><th>Frequency</th><th>Next</th><th>Status</th><th class="r"></th></tr>
         </thead>
         <tbody>
-          {% for r in recurring_rules %}
+          {% for account, rules in recurring_rules | groupby('account') %}
+          <tr class="recurring-acct">
+            <td colspan="5"><span class="acct-badge acct-{{ account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ account }}</span></td>
+          </tr>
+          {% for r in rules %}
           <tr>
-            <td>{{ r.summary }}</td>
+            <td>{{ r.short }}{% if r.dollar_based %} <span class="card-sub">· units from NAV</span>{% endif %}</td>
+            <td class="text-dim" style="font-size:.82rem">{{ r.frequency | capitalize }}{% if r.end_date %} · until {{ r.end_date }}{% endif %}</td>
             <td class="mono">{% if r.active %}{{ r.next_date.strftime('%Y-%m-%d') }}{% else %}—{% endif %}</td>
             <td>
               {% if r.active %}<span class="type-badge type-buy">Active</span>
-              {% else %}<span class="type-badge">Paused</span>{% endif %}
+              {% else %}<span class="type-badge">Stopped</span>{% endif %}
             </td>
-            <td class="r">
+            <td class="r" style="white-space:nowrap">
               <form method="POST" action="{{ url_for('toggle_recurring', id=r.id) }}" style="display:inline">
-                <button class="btn btn-sm" type="submit">{{ 'Pause' if r.active else 'Resume' }}</button>
+                <button class="btn btn-sm {% if r.active %}btn-stop{% endif %}" type="submit">{{ 'Stop' if r.active else 'Resume' }}</button>
               </form>
               <form method="POST" action="{{ url_for('delete_recurring', id=r.id) }}" style="display:inline"
-                    onsubmit="return confirm('Delete this recurring rule? Generated transactions are kept.')">
-                <button class="btn-delete" type="submit">✕</button>
+                    onsubmit="return confirm('Delete this recurring payment? Generated transactions are kept.')">
+                <button class="btn-delete" type="submit" title="Delete rule">✕</button>
               </form>
             </td>
           </tr>
+          {% endfor %}
           {% endfor %}
         </tbody>
       </table>
@@ -298,9 +307,9 @@ function updateTxnForm() {
   const sel = document.getElementById('txnType');
   if (!sel) return;
   const CFG = {
-    Buy:             {ticker:1, qty:1, price:1, amount:0, subtype:0, currency:1, fees:1, qtyLabel:'Quantity'},
+    Buy:             {ticker:1, qty:1, price:1, amount:0, subtype:0, currency:1, fees:1, qtyLabel:'Quantity', dollarbuy:1},
     Sell:            {ticker:1, qty:1, price:1, amount:0, subtype:0, currency:1, fees:1, qtyLabel:'Quantity'},
-    Reinvest:        {ticker:1, qty:1, price:1, amount:0, subtype:0, currency:1, fees:0, qtyLabel:'Shares acquired'},
+    Reinvest:        {ticker:1, qty:1, price:1, amount:0, subtype:0, currency:1, fees:0, qtyLabel:'Shares acquired', dollarbuy:1},
     Dividend:        {ticker:1, qty:0, price:0, amount:1, subtype:0, currency:1, fees:0},
     Interest:        {ticker:0, qty:0, price:0, amount:1, subtype:0, currency:1, fees:0},
     Deposit:         {ticker:0, qty:0, price:0, amount:1, subtype:1, currency:1, fees:0},
@@ -313,11 +322,26 @@ function updateTxnForm() {
   const c = CFG[sel.value] || CFG.Buy;
   const grp = (id, on) => { const el = document.getElementById('grp-' + id); if (el) el.style.display = on ? '' : 'none'; };
   const req = (name, on) => { const el = document.querySelector('[name="' + name + '"]'); if (el) el.required = !!on; };
-  ['ticker', 'qty', 'price', 'amount', 'subtype', 'currency', 'fees', 'fx'].forEach(k => grp(k, c[k]));
+  ['ticker', 'qty', 'price', 'amount', 'subtype', 'currency', 'fees', 'fx', 'dollarbuy'].forEach(k => grp(k, c[k]));
   req('ticker', c.ticker); req('qty', c.qty); req('price', c.price); req('amount', c.amount);
   req('from_amount', c.fx); req('to_amount', c.fx);
   const ql = document.getElementById('qtyLabel');
   if (ql) ql.textContent = c.qtyLabel || 'Quantity';
+
+  // "By $ amount" mode (mutual-fund PAC): swap Quantity → Amount, price optional.
+  const db = document.getElementById('dollarBased');
+  const dollarOn = !!c.dollarbuy && db && db.checked;
+  const amtLabel = document.querySelector('#grp-amount label');
+  const priceLabel = document.getElementById('priceLabel');
+  if (dollarOn) {
+    grp('qty', false); grp('amount', true);
+    req('qty', false); req('amount', true); req('price', false);
+    if (amtLabel) amtLabel.textContent = 'Amount ($)';
+    if (priceLabel) priceLabel.textContent = 'Price/unit (blank = auto NAV)';
+  } else {
+    if (amtLabel) amtLabel.textContent = 'Amount (total)';
+    if (priceLabel) priceLabel.textContent = 'Price per Share';
+  }
 }
 document.addEventListener('DOMContentLoaded', updateTxnForm);
 

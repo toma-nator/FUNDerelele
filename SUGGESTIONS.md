@@ -515,6 +515,23 @@ Broaden the importer beyond TD/CIBC CSV + TD PDF:
 
 **Priority:** Impact: Med · Effort: medium
 
+## Import — recurring rules in the import file (self-contained hand-off)
+
+The native CSV importer creates **transactions only** — recurring/scheduled rules
+are a separate app setting, so a file handed to a new user (e.g. a friend's fund
+account) can't carry their standing PACs. Let the native export/import round-trip
+**`RecurringRule`s** too, so one file fully provisions an account incl. its ongoing
+dollar-based mutual-fund PAC.
+
+- **How:** a second sheet/section or a marker row (e.g. `type=RecurringBuy` with
+  `frequency`/`end_date`/`dollar_based` columns) that `_import_native` turns into a
+  `RecurringRule` instead of a `Transaction`; the export writes active rules.
+- **Why parked:** transaction import + a one-time rule add already covers it; this is
+  convenience for clean multi-user hand-off. Pairs with the dollar-based PAC engine.
+- **Effort:** small–medium — extend `_import_native` + the export with a rule block.
+
+**Priority:** Impact: Low–Med · Effort: small–medium
+
 ## Projections — TFSA room projector
 
 Track and project TFSA contribution room (the V6 Excel had this on the

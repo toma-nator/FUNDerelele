@@ -48,6 +48,7 @@ def run_migrations():
         _add_col('accounts', 'cash_balance', 'FLOAT DEFAULT 0')
         _add_col('accounts', 'horizon', 'VARCHAR(20)')
         _add_col('price_cache', 'meta_json', 'TEXT')
+        _add_col('recurring_rules', 'dollar_based', 'BOOLEAN DEFAULT 0')
 
 
 def resolve_db_path():
@@ -326,12 +327,18 @@ def dashboard_widget():
 @app.route('/holdings')
 def holdings():
     from calculations import get_holdings
+    from price_service import get_holdings_metadata
     data = get_holdings(include_closed=True)
     accounts = sorted({h['account'] for h in data})
     currencies = sorted({h['currency'] for h in data})
+    # Friendly names (e.g. cryptic mutual-fund symbols → "CIBC Smart Growth A").
+    tickers = sorted({h['ticker'] for h in data if h['ticker'] and h['ticker'] != 'CASH'})
+    meta = get_holdings_metadata(tickers)
+    names = {t: (meta.get(t, {}).get('long_name') or '') for t in tickers}
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
     return render_template('holdings.html', holdings=data, accounts=accounts,
-                           currencies=currencies, last_updated=last_updated, active='holdings')
+                           currencies=currencies, names=names,
+                           last_updated=last_updated, active='holdings')
 
 
 def _used_account_names():
@@ -348,7 +355,8 @@ def transactions():
     txns = Transaction.query.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
     used = _used_account_names()
     accounts = [a for a in Account.query.order_by(Account.name).all() if a.name in used]
-    rules = RecurringRule.query.order_by(RecurringRule.active.desc(), RecurringRule.next_date).all()
+    rules = RecurringRule.query.order_by(
+        RecurringRule.account, RecurringRule.active.desc(), RecurringRule.next_date).all()
     return render_template('transactions.html', transactions=txns, accounts=accounts,
                            recurring_rules=rules, active='transactions')
 
@@ -371,6 +379,8 @@ def add_transaction():
         currency = request.form.get('currency', 'CAD') or 'CAD'
         fees = float(request.form.get('fees', 0) or 0)
         notes = request.form.get('notes', '')
+        # Mutual-fund style: buy a fixed $ amount; units = amount ÷ NAV.
+        dollar_based = request.form.get('dollar_based') == 'on'
 
         # Currency Exchange is a two-legged cash transfer (one side must be CAD),
         # handled by its own helper before the share/cash field logic below.
@@ -406,12 +416,22 @@ def add_transaction():
                 next_date=txn_date,
                 end_date=datetime.strptime(end_raw, '%Y-%m-%d').date() if end_raw else None,
                 count_remaining=int(count_raw) if count_raw.isdigit() else None,
+                dollar_based=dollar_based and txn_type in ('Buy', 'Reinvest'),
             )
             db.session.add(rule)
             db.session.commit()
             made = generate_due()
             flash(f'Recurring rule added ({repeat}); generated {made} transaction(s) to date.', 'success')
             return redirect(url_for('transactions'))
+
+        # One-off dollar-based buy: derive units from the NAV (use the entered price
+        # per unit if given, otherwise look up the fund's NAV on the trade date).
+        if dollar_based and txn_type in ('Buy', 'Reinvest') and amount_in:
+            from price_service import get_nav_on
+            nav = price if price > 0 else (get_nav_on(ticker, txn_date) or 0)
+            if not nav:
+                raise ValueError('Could not find a NAV for that fund on that date — enter the price per unit.')
+            price, qty = nav, amount_in / nav
 
         fx = get_fx_rate()
         rate = fx if currency == 'USD' else 1.0
@@ -441,10 +461,11 @@ def add_transaction():
 @app.route('/recurring/<int:id>/pause', methods=['POST'])
 def toggle_recurring(id):
     rule = RecurringRule.query.get_or_404(id)
+    nxt = request.args.get('next')
     rule.active = not rule.active
     db.session.commit()
-    flash(f"Recurring rule {'resumed' if rule.active else 'paused'}.", 'info')
-    return redirect(url_for('transactions'))
+    flash(f"Recurring payment {'resumed' if rule.active else 'stopped'}.", 'info')
+    return redirect(nxt or url_for('transactions'))
 
 
 @app.route('/recurring/<int:id>/delete', methods=['POST'])
@@ -488,10 +509,27 @@ def delete_all_transactions():
 
 @app.route('/accounts')
 def accounts():
-    from calculations import get_account_summary, HORIZON_BUCKETS
+    from calculations import get_account_summary, HORIZON_BUCKETS, gic_value
+    from datetime import date
     data = get_account_summary()
+    # Recurring payments grouped by account, for a per-account list + Stop button.
+    rules_by_account = {}
+    for r in RecurringRule.query.order_by(RecurringRule.active.desc(), RecurringRule.next_date).all():
+        rules_by_account.setdefault(r.account, []).append(r)
+    # Active GICs grouped by account, shown as positions in the account detail.
+    today = date.today()
+    gics_by_account = {}
+    for g in GIC.query.order_by(GIC.maturity_date).all():
+        if not g.account or (g.maturity_date and today >= g.maturity_date):
+            continue  # matured GICs have been returned to cash
+        cur, vat = gic_value(g, today)
+        gics_by_account.setdefault(g.account, []).append({
+            'name': g.name or '', 'institution': g.institution or '', 'principal': g.principal or 0,
+            'rate': g.rate or 0, 'current_value': cur, 'value_at_maturity': vat,
+            'maturity_date': g.maturity_date})
     return render_template('accounts.html', accounts=data, active='accounts',
-                           account_types=ACCOUNT_TYPES, horizon_buckets=HORIZON_BUCKETS)
+                           account_types=ACCOUNT_TYPES, horizon_buckets=HORIZON_BUCKETS,
+                           recurring_by_account=rules_by_account, gics_by_account=gics_by_account)
 
 
 @app.route('/accounts/<name>/reconcile-fx', methods=['POST'])

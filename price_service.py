@@ -32,7 +32,8 @@ def _fetch_one_metadata(ticker):
         tk = yf.Ticker(ticker)
         info = tk.info or {}
         qt = (info.get('quoteType') or '').upper()
-        meta['asset_type'] = 'ETF' if qt == 'ETF' else ('Equity' if qt in ('EQUITY', '') else qt.title())
+        meta['asset_type'] = ({'ETF': 'ETF', 'MUTUALFUND': 'Mutual Fund'}.get(qt)
+                              or ('Equity' if qt in ('EQUITY', '') else qt.title()))
         meta['sector'] = info.get('sector')
         meta['long_name'] = info.get('longName') or info.get('shortName')
         mc = info.get('marketCap')
@@ -47,7 +48,9 @@ def _fetch_one_metadata(ticker):
         meta['dividend_rate'] = float(dr) if dr else None
         dy = info.get('dividendYield')
         meta['dividend_yield'] = float(dy) if dy else None
-        if qt == 'ETF':
+        if qt in ('ETF', 'MUTUALFUND'):
+            # Mutual funds also expose sector/asset-class look-through for many
+            # symbols (e.g. CIBC's 0P…TO codes); gracefully skips when unavailable.
             try:
                 fd = tk.funds_data
                 sw = fd.sector_weightings or {}
@@ -143,6 +146,41 @@ def fetch_prices_batch(tickers):
         pass
 
     return results
+
+
+def fetch_nav_series(ticker):
+    """Daily *unadjusted* closes (~5y) for a ticker as a pandas Series indexed by
+    naive midnight dates. Used to value dollar-based mutual-fund PACs at the NAV on
+    each occurrence date. Empty Series on failure."""
+    import pandas as pd
+    try:
+        import yfinance as yf
+        c = yf.Ticker(ticker).history(period='5y', auto_adjust=False)['Close'].dropna()
+        c.index = pd.to_datetime(c.index).tz_localize(None).normalize()
+        return c
+    except Exception:
+        return pd.Series(dtype=float)
+
+
+def get_nav_on(ticker, as_of=None):
+    """Unadjusted NAV/price for `ticker` on/before `as_of` (native currency).
+    Today/None → live cached price (fetch if missing). Past → daily close. None if
+    unavailable."""
+    from datetime import date
+    from models import PriceCache
+    today = date.today()
+    if as_of is None or as_of >= today:
+        pc = PriceCache.query.get(ticker)
+        if pc and pc.price:
+            return float(pc.price)
+        data = fetch_prices_batch([ticker])
+        return data[ticker]['price'] if ticker in data else None
+    import pandas as pd
+    s = fetch_nav_series(ticker)
+    if s.empty:
+        return None
+    before = s[s.index <= pd.Timestamp(as_of)]
+    return float(before.iloc[-1]) if not before.empty else None
 
 
 def refresh_prices(tickers):

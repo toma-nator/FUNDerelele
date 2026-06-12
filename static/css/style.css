@@ -391,6 +391,17 @@ body::before {
 /* ── Tables ── */
 .table-scroll { overflow-x: auto; }
 
+/* Clean UI — hide the scrollbars on inner scroll areas (content still scrolls
+   via trackpad / shift-wheel); keeps tables from showing chunky grey bars. */
+.table-scroll, .account-holdings, .recurring-list, .breakdown-grid {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* legacy Edge */
+}
+.table-scroll::-webkit-scrollbar, .account-holdings::-webkit-scrollbar,
+.recurring-list::-webkit-scrollbar, .breakdown-grid::-webkit-scrollbar {
+  width: 0; height: 0;            /* Chrome / Edge / Safari */
+}
+
 /* Top horizontal scrollbar that mirrors a wide table below it */
 .table-scroll-top {
   overflow-x: auto;
@@ -949,6 +960,14 @@ a.hero-delta:hover { text-decoration: underline; }
 .snap-total-kpi { color: var(--accent); }
 .snap-toggle { display: inline-block; margin-top: 6px; color: var(--accent); text-decoration: none; font-size: .8rem; }
 .snap-toggle:hover { text-decoration: underline; }
+
+/* Friendly fund/company name under a holding's ticker symbol */
+.ticker-name { font-size: .68rem; font-weight: 400; color: var(--text-dim); letter-spacing: 0; text-transform: none; margin-top: 1px; white-space: normal; max-width: 220px; }
+
+/* Recurring payments list — per-account grouping + Stop button */
+.recurring-acct td { background: var(--bg-surface); padding-top: 10px; }
+.btn-stop { border-color: var(--accent); color: var(--accent); }
+.btn-stop:hover { background: rgba(0,200,240,.12); }
 
 .room-widget { padding: 4px 0; }
 .room-widget-row { margin-bottom: 12px; }

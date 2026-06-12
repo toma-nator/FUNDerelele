@@ -660,8 +660,8 @@ def get_account_breakdown(account_name):
         else:
             sector['Unclassified'] = sector.get('Unclassified', 0) + mv
 
-        # Market cap — ETFs grouped as Fund; stocks bucketed
-        if at == 'ETF':
+        # Market cap — ETFs/mutual funds grouped as Fund; individual stocks bucketed
+        if at in ('ETF', 'Mutual Fund'):
             market_cap['Fund'] = market_cap.get('Fund', 0) + mv
         else:
             b = _cap_bucket(m.get('market_cap')) or 'Unclassified'
@@ -2153,9 +2153,13 @@ def get_snapshot_at(as_of, scope='portfolio'):
         symbols = tickers + ['USDCAD=X']
         first_date = txns_to_date[0].date
         try:
+            # auto_adjust=False → real NAV/close on the date (dividends/distributions
+            # are tracked separately as cash, per the app's unadjusted-price rule).
+            # auto_adjust=True would bake distributions into a lower past price and
+            # mis-value distribution-paying holdings (mutual funds especially).
             raw = yf.download(symbols, start=first_date.isoformat(),
                               end=(as_of + timedelta(days=1)).isoformat(),
-                              auto_adjust=True, progress=False)
+                              auto_adjust=False, progress=False)
         except Exception:
             raw = pd.DataFrame()
         if not raw.empty:

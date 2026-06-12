@@ -267,6 +267,54 @@
         </table>
       </div>
       {% endif %}
+
+      {% set acct_gics = gics_by_account.get(acc.name) %}
+      {% if acct_gics %}
+      <div class="account-holdings">
+        <div class="account-holdings-label">GICs <span class="bd-note">fixed income · counted in account value</span></div>
+        <table class="data-table mini">
+          <thead><tr><th>GIC</th><th>Institution</th><th class="r">Rate</th><th class="r">Principal</th><th class="r">Current Value</th><th class="r">At Maturity</th><th>Maturity</th></tr></thead>
+          <tbody>
+            {% for g in acct_gics %}
+            <tr>
+              <td>{{ g.name or '—' }}</td>
+              <td class="text-dim">{{ g.institution or '—' }}</td>
+              <td class="r mono text-green">{{ '%.2f' % g.rate }}%</td>
+              <td class="r mono">{{ g.principal | cad }}</td>
+              <td class="r mono">{{ g.current_value | cad }}</td>
+              <td class="r mono text-dim">{{ g.value_at_maturity | cad }}</td>
+              <td class="mono" style="font-size:.78rem">{{ g.maturity_date }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
+
+      {% set acct_rules = recurring_by_account.get(acc.name) %}
+      {% if acct_rules %}
+      <div class="account-holdings">
+        <div class="account-holdings-label">Recurring payments <span class="bd-note">click Stop to end one</span></div>
+        <table class="data-table mini">
+          <thead><tr><th>Payment</th><th>Frequency</th><th class="r">Next</th><th>Status</th><th class="r"></th></tr></thead>
+          <tbody>
+            {% for r in acct_rules %}
+            <tr>
+              <td>{{ r.short }}{% if r.dollar_based %} <span class="bd-note">· units from NAV</span>{% endif %}</td>
+              <td class="text-dim">{{ r.frequency | capitalize }}{% if r.end_date %} · until {{ r.end_date }}{% endif %}</td>
+              <td class="r mono">{% if r.active %}{{ r.next_date }}{% else %}—{% endif %}</td>
+              <td>{% if r.active %}<span class="type-badge type-buy">Active</span>{% else %}<span class="type-badge">Stopped</span>{% endif %}</td>
+              <td class="r">
+                <form method="POST" action="{{ url_for('toggle_recurring', id=r.id, next=url_for('accounts')) }}" style="display:inline">
+                  <button class="btn btn-sm {% if r.active %}btn-stop{% endif %}" type="submit">{{ 'Stop' if r.active else 'Resume' }}</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endif %}
     </div>
 
     <div style="padding:8px 20px 12px;font-size:.7rem;color:var(--text-muted)">
