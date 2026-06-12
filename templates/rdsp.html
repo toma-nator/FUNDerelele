@@ -301,89 +301,6 @@
 </div>
 {% endif %}
 
-<!-- Sequence-of-returns stress test -->
-<div class="card" style="margin-top:16px">
-  <div class="card-header toggle-header" onclick="togglePanel('stressPanel','stressArrow')">
-    Sequence-of-returns stress test
-    <span class="card-sub">how a badly-timed downturn hits your plan — flat vs glide</span>
-    <span class="toggle-arrow" id="stressArrow">▼</span>
-  </div>
-  <div id="stressPanel" style="display:none">
-    <div class="rdsp-controls" style="padding:14px 20px 2px; margin:0">
-      <div class="ctl">
-        <label>Shock</label>
-        <select class="form-input" onchange="setP('s_shape', this.value)">
-          <option value="none" {% if view.stress.shape == 'none' %}selected{% endif %}>No shock</option>
-          <option value="crash" {% if view.stress.shape == 'crash' %}selected{% endif %}>Sharp crash</option>
-          <option value="decade" {% if view.stress.shape == 'decade' %}selected{% endif %}>Lost decade</option>
-        </select>
-      </div>
-      {% if view.stress.shape != 'none' %}
-      <div class="ctl">
-        <label>Timing{% if view.stress.auto_timing %} <span style="color:var(--accent)">· best for glide</span>{% endif %}</label>
-        <select class="form-input" onchange="setP('s_when', this.value)">
-          {% for t in ['early','mid','late'] %}<option value="{{ t }}" {% if view.stress.timing == t %}selected{% endif %}>{{ t|capitalize }}</option>{% endfor %}
-        </select>
-      </div>
-      {% endif %}
-      {% if view.stress.shape == 'crash' %}
-      <div class="ctl">
-        <label>Crash depth %</label>
-        <input class="form-input" type="number" step="5" value="{{ view.stress.severity }}" onchange="setP('s_depth', this.value)">
-      </div>
-      {% endif %}
-      {% if view.stress.shape == 'decade' %}
-      <div class="ctl">
-        <label>Stagnation years</label>
-        <input class="form-input" type="number" step="1" value="{{ view.stress.decade_years }}" onchange="setP('s_dlen', this.value)">
-      </div>
-      {% endif %}
-    </div>
-    <div style="padding:2px 20px 10px;font-size:.74rem;color:var(--text-muted)">
-      {% if view.stress.shape == 'none' %}<strong>No downturn</strong> — the baseline cost of de-risking.
-      {% elif view.stress.shape == 'crash' %}A <strong>{{ view.stress.severity }}%</strong> crash starting at <strong>age {{ view.stress.shock_start_age }}</strong> ({{ view.stress.shock_start_year }}).
-      {% else %}A <strong>~{{ view.stress.decade_years }}-year</strong> stagnation starting at <strong>age {{ view.stress.shock_start_age }}</strong> ({{ view.stress.shock_start_year }}).{% endif %}
-      Same plan. <strong>Flat</strong> = no de-risk at your {{ view.stress.flat_label }} {{ view.stress.flat_rate }}% return (~{{ (100 - view.stress.flat_safe)|round|int }}% equity, so the crash hits it that much);
-      <strong>Glide</strong> = de-risk ({{ view.stress.glide_desc }}). Income is after tax.{% if view.stress.auto_timing and view.stress.shape != 'none' %} Timing auto-set to where de-risking helps most — change it above.{% endif %}
-    </div>
-    <div class="rdsp-breakeven">
-      <strong>Gliding</strong>
-      <span class="{{ 'text-green' if view.stress.nocrash_pct >= 0 else 'text-red' }}">{{ '+' if view.stress.nocrash_pct >= 0 else '' }}{{ view.stress.nocrash_pct }}%</span>
-      {% if view.stress.payoff_pct is not none %}income, no {{ 'crash' if view.stress.shape == 'crash' else 'stagnation' }} ·
-      <span class="{{ 'text-green' if view.stress.payoff_pct >= 0 else 'text-red' }}">{{ '+' if view.stress.payoff_pct >= 0 else '' }}{{ view.stress.payoff_pct }}%</span> income, if {{ 'crash' if view.stress.shape == 'crash' else 'stagnation' }}{% else %}income vs staying flat{% endif %}
-      <span class="text-dim">· ≡ staying flat at {{ view.stress.breakeven_safe }}% safe</span>
-    </div>
-    <div class="table-scroll rdsp-plan">
-      <table class="data-table">
-        <thead><tr><th>After the shock</th><th class="r">Flat (no de-risk)</th><th class="r">Glide (de-risk)</th><th class="r">Glide vs Flat</th></tr></thead>
-        <tbody>
-          {% for m in view.stress.metrics %}
-          <tr>
-            <td>{{ m.label }}</td>
-            <td class="r">{{ m.flat }}</td>
-            <td class="r">{{ m.glide }}</td>
-            <td class="r {{ m.cls }}">{{ '+' if m.diff_pct >= 0 else '' }}{{ m.diff_pct }}{% if m.is_pp %} pp{% else %}%{% endif %}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    <div class="card-header" style="border-top:1px solid var(--border-sub);border-bottom:none">Across every scenario
-      <span class="card-sub">glide's after-tax income vs the flat plan — green = de-risking pays off</span>
-    </div>
-    <div class="table-scroll rdsp-plan">
-      <table class="data-table">
-        <thead><tr><th>Scenario</th><th class="r">Glide income vs flat</th></tr></thead>
-        <tbody>
-          {% for s in view.stress.scenarios %}
-          <tr><td>{{ s.label }}</td><td class="r {{ s.cls }}">{{ '+' if s.diff_pct >= 0 else '' }}{{ s.diff_pct }}%</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
-
 <!-- Glide Lab — allocation-based flat-vs-glide de-risk analyzer (Model C) -->
 <div class="card rdsp-glidelab" style="margin-top:16px">
   <div class="card-header">Glide Lab
@@ -420,14 +337,29 @@
       </select></div>
   </div>
   <div class="rdsp-gl-tiles" id="glLabTiles"></div>
+  <div class="rdsp-gl-summary" id="glLabSummary"></div>
   <div class="rdsp-gl-views">
-    <button type="button" class="btn btn-sm rdsp-viewbtn gl-viewbtn active" data-glview="value">Value paths</button>
-    <button type="button" class="btn btn-sm rdsp-viewbtn gl-viewbtn" data-glview="alloc">Allocation</button>
+    <button type="button" class="btn btn-sm rdsp-viewbtn gl-viewbtn active" data-glview="alloc">Allocation</button>
     <button type="button" class="btn btn-sm rdsp-viewbtn gl-viewbtn" data-glview="breakeven">Break-even</button>
     <button type="button" class="btn btn-sm rdsp-viewbtn gl-viewbtn" data-glview="dial">Cost vs protection</button>
   </div>
   <div class="chart-wrap" style="height:340px;padding:14px 18px"><canvas id="glideLabChart"></canvas></div>
   <div class="rdsp-gl-caption" id="glLabCaption">Loading…</div>
+  <div class="table-scroll rdsp-plan">
+    <table class="data-table">
+      <thead><tr><th>After the shock</th><th class="r">Flat (no de-risk)</th><th class="r">Glide (de-risk)</th><th class="r">Glide vs Flat</th></tr></thead>
+      <tbody id="glLabMetrics"></tbody>
+    </table>
+  </div>
+  <div class="card-header" style="border-top:1px solid var(--border-sub);border-bottom:none">Across every scenario
+    <span class="card-sub">glide's after-tax income vs the flat plan — green = de-risking pays off</span>
+  </div>
+  <div class="table-scroll rdsp-plan">
+    <table class="data-table">
+      <thead><tr><th>Scenario</th><th class="r">Glide income vs flat</th></tr></thead>
+      <tbody id="glLabScenarios"></tbody>
+    </table>
+  </div>
 </div>
 
 <!-- Editable plan -->
@@ -498,6 +430,8 @@ function togglePanel(id, arrowId) {
   const money = (window.PT && window.PT.money) || { format: v => '$' + Math.round(v).toLocaleString() };
   const ctx = document.getElementById('rdspChart').getContext('2d');
   let mode = 'value', chart;
+  let glideOverlay = null;   // flat/glide stress lines fed by the Glide Lab (set via rdspSetGlideOverlay)
+  window.rdspSetGlideOverlay = function (o) { glideOverlay = o; if (chart) build(); };
 
   // Reload with one query param changed (keeps all the others).
   window.setP = function (k, v) { const u = new URL(location); u.searchParams.set(k, v); location.href = u.search; };
@@ -602,6 +536,7 @@ function togglePanel(id, arrowId) {
                      ['withdrawals', M.withdrawal_start, '#9fc0dc'],
                      ['deplete', M.depletion, '#ff6b6b']];
       if (C.glide) marks.push(['de-risk start', C.glide.begin, '#b98cff'], ['de-risked', C.glide.end, '#b98cff']);
+      if (glideOverlay && glideOverlay.markers && glideOverlay.markers.crash) marks.push(['crash', glideOverlay.markers.crash, '#ff6b6b']);
       ctx.save(); ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
       const used = [];
       marks.forEach(([lbl, yr, col]) => {
@@ -628,13 +563,11 @@ function togglePanel(id, arrowId) {
         { label: 'Projected', data: C.projected, borderColor: '#5fd6f5', borderDash: [6, 4],
           pointRadius: 0, borderWidth: 2, tension: .2, fill: false },
       ];
-      if (C.stress_flat) {
-        const shock = C.stress_label || 'crash';
-        const short = /stag/.test(shock) ? 'stag' : 'crash';
-        ds.push({ label: 'Glide + ' + shock, legendLabel: 'Glide+' + short,
-          data: C.stress_glide, borderColor: '#b98cff', borderDash: [4, 3], pointRadius: 0, borderWidth: 2, tension: .2, fill: false });
-        ds.push({ label: 'Flat + ' + shock, legendLabel: 'Flat+' + short,
-          data: C.stress_flat, borderColor: '#ff6b6b', borderDash: [4, 3], pointRadius: 0, borderWidth: 2, tension: .2, fill: false });
+      if (glideOverlay) {   // fed by the Glide Lab: flat = red (takes the crash), glide = purple
+        ds.push({ label: 'Glide (de-risk)', legendLabel: 'Glide', data: glideOverlay.glide,
+          borderColor: '#b98cff', borderDash: [5, 3], pointRadius: 0, borderWidth: 2, tension: .2, fill: false });
+        ds.push({ label: 'Flat (no de-risk)', legendLabel: 'Flat', data: glideOverlay.flat,
+          borderColor: '#ff6b6b', borderDash: [5, 3], pointRadius: 0, borderWidth: 2, tension: .2, fill: false });
       }
       return ds;
     }
@@ -721,7 +654,7 @@ function togglePanel(id, arrowId) {
 (function () {
   const canvas = document.getElementById('glideLabChart');
   if (!canvas) return;
-  let glChart, glData, glMode = 'value';
+  let glChart, glData, glMode = 'alloc';
   const dollars = n => '$' + Math.round(n).toLocaleString();
   // Plan identity on the value/alloc charts (glide purple, flat white); win/lose
   // green/red used only on the break-even & dial; cyan = withdrawal marker.
@@ -772,9 +705,10 @@ function togglePanel(id, arrowId) {
 
   window.refreshGlideLab = function () {
     document.getElementById('glLabCaption').textContent = 'Calculating…';
-    fetch('/rdsp/glide-lab?' + glParams()).then(r => r.json()).then(g => {
+    fetch('/rdsp/glide-lab?full=1&' + glParams()).then(r => r.json()).then(g => {
       if (!g || !g.value) { document.getElementById('glLabCaption').textContent = 'No data.'; return; }
-      glData = g; renderTiles(g); drawChart();
+      glData = g; renderTiles(g); renderMerged(g); drawChart();
+      if (window.rdspSetGlideOverlay) window.rdspSetGlideOverlay(g.overlay);   // draw flat/glide on the main chart
     }).catch(() => { document.getElementById('glLabCaption').textContent = 'Could not load.'; });
   };
 
@@ -785,13 +719,29 @@ function togglePanel(id, arrowId) {
   function renderTiles(g) {
     const c = g.crash_year, t = g.totals, be = g.breakeven.point;
     const cyVal = c ? c.flat + '% / ' + c.glide + '%' : '—';
-    const cySub = c ? 'flat / glide · age ' + c.age : (g.shape === 'decade' ? 'n/a for a lost decade' : 'no shock');
+    const cySub = c ? 'flat / glide · age ' + c.age : 'no shock';
     const beTile = g.shape === 'none' ? '—' : (be == null ? 'never' : be + '%');
     document.getElementById('glLabTiles').innerHTML =
       tile('Crash-year hit', cyVal, cySub) +
       tile('Worst-year income', dollars(g.floor.flat) + ' / ' + dollars(g.floor.glide), 'flat / glide, under shock') +
-      tile('Break-even crash chance', beTile, 'glide pays off above this') +
-      tile('Income, no shock', dollars(t.calm_flat) + ' / ' + dollars(t.calm_glide), 'flat / glide, lifetime');
+      tile('Break-even crash chance', beTile, 'glide pays off above this');
+  }
+
+  function renderMerged(g) {
+    const s = g.summary, sgn = v => (v >= 0 ? '+' : '') + v + '%', cls = v => v >= 0 ? 'text-green' : 'text-red';
+    const word = g.shape === 'crash' ? 'crash' : (g.shape === 'decade' ? 'lost decade' : 'shock');
+    let sum = '<strong>Gliding</strong> <span class="' + cls(s.nocrash_pct) + '">' + sgn(s.nocrash_pct) +
+      ' income</span>, no ' + (g.shape === 'none' ? 'shock' : word);
+    if (s.payoff_pct !== null) sum += ' · <span class="' + cls(s.payoff_pct) + '">' + sgn(s.payoff_pct) +
+      ' income</span>, if ' + word;
+    sum += ' <span class="text-dim">· ≡ staying flat at ' + s.breakeven_safe + '% safe</span>';
+    document.getElementById('glLabSummary').innerHTML = sum;
+    const row = (a, b) => '<tr>' + a + b + '</tr>';
+    document.getElementById('glLabMetrics').innerHTML = (g.metrics || []).map(m =>
+      row('<td>' + m.label + '</td>', '<td class="r">' + m.flat + '</td><td class="r">' + m.glide +
+        '</td><td class="r ' + m.cls + '">' + (m.diff_pct >= 0 ? '+' : '') + m.diff_pct + '%</td>')).join('');
+    document.getElementById('glLabScenarios').innerHTML = (g.scenarios || []).map(sc =>
+      row('<td>' + sc.label + '</td>', '<td class="r ' + sc.cls + '">' + (sc.diff_pct >= 0 ? '+' : '') + sc.diff_pct + '%</td>')).join('');
   }
 
   const grid = { color: 'rgba(120,160,200,.10)' };
@@ -839,9 +789,12 @@ function togglePanel(id, arrowId) {
         x: { title: axisTitle('Chance of a severe crash (%)'), grid, ticks: { color: '#5a7a96', callback: function (v, i) { return this.chart.data.labels[i] + '%'; } } },
         y: { title: axisTitle('$ glide − flat'), grid, ticks: { color: '#5a7a96', callback: v => dollars(v) } },
       };
+      const bePt = be.point == null ? [] : be.p.map(p => p === Math.round(be.point / 5) * 5 ? 0 : null);
       cfg = { type: 'line', data: { labels: be.p, datasets: [
+        { label: '_zero', data: be.p.map(() => 0), borderColor: 'rgba(154,167,179,.45)', borderWidth: 1, borderDash: [4, 4], pointRadius: 0 },
         { label: 'Glide − Flat', data: be.ev, borderColor: COL.win, borderWidth: 2, pointRadius: 0, tension: .1,
-          segment: { borderColor: c => c.p1.parsed.y >= 0 ? COL.win : COL.loss } }] }, options: o };
+          segment: { borderColor: c => c.p1.parsed.y >= 0 ? COL.win : COL.loss } },
+        { label: '_pt', data: bePt, borderColor: 'transparent', pointRadius: 5, pointBackgroundColor: '#c8d8e8', pointBorderColor: '#0c1929' }] }, options: o };
       text = be.point == null ? 'Gliding loses at every probability for this shock — it never breaks even.'
                               : 'Above ≈' + be.point + '% chance of this shock happening, gliding comes out ahead (where the line crosses $0).';
 
@@ -856,10 +809,23 @@ function togglePanel(id, arrowId) {
         x: { title: axisTitle('Glide target (% safe)'), grid: { display: false }, ticks: { color: '#5a7a96', callback: function (v, i) { return this.chart.data.labels[i] + '%'; } } },
         y: { title: axisTitle('$ vs flat'), grid, ticks: { color: '#5a7a96', callback: v => dollars(v) } },
       };
+      const bySign = arr => arr.map(v => v >= 0 ? 'rgba(0,230,118,.55)' : 'rgba(255,107,107,.6)');
+      const costs = d.map(x => x.cost), pays = d.map(x => x.payoff);
       cfg = { type: 'bar', data: { labels: d.map(x => x.target), datasets: [
-        { label: 'Certain calm cost', data: d.map(x => x.cost), backgroundColor: 'rgba(255,107,107,.6)', borderColor: bord, borderWidth: bw },
-        { label: 'Crash payoff', data: d.map(x => x.payoff), backgroundColor: 'rgba(0,230,118,.55)', borderColor: bord, borderWidth: bw }] }, options: o };
-      text = 'How hard you de-risk (your current target is outlined): red = income given up for certain, green = what the chosen shock pays back.';
+        { label: 'Calm income vs flat', data: costs, backgroundColor: bySign(costs), borderColor: bord, borderWidth: bw },
+        { label: 'Shock income vs flat', data: pays, backgroundColor: bySign(pays), borderColor: bord, borderWidth: bw }] }, options: o };
+      // Most efficient hedge = the de-risking target (cost in calm, gain in the shock)
+      // with the lowest break-even crash chance.
+      const cands = d.filter(x => x.cost < 0 && x.payoff > 0)
+        .map(x => ({ t: x.target, p: x.cost / (x.cost - x.payoff) }))
+        .filter(x => x.p > 0 && x.p < 1);
+      let lead = 'How hard you de-risk (current target outlined): green = a gain for the glide, red = a loss.';
+      if (cands.length) {
+        const best = cands.reduce((a, b) => b.p < a.p ? b : a);
+        lead = 'Most efficient hedge: ' + best.t + '% safe for the modeled crash (pays off above ≈' +
+          Math.round(best.p * 100) + '% crash chance). ' + lead;
+      }
+      text = lead;
     }
 
     glChart = new Chart(canvas.getContext('2d'), cfg);

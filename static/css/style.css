@@ -763,6 +763,8 @@ body.customizing .nav-hidden { display: flex; opacity: .45; }
 .gl-tile-v { font-size: 1rem; font-weight: 600; color: var(--text); font-family: var(--mono); }
 .gl-tile-s { font-size: .64rem; color: var(--text-dim); }
 .rdsp-gl-views { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 20px 0; }
+.rdsp-gl-summary { padding: 11px 20px; font-size: .82rem; line-height: 1.5; color: var(--text-dim); border-bottom: 1px solid var(--border-sub); }
+.rdsp-gl-summary strong { color: var(--text); }
 
 /* Permanent inline callouts (not auto-dismissed like .flash) */
 .callout { margin: 8px 0; padding: 10px 12px; border-radius: var(--radius-sm);

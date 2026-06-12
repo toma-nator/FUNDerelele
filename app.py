@@ -1134,9 +1134,11 @@ def rdsp_data():
 @app.route('/rdsp/glide-lab')
 def rdsp_glide_lab():
     # Lazy: the allocation-based Glide Lab is heavier than the rest of the tab, so the
-    # section fetches it on demand (keeps the main page load light).
+    # section fetches it on demand. `full=1` adds the heavy dial + scenario grid (a
+    # deferred second fetch) so the core view stays snappy.
     from rdsp_view import get_rdsp_view
-    view = get_rdsp_view(**_rdsp_args(), include_glide_lab=True)
+    full = request.args.get('full') == '1'
+    view = get_rdsp_view(**_rdsp_args(), include_glide_lab=True, gl_full=full)
     return jsonify(view.get('glide_lab') or {})
 
 

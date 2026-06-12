@@ -34,12 +34,13 @@ GL_FLATMIX_DEFAULT = 40.0
 # over time: return(y) = safe%(y)·safe_rate + (1 − safe%(y))·equity(y).
 def _gl_shock_equity(y, start, shape, severity, decade_len):
     """Equity-sleeve return in year `y` under a shock (None = a normal year)."""
-    if shape == 'crash':
+    if shape == 'crash':                                     # a "V": deep 2-yr drop, then recovers
         if y == start:     return -severity / 100.0
-        if y == start + 1: return -severity / 200.0          # partial bounce
-    elif shape == 'decade':
-        if start <= y < start + decade_len:
-            return rdsp.LOST_DECADE_RETURN
+        if y == start + 1: return -severity / 200.0          # second down year, then normal returns
+    elif shape == 'decade':                                  # an "L": crash-led, then flat — no recovery
+        if y == start:     return -severity / 100.0          # the initial crash …
+        if start < y < start + decade_len:
+            return rdsp.LOST_DECADE_RETURN                   # … then stagnant for the rest of the decade
     return None
 
 
@@ -134,10 +135,23 @@ def actuals_by_year(names):
     return out
 
 
+_VBY_CACHE = {'key': None, 'ts': 0.0, 'val': None}
+
+
 def value_by_year(names):
     """(year → end-of-year value cents, current_value cents) from the live
     performance series (market value + cash). Year-end = last monthly point in the
-    year; the final point is today's live value."""
+    year; the final point is today's live value.
+
+    The performance series is a heavy rebuild (~1s, hits yfinance) and the account
+    value doesn't change between Glide-Lab tweaks, so cache it briefly — this is what
+    keeps the lab's per-input AJAX snappy (the projection math itself is ~instant)."""
+    import time as _time
+    key = tuple(sorted(names))
+    now = _time.time()
+    if _VBY_CACHE['key'] == key and now - _VBY_CACHE['ts'] < 60:
+        return _VBY_CACHE['val']
+
     from calculations import get_performance_series
     per_year, current = {}, 0
     for name in names:
@@ -153,6 +167,7 @@ def value_by_year(names):
             per_year[y] = per_year.get(y, 0) + v
         if mv:
             current += rdsp.to_cents((mv[-1] or 0) + (cash[-1] if cash else 0))
+    _VBY_CACHE.update(key=key, ts=now, val=(per_year, current))
     return per_year, current
 
 
@@ -267,7 +282,7 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
                   draw_style='flat', glide_start_age=None, glide_length=None,
                   glide_target=None, glide_safe_return=None, glide_current=None,
                   stress_shape='crash', stress_timing=None, stress_severity=None, stress_decade_len=None,
-                  gl_stock=None, gl_safe=None, gl_flatmix=None, include_glide_lab=False):
+                  gl_stock=None, gl_safe=None, gl_flatmix=None, include_glide_lab=False, gl_full=False):
     """Assemble the full RDSP payload (dollars) for the template/JSON endpoint."""
     names = rdsp_accounts()
     if not names:
@@ -647,184 +662,19 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
         'rows': glide_rows,
     }
 
-    # ── Sequence-of-returns stress test ──
-    # Same plan under a badly-timed downturn, comparing the flat drawdown vs the glide.
-    # The shock hits the EQUITY sleeve only, so each plan's equity exposure decides the
-    # blow: the glide's is 1 − safe%(year); the flat's is 1 − the safe % its drawdown
-    # preset implies (the editable equity table). In a shock year the equity return is
-    # −crash (or ~0 in a lost decade) and the safe sleeve keeps earning the safe rate.
+    # ── Stress params (shape / severity / timing) ──
+    # The heavy flat-vs-glide analysis now lives in the Glide Lab (allocation model);
+    # here we just derive the params it (and the main-chart overlay) need.
     s_shape = stress_shape if stress_shape in ('none', 'crash', 'decade') else 'crash'
     s_depth = max(5.0, min(_float(stress_severity, 35.0), 90.0))
     s_decade_len = int(max(3, min(_float(stress_decade_len, 7), 15)))
     STRESS_TIMING_OFFSET = {'early': 0, 'mid': 8, 'late': 16}
-
-    def _safe_at(y):
-        return g_current if y <= glide_begin else (g_target if y >= glide_end else glide_safe_at.get(y, g_current))
-
-    # Flat plan's safe % ← the editable equity table (keyed by the drawdown preset).
-    flat_safe_pct = equity_safe_map().get(draw_label, 0.0)
-
-    def _shock_equity(y, start, shape):
-        if shape == 'crash':
-            if y == start:     return -s_depth / 100
-            if y == start + 1: return -s_depth / 200                # partial bounce
-        elif shape == 'decade':
-            if start <= y < start + s_decade_len: return rdsp.LOST_DECADE_RETURN
-        return None
-
-    def _paths(start, shape):
-        """(flat, glide) per-year returns under a `shape` shock starting at `start`."""
-        flat, glide = {}, {}
-        for y in range(cy + 1, end_year + 1):
-            # Growth sleeve earns the accumulation `rate` until withdrawals begin, then the
-            # `draw_rate` — identical for BOTH arms. So the growth assumption no longer feeds
-            # the glide's retirement returns differently from the flat's; the glide differs
-            # from the flat purely in ALLOCATION (its de-risking safe %), not in equity return.
-            growth = rate if y < wd_start_year else draw_rate
-            eq = _shock_equity(y, start, shape)
-            if eq is None:                                          # normal year — returns unchanged
-                flat[y] = growth
-                glide[y] = rdsp.blended_return(_safe_at(y), growth, g_safe_ret)
-            else:                                                   # shock year — equity sleeve takes the hit
-                flat[y] = rdsp.blended_return(flat_safe_pct, eq, g_safe_ret)
-                glide[y] = rdsp.blended_return(_safe_at(y), eq, g_safe_ret)
-        return flat, glide
-
-    def _avg_income(rby):
-        """Average after-tax yearly income across the drawdown for a return path."""
-        pr = project_rby(rby)
-        rows = pr['rows']
-        n = sum(1 for r in rows if r['phase'] == 'decumulation' and r['withdrawal'] > 0)
-        net = sum(r['withdrawal'] for r in rows) - int(round(pr['summary']['taxable_total'] * tax_pct))
-        return (net / n) if n else 0.0
-
-    # No-shock baseline — the pure income cost of de-risking, crash aside.
-    flat_calm, glide_calm = _paths(0, 'none')
-    flat_calm_inc, glide_calm_inc = _avg_income(flat_calm), _avg_income(glide_calm)
-
-    # Auto BEST-case timing: default to whichever crash timing the glide benefits from
-    # most (its largest after-tax income edge over the flat plan) — i.e. when de-risking
-    # pays off best. Honour an explicit pick from the dropdown.
-    timings = ['early', 'mid', 'late']
-    if stress_timing in timings:
-        s_when, auto_timing = stress_timing, False
-    elif s_shape == 'none':
-        s_when, auto_timing = 'early', False
-    else:
-        def _glide_edge(t):
-            fp, gp = _paths(wd_start_year + STRESS_TIMING_OFFSET[t], s_shape)
-            return _avg_income(gp) - _avg_income(fp)
-        s_when, auto_timing = max(timings, key=_glide_edge), True
-
+    s_when = stress_timing if stress_timing in STRESS_TIMING_OFFSET else ('early' if s_shape == 'none' else 'mid')
     shock_start = wd_start_year + STRESS_TIMING_OFFSET[s_when]
-    flat_stress, glide_stress = _paths(shock_start, s_shape)
-
-    # Chart overlay: a matched pair of balance paths under the selected shock — the
-    # FLAT (un-de-risked) plan and the GLIDE (de-risked) plan — so the gap between
-    # them shows what de-risking preserves. The crash pair swaps out for the
-    # lost-decade pair when a stagnation is selected.
-    def _stress_line(rby):
-        vals = {pr['year']: pr['value'] for pr in project_rby(rby)['rows']}
-        out = []
-        for i, t in enumerate(timeline):
-            if i < n_actual - 1:
-                out.append(None)
-            elif i == n_actual - 1:
-                out.append(D(t['value']))                          # join at the last actual point
-            else:
-                out.append(D(vals.get(t['year'], 0)))
-        return out
-
-    if s_shape == 'none':
-        stress_flat_line, stress_glide_line, stress_chart_label = None, None, ''
-    else:
-        stress_flat_line = _stress_line(flat_stress)
-        stress_glide_line = _stress_line(glide_stress)
-        stress_chart_label = f"{round(s_depth)}% crash" if s_shape == 'crash' else f"{s_decade_len}-yr stagnation"
-
-    def _income(rby):
-        pr = project_rby(rby)
-        rows = pr['rows']
-        decum = [r for r in rows if r['phase'] == 'decumulation' and r['withdrawal'] > 0]
-        n = len(decum)
-        incomes = [r['withdrawal'] - int(round(r['taxable'] * tax_pct)) for r in decum]   # per-year after-tax
-        net = sum(r['withdrawal'] for r in rows) - int(round(pr['summary']['taxable_total'] * tax_pct))
-        drops = [incomes[i - 1] - incomes[i] for i in range(1, len(incomes))]
-        return {'avg_monthly': (net // n // 12) if n else 0, 'avg_yearly': (net // n) if n else 0,
-                'total': net, 'ending': pr['summary']['final_value'],
-                'worst': min(incomes) if incomes else 0,
-                'drop': max([d for d in drops if d > 0] or [0])}   # biggest 1-yr income fall
-
-    F, G = _income(flat_stress), _income(glide_stress)
-
-    def _pct(f, g):
-        return round((g - f) / f * 100, 1) if f else 0.0
-
-    def _c0(c):
-        return f"${rdsp.to_dollars(c):,.0f}"
-
-    def _ck(c):
-        d = rdsp.to_dollars(c)
-        return f"${d / 1000:,.0f}k" if abs(d) >= 1000 else _c0(c)
-
-    def _metric(label, key, higher_better=True, cell=None):
-        f, g = F[key], G[key]
-        better = (g >= f) if higher_better else (g <= f)
-        return {'label': label, 'flat': cell(F) if cell else _c0(f),
-                'glide': cell(G) if cell else _c0(g), 'diff_pct': _pct(f, g),
-                'cls': 'text-green' if better else 'text-red'}
-
-    def _income_cell(d):
-        return f"{_c0(d['avg_monthly'])}/mo · {_c0(d['avg_yearly'])}/yr · {_ck(d['total'])} total"
-
-    stress_metrics = [
-        _metric('After-tax income', 'avg_yearly', cell=_income_cell),
-        _metric('Worst-year income', 'worst'),
-        _metric('Biggest 1-yr income drop', 'drop', higher_better=False),
-        _metric('Ends with (bequest)', 'ending'),
-    ]
-
-    # ── Break-even: income Δ no-crash / payoff (this shock) / equivalent flat allocation ──
-    # Both signed glide − flat (positive = gliding gives more income), so the two read consistently.
-    nocrash_pct = round((glide_calm_inc - flat_calm_inc) / flat_calm_inc * 100, 1) if flat_calm_inc else 0.0
-    flat_shock_inc, glide_shock_inc = _avg_income(flat_stress), _avg_income(glide_stress)
-    payoff_pct = (round((glide_shock_inc - flat_shock_inc) / flat_shock_inc * 100, 1)
-                  if s_shape != 'none' and flat_shock_inc else None)
-
-    def _flat_s_income(s):                                     # a static flat portfolio at s% safe
-        return _avg_income({y: rdsp.blended_return(s, rate, g_safe_ret) for y in range(cy + 1, end_year + 1)})
-    lo, hi = 0.0, 100.0                                        # bisect for the safe % whose income matches the glide
-    for _ in range(12):
-        mid = (lo + hi) / 2
-        if _flat_s_income(mid) > glide_calm_inc:
-            lo = mid
-        else:
-            hi = mid
-    breakeven_safe = round((lo + hi) / 2)
-
-    # ── Scenario summary: glide vs flat after-tax income, every shock × timing ──
-    def _scenario(shape, when):
-        if shape == 'none':
-            fi, gi = flat_calm_inc, glide_calm_inc
-        else:
-            fp, gp = _paths(wd_start_year + STRESS_TIMING_OFFSET[when], shape)
-            fi, gi = _avg_income(fp), _avg_income(gp)
-        diff = round((gi - fi) / fi * 100, 1) if fi else 0.0
-        return {'diff_pct': diff, 'cls': 'text-green' if diff >= 0 else 'text-red'}
-    scenarios = [{'label': 'No shock', **_scenario('none', None)}]
-    for shape, name in [('crash', 'Sharp crash'), ('decade', 'Lost decade')]:
-        scenarios += [{'label': f'{name} — {w}', **_scenario(shape, w)} for w in timings]
-
-    stress = {
-        'shape': s_shape, 'timing': s_when, 'severity': round(s_depth), 'auto_timing': auto_timing,
-        'shock_start_year': shock_start, 'shock_start_age': shock_start - by,
-        'decade_years': s_decade_len,
-        'flat_rate': round(draw_rate * 100, 1), 'flat_label': draw_label, 'flat_safe': round(flat_safe_pct, 1),
-        'glide_desc': f"age {glide_begin - by}→{glide_end - by}, {round(g_target)}% safe",
-        'metrics': stress_metrics,
-        'nocrash_pct': nocrash_pct, 'payoff_pct': payoff_pct, 'breakeven_safe': breakeven_safe,
-        'scenarios': scenarios,
-    }
+    # Old rate-based main-chart overlay retired — the Glide Lab supplies the allocation one.
+    stress_flat_line = stress_glide_line = None
+    stress_chart_label = ''
+    stress = {'shape': s_shape, 'severity': round(s_depth), 'timing': s_when, 'decade_years': s_decade_len}
 
     # ── Glide Lab: allocation-based flat-vs-glide comparison (Model C) ──
     # Computed only on request (heavier than the rest of the tab). Both plans share
@@ -843,29 +693,114 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
             return _gl_return_map(gl_years, safe_at, gl_stock_rate, gl_safe_rate,
                                   shape, start, s_depth, s_decade_len)
 
-        fpath = project_rby(_lab_map(flat_at, *shock))['rows']
-        gpath = project_rby(_lab_map(glide_at, *shock))['rows']
-        calm_f, calm_g = _income(_lab_map(flat_at, 'none', 0)), _income(_lab_map(glide_at, 'none', 0))
-        shock_f, shock_g = _income(_lab_map(flat_at, *shock)), _income(_lab_map(glide_at, *shock))
+        # Per-request projection cache — many maps repeat (value == shock, overlay ==
+        # value, no-shock scenario == calm), so caching keeps the lab snappy.
+        _pcache = {}
+
+        def _projc(rby):
+            k = tuple(sorted(rby.items()))
+            if k not in _pcache:
+                _pcache[k] = project_rby(rby)
+            return _pcache[k]
+
+        def _incc(rby):
+            pr = _projc(rby)
+            rows = pr['rows']
+            inc = [r['withdrawal'] - int(round(r['taxable'] * tax_pct))
+                   for r in rows if r['phase'] == 'decumulation' and r['withdrawal'] > 0]
+            n = len(inc)
+            net = sum(r['withdrawal'] for r in rows) - int(round(pr['summary']['taxable_total'] * tax_pct))
+            drops = [inc[i - 1] - inc[i] for i in range(1, len(inc))]
+            return {'avg_monthly': (net // n // 12) if n else 0, 'avg_yearly': (net // n) if n else 0,
+                    'total': net, 'ending': pr['summary']['final_value'],
+                    'worst': min(inc) if inc else 0, 'drop': max([d for d in drops if d > 0] or [0])}
+
+        def _overlay_line(rby):                                  # aligned to the main projection timeline
+            vals = {pr['year']: pr['value'] for pr in _projc(rby)['rows']}
+            out = []
+            for i, t in enumerate(timeline):
+                if i < n_actual - 1:    out.append(None)
+                elif i == n_actual - 1: out.append(D(t['value']))
+                else:                   out.append(D(vals.get(t['year'], 0)))
+            return out
+
+        flat_shock, glide_shock = _lab_map(flat_at, *shock), _lab_map(glide_at, *shock)
+        calm_f, calm_g = _incc(_lab_map(flat_at, 'none', 0)), _incc(_lab_map(glide_at, 'none', 0))
+        shock_f, shock_g = _incc(flat_shock), _incc(glide_shock)
         calm_diff = calm_g['total'] - calm_f['total']
         crash_diff = shock_g['total'] - shock_f['total']
         be = glide_lab_breakeven(calm_diff, crash_diff) if has_shock else None
+        fpath, gpath = _projc(flat_shock)['rows'], _projc(glide_shock)['rows']
 
-        # Cost-vs-protection dial: vary the glide's target safe % (cost = calm, payoff = this shock)
-        dial = []
-        for tgt in range(0, 101, 20):
-            gs = _gl_glide_safe(glide_begin, glide_end, g_current, float(tgt))
-            cost = _income(_lab_map(gs, 'none', 0))['total'] - calm_f['total']
-            pay = (_income(_lab_map(gs, *shock))['total'] - shock_f['total']) if has_shock else 0
-            dial.append({'target': tgt, 'cost': D(cost), 'payoff': D(pay)})
-
-        # Crash-year zoom: the one-year hit (crash only — a lost decade has no single dramatic year)
+        # Crash-year zoom: the one-year hit (both shocks are now crash-led)
         crash_year = None
-        if s_shape == 'crash':
+        if has_shock:
             cy_eq = -s_depth / 100.0
             crash_year = {'age': shock_start - by,
                           'flat': round(rdsp.blended_return(flat_at(shock_start), cy_eq, gl_safe_rate) * 100, 1),
                           'glide': round(rdsp.blended_return(glide_at(shock_start), cy_eq, gl_safe_rate) * 100, 1)}
+
+        # Main-chart overlay: flat/glide value paths aligned to the projection timeline
+        overlay = {'flat': _overlay_line(flat_shock), 'glide': _overlay_line(glide_shock),
+                   'markers': {'withdrawal': wd_start_year, 'glide_begin': glide_begin,
+                               'glide_end': glide_end, 'crash': shock_start if has_shock else None}}
+
+        # ── Summary line + after-shock table (allocation model, no bequest) ──
+        def _pct(f, g):
+            return round((g - f) / f * 100, 1) if f else 0.0
+
+        def _c0(c):
+            return f"${rdsp.to_dollars(c):,.0f}"
+
+        def _ck(c):
+            d = rdsp.to_dollars(c)
+            return f"${d / 1000:,.0f}k" if abs(d) >= 1000 else _c0(c)
+
+        def _metric(label, key, higher_better=True, cell=None):
+            f, g = shock_f[key], shock_g[key]
+            better = (g >= f) if higher_better else (g <= f)
+            return {'label': label, 'flat': cell(shock_f) if cell else _c0(f),
+                    'glide': cell(shock_g) if cell else _c0(g), 'diff_pct': _pct(f, g),
+                    'cls': 'text-green' if better else 'text-red'}
+
+        metrics = [
+            _metric('After-tax income', 'avg_yearly',
+                    cell=lambda d: f"{_c0(d['avg_monthly'])}/mo · {_c0(d['avg_yearly'])}/yr · {_ck(d['total'])} total"),
+            _metric('Worst-year income', 'worst'),
+            _metric('Biggest 1-yr income drop', 'drop', higher_better=False),
+        ]
+
+        # Equivalent flat safe % whose calm income matches the glide's (bisect; higher safe = lower income)
+        target_inc = calm_g['avg_yearly']
+        lo, hi = 0.0, 100.0
+        for _ in range(6):
+            mid = (lo + hi) / 2
+            inc = _incc(_lab_map(_gl_flat_safe(wd_start_year, mid), 'none', 0))['avg_yearly']
+            lo, hi = (mid, hi) if inc > target_inc else (lo, mid)
+
+        # ── Heavy extras (cost-vs-protection dial + scenario grid): only on `gl_full` ──
+        dial = scenarios = None
+        if gl_full:
+            dial = []
+            for tgt in range(0, 101, 20):
+                gs = _gl_glide_safe(glide_begin, glide_end, g_current, float(tgt))
+                cost = _incc(_lab_map(gs, 'none', 0))['total'] - calm_f['total']
+                pay = (_incc(_lab_map(gs, *shock))['total'] - shock_f['total']) if has_shock else 0
+                dial.append({'target': tgt, 'cost': D(cost), 'payoff': D(pay)})
+
+            def _scen(shape, when):
+                if shape == 'none':
+                    fi, gi = calm_f['avg_yearly'], calm_g['avg_yearly']
+                else:
+                    st = wd_start_year + STRESS_TIMING_OFFSET[when]
+                    fi = _incc(_lab_map(flat_at, shape, st))['avg_yearly']
+                    gi = _incc(_lab_map(glide_at, shape, st))['avg_yearly']
+                diff = _pct(fi, gi)
+                return {'diff_pct': diff, 'cls': 'text-green' if diff >= 0 else 'text-red'}
+
+            scenarios = [{'label': 'No shock', **_scen('none', None)}]
+            for shp, name in [('crash', 'Sharp crash'), ('decade', 'Lost decade')]:
+                scenarios += [{'label': f'{name} — {w}', **_scen(shp, w)} for w in ('early', 'mid', 'late')]
 
         glide_lab = {
             'stock_rate': round(gl_stock_rate * 100, 1), 'safe_rate': round(gl_safe_rate * 100, 1),
@@ -880,6 +815,12 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
                           'point': round(be * 100) if be is not None else None},
             'dial': dial,
             'crash_year': crash_year,
+            'overlay': overlay,
+            'summary': {'nocrash_pct': _pct(calm_f['avg_yearly'], calm_g['avg_yearly']),
+                        'payoff_pct': _pct(shock_f['avg_yearly'], shock_g['avg_yearly']) if has_shock else None,
+                        'breakeven_safe': round((lo + hi) / 2)},
+            'metrics': metrics,
+            'scenarios': scenarios,
             'markers': {'withdrawal': wd_start_year - by, 'glide_begin': glide_begin - by,
                         'glide_end': glide_end - by, 'crash': (shock_start - by) if has_shock else None},
             # Worst-year after-tax income UNDER THE SHOCK (de-risking's real job is raising it)

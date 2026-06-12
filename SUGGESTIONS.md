@@ -22,12 +22,12 @@ Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈98 ideas)
+## Backlog at a glance (≈99 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
 | Charts | ~41 | ~26 finance-useful + ~15 fun/easter-egg (3 % charts now shipped) |
-| Per-tab feature enhancements | ~27 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX, RDSP |
+| Per-tab feature enhancements | ~28 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX, RDSP |
 | New tabs (big features) | 9 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt |
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
 | UI/UX polish | 6 | Restore-alerts, sidebar hide/reorder tabs, sparkline, chart descriptions/hide/star, daily-swing widget, trend indicator |
@@ -438,6 +438,17 @@ targets by hand and gives a starting point.
   a dropdown that populates the existing target inputs; engine unchanged.
 
 **Priority:** Impact: Med · Effort: medium
+
+## Rebalancer — flat-rate (constant safe %) drawdown support (parked)
+
+The RDSP **glide** drawdown hands off to the Rebalancer (seeded de-risk targets per
+year). Make the Rebalancer also support a **flat allocation** held *constant* through
+withdrawal — i.e. if the user picks a fixed safe/stock mix instead of gliding, the
+Rebalancer should keep that **same safe %** every year of the drawdown (rebalancing
+back to it), not ramp it. So both RDSP drawdown styles (glide *and* flat) have a
+working Rebalancer hand-off. Not needed now — user may or may not run a flat plan.
+
+**Priority:** Impact: Low–Med · Effort: small–medium
 
 ## Watchlist — quick "add transaction" from a row
 

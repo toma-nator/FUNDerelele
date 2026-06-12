@@ -310,9 +310,10 @@ def test_gl_shock_equity_crash_and_decade():
     assert _gl_shock_equity(2050, 2050, 'crash', 50, 10) == -0.50    # full hit
     assert _gl_shock_equity(2051, 2050, 'crash', 50, 10) == -0.25    # partial bounce
     assert _gl_shock_equity(2052, 2050, 'crash', 50, 10) is None     # over
-    assert _gl_shock_equity(2050, 2050, 'decade', 0, 7) == LOST_DECADE_RETURN
-    assert _gl_shock_equity(2056, 2050, 'decade', 0, 7) == LOST_DECADE_RETURN
-    assert _gl_shock_equity(2057, 2050, 'decade', 0, 7) is None      # past the decade
+    assert _gl_shock_equity(2050, 2050, 'decade', 30, 7) == -0.30    # crash-led: initial drop
+    assert _gl_shock_equity(2051, 2050, 'decade', 30, 7) == LOST_DECADE_RETURN  # then flat, no recovery
+    assert _gl_shock_equity(2056, 2050, 'decade', 30, 7) == LOST_DECADE_RETURN
+    assert _gl_shock_equity(2057, 2050, 'decade', 30, 7) is None     # past the decade
     assert _gl_shock_equity(2050, 2050, 'none', 50, 10) is None      # no shock
 
 
