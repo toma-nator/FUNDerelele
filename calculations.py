@@ -175,6 +175,13 @@ def get_cash_by_account_currency():
             native = (net_cad / rate) if rate else net_cad
         pools = result.setdefault(acc, {})
         pools[ccy] = pools.get(ccy, 0.0) + native
+    # Symmetric GIC cash model: lock active-GIC principal out of the CAD pool and
+    # return earned interest at maturity (principal returns implicitly), so a GIC's
+    # money flows continuously through cash ↔ GIC value without touching net worth.
+    for acc, adj in get_gic_cash_adjustment_by_account().items():
+        if adj:
+            pools = result.setdefault(acc, {})
+            pools['CAD'] = pools.get('CAD', 0.0) + adj
     # Snap to whole cents and drop sub-cent foreign "dust". Reconstructing native
     # amounts (net_cad / booked rate) leaves tiny float residue, so a foreign pool
     # that should be exactly $0 lingers at e.g. 0.004 USD — which then revalues at
@@ -542,9 +549,10 @@ def get_account_summary():
             continue
 
         total_value = holdings_mv + cash + gic_value_cad
-        # GIC principal isn't a cash transaction in this app, so count it as
-        # contributed capital — then all-time gain reflects only accrued interest.
-        net_contributions = contrib_by_account.get(account.name, 0.0) + gic['principal']
+        # Under the symmetric cash model the GIC's principal is funded from (and
+        # locked out of) this account's tracked cash — the deposit that funded it is
+        # already in net_contributions, so all-time gain reflects only accrued interest.
+        net_contributions = contrib_by_account.get(account.name, 0.0)
         grants_bonds = grants_by_account.get(account.name, 0.0)
 
         # Group active positions by currency (CAD/USD/…) with per-group subtotals,
@@ -940,6 +948,34 @@ def get_gic_value_by_account(as_of=None):
     return out
 
 
+def get_gic_cash_adjustment_by_account(as_of=None):
+    """Per-account CAD cash adjustment under the symmetric cash model — GICs are
+    funded from (and return to) the account's tracked cash:
+      • active GIC  → −principal  (cash is locked into the GIC; it shows separately
+                                   at its accruing value via get_gic_value_by_account)
+      • matured GIC → +(value_at_maturity − principal) = +interest
+        (the −principal it carried while active is dropped, so principal returns to
+         cash; maturity layers only the earned interest on top)
+    Net effect: buying draws principal out of cash, maturity returns principal+interest,
+    and net worth stays continuous across the maturity boundary. Returns {account: cad}.
+    May push an account's cash negative if its tracked cash never covered the principal
+    (i.e. the funding deposit was never recorded) — that's an intentional signal."""
+    from models import GIC
+    from datetime import date
+    today = as_of or date.today()
+    out = {}
+    for g in GIC.query.all():
+        if not g.account:
+            continue
+        principal = g.principal or 0.0
+        if g.maturity_date and today >= g.maturity_date:
+            _, value_at_maturity = gic_value(g, today)
+            out[g.account] = out.get(g.account, 0.0) + (value_at_maturity - principal)
+        else:
+            out[g.account] = out.get(g.account, 0.0) - principal
+    return out
+
+
 def get_gic_stats(account_filter=None, show_matured=False):
     from models import GIC
     from datetime import date
@@ -987,6 +1023,9 @@ def get_gic_stats(account_filter=None, show_matured=False):
     active_rows = [r for r in rows if not r['is_matured']]
     matured_rows = [r for r in rows if r['is_matured']]
 
+    # Lifetime interest already realized from matured GICs (returned to cash).
+    matured_interest_total = sum(r['interest_at_maturity'] for r in matured_rows)
+
     # Stat totals reflect ACTIVE GICs only — matured principal has been paid out.
     total_principal = sum(r['principal'] for r in active_rows)
     total_interest = sum(r['interest_accrued'] for r in active_rows)
@@ -1010,6 +1049,7 @@ def get_gic_stats(account_filter=None, show_matured=False):
         'next_maturity_days': next_maturity_days,
         'active_count': len(active_rows),
         'matured_count': len(matured_rows),
+        'matured_interest_total': matured_interest_total,
         'gic_accounts': gic_accounts,
         'active_account': account_filter or '',
         'show_matured': show_matured,
@@ -1168,6 +1208,28 @@ def get_tax_summary(year=None, inclusion_rate=None, marginal_rate=None):
     txn_accounts = {t.account for t in all_txns}
     registered_accounts = sorted(a for a in txn_accounts if is_registered(a))
 
+    # ── GIC interest income (matured in the selected year, non-registered) ──
+    # GIC interest is fully-taxable interest income in the year of maturity — no
+    # capital-gains inclusion rate applies. Registered accounts shelter it.
+    from models import GIC
+    gic_interest_rows = []
+    for g in GIC.query.order_by(GIC.maturity_date.asc()).all():
+        if not g.account or not g.maturity_date or g.maturity_date.year != year:
+            continue
+        if is_registered(g.account):
+            continue
+        _, value_at_maturity = gic_value(g)
+        interest = value_at_maturity - (g.principal or 0.0)
+        if abs(interest) < 0.005:
+            continue
+        gic_interest_rows.append({
+            'name': g.name or '', 'institution': g.institution or '',
+            'account': g.account, 'principal': g.principal or 0.0,
+            'maturity_date': g.maturity_date, 'interest': round(interest, 2),
+        })
+    gic_interest_total = round(sum(r['interest'] for r in gic_interest_rows), 2)
+    gic_interest_tax = round(gic_interest_total * marginal_rate, 2)
+
     return {
         'year': year,
         'is_current_year': year == today.year,
@@ -1194,6 +1256,9 @@ def get_tax_summary(year=None, inclusion_rate=None, marginal_rate=None):
         'yearly_realized': yearly_realized,
         'accounts': accounts,
         'registered_accounts': registered_accounts,
+        'gic_interest_rows': gic_interest_rows,
+        'gic_interest_total': gic_interest_total,
+        'gic_interest_tax': gic_interest_tax,
     }
 
 

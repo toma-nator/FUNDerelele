@@ -92,6 +92,47 @@
 </div>
 {% endif %}
 
+{# ── GIC interest income (matured, non-registered) ── #}
+{% if gic_interest_rows %}
+<div class="card">
+  <div class="card-header">
+    GIC Interest Income — {{ year }}
+    <span class="card-sub">fully taxable · non-registered · matured this year</span>
+  </div>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>GIC</th><th>Institution</th><th>Account</th>
+          <th>Matured</th><th class="r">Principal</th><th class="r">Interest</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in gic_interest_rows %}
+        <tr>
+          <td style="font-size:.82rem">{{ r.name or '—' }}</td>
+          <td class="text-dim" style="font-size:.78rem">{{ r.institution or '—' }}</td>
+          <td><span class="acct-badge acct-{{ r.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ r.account }}</span></td>
+          <td class="mono text-dim" style="font-size:.78rem">{{ r.maturity_date }}</td>
+          <td class="r mono text-dim">{{ r.principal | cad }}</td>
+          <td class="r mono text-green">{{ r.interest | cad }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr style="border-top:2px solid var(--border)">
+          <td colspan="4" style="padding:9px 14px;font-size:.72rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim)">
+            Interest income · est. tax {{ gic_interest_tax | cad }} @ {{ marginal_pct }}% marginal
+          </td>
+          <td></td>
+          <td class="r mono text-green" style="padding:9px 14px;font-weight:600">{{ gic_interest_total | cad }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 {# ── Realized G/L by year ── #}
 {% if yearly_realized | length > 1 %}
 <div class="card">

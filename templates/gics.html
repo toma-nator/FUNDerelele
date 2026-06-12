@@ -3,7 +3,7 @@
 {% block page_title %}GICs{% endblock %}
 
 {% block content %}
-<div class="stat-grid" style="grid-template-columns:repeat(5,1fr)">
+<div class="stat-grid" style="grid-template-columns:repeat({{ 6 if data.matured_count else 5 }},1fr)">
   <div class="stat-card">
     <div class="stat-label">Total Principal</div>
     <div class="stat-value">{{ data.total_principal | cad }}</div>
@@ -31,6 +31,13 @@
     <div class="stat-value text-dim">—</div>
     {% endif %}
   </div>
+  {% if data.matured_count %}
+  <div class="stat-card">
+    <div class="stat-label">Interest from Matured</div>
+    <div class="stat-value text-green">{{ data.matured_interest_total | cad }}</div>
+    <div class="stat-sub text-dim">{{ data.matured_count }} matured GIC{{ 's' if data.matured_count != 1 }}</div>
+  </div>
+  {% endif %}
 </div>
 
 {# ── Account chips ── #}
