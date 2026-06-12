@@ -97,6 +97,33 @@
     </table>
   </div>
 </div>
+
+<div class="card">
+  <div class="card-header">Point-in-Time Snapshot <span class="card-sub">value of the portfolio or an account on a chosen date</span></div>
+  <div class="holdings-toolbar">
+    <div class="filter-group">
+      <label>As of date</label>
+      <input type="date" id="snapDate" class="filter-select">
+    </div>
+    <div class="filter-group">
+      <label>Scope</label>
+      <select id="snapScope" class="filter-select">
+        <option value="portfolio">Whole Portfolio</option>
+        {% for a in accounts %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>&nbsp;</label>
+      <div style="display:flex;gap:8px;align-items:center;height:30px">
+        <button type="button" class="btn btn-primary" id="snapView">View</button>
+        <a class="btn" id="snapCsv" href="#">⭳ Export CSV</a>
+      </div>
+    </div>
+    <div class="filter-spacer"></div>
+    <span class="holdings-count" id="snapMsg"></span>
+  </div>
+  <div id="snapResult" style="display:none;padding:4px 18px 18px"></div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -321,6 +348,85 @@
   document.getElementById('perfBarLine').addEventListener('change', e => { state.barLine = e.target.value; render(); });
 
   fetchScope();
+})();
+
+// ── Point-in-Time Snapshot ──
+(function () {
+  const dateEl = document.getElementById('snapDate');
+  const scopeEl = document.getElementById('snapScope');
+  const msg = document.getElementById('snapMsg');
+  const result = document.getElementById('snapResult');
+  const csvBtn = document.getElementById('snapCsv');
+  dateEl.value = new Date().toISOString().slice(0, 10);
+  dateEl.max = dateEl.value;
+
+  const cad = v => (v < 0 ? '−$' : '$') + Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const signed = v => (v >= 0 ? '+$' : '−$') + Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  const params = () => 'date=' + encodeURIComponent(dateEl.value) + '&scope=' + encodeURIComponent(scopeEl.value);
+  const updateCsv = () => { csvBtn.href = '/performance/asof.csv?' + params(); };
+  const stat = (label, val, cls) =>
+    '<div class="stat-card"><div class="stat-label">' + label + '</div><div class="stat-value ' + (cls || '') + '">' + val + '</div></div>';
+
+  function render(d) {
+    if (!d.ok) { result.style.display = 'none'; msg.textContent = 'Could not load snapshot.'; return; }
+    msg.textContent = '';
+    result.style.display = 'block';
+    if (d.empty) { result.innerHTML = '<div class="empty-row">No activity on or before this date.</div>'; return; }
+
+    const glCls = d.unrealized_gl >= 0 ? 'text-green' : 'text-red';
+    let html = '<div class="snap-caption">As of ' + d.as_of + ' · ' + d.scope + '</div>';
+    // Default: the most important info, led by Total Value as the leftmost KPI.
+    html += '<div class="stat-grid" style="grid-template-columns:repeat(5,1fr);margin-top:4px">'
+      + stat('Total Value', cad(d.total_value), 'snap-total-kpi')
+      + stat('Holdings Value', cad(d.holdings_mv))
+      + stat('Cash', cad(d.cash))
+      + stat('Unrealized G/L', signed(d.unrealized_gl), glCls)
+      + stat('Holdings', d.num_holdings) + '</div>';
+    // Optional: the rest, behind a toggle.
+    html += '<a href="#" class="snap-toggle" id="snapMore">▸ More detail</a>'
+      + '<div id="snapDetail" style="display:none">'
+      + '<div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin:10px 0">'
+      + stat('Book Value', cad(d.book_value))
+      + stat('GICs', cad(d.gic_value))
+      + stat('Contributions', cad(d.contributions))
+      + stat('Unrealized %', (d.unrealized_gl_pct >= 0 ? '+' : '') + d.unrealized_gl_pct.toFixed(1) + '%', glCls)
+      + '</div>';
+    if (d.unpriced && d.unpriced.length)
+      html += '<div class="text-dim" style="font-size:.78rem;margin:0 0 8px">No historical price for: '
+        + d.unpriced.join(', ') + ' (excluded from value).</div>';
+    html += '<div class="table-scroll"><table class="data-table mini"><thead><tr>'
+      + '<th>Ticker</th><th>Ccy</th><th class="r">Qty</th><th class="r">Price</th>'
+      + '<th class="r">Value</th><th class="r">Book</th><th class="r">G/L</th></tr></thead><tbody>';
+    d.holdings.forEach(h => {
+      const hgl = h.unrealized_gl == null ? 'text-dim' : (h.unrealized_gl >= 0 ? 'text-green' : 'text-red');
+      html += '<tr><td class="mono ticker">' + h.ticker + '</td><td class="text-dim">' + h.currency + '</td>'
+        + '<td class="r mono">' + h.qty.toLocaleString() + '</td>'
+        + '<td class="r mono">' + (h.price == null ? '—' : h.price.toLocaleString()) + '</td>'
+        + '<td class="r mono">' + (h.price == null ? '—' : cad(h.market_value_cad)) + '</td>'
+        + '<td class="r mono text-dim">' + cad(h.book_value_cad) + '</td>'
+        + '<td class="r mono ' + hgl + '">' + (h.unrealized_gl == null ? '—' : signed(h.unrealized_gl)) + '</td></tr>';
+    });
+    html += '</tbody></table></div></div>';
+    result.innerHTML = html;
+
+    document.getElementById('snapMore').addEventListener('click', e => {
+      e.preventDefault();
+      const det = document.getElementById('snapDetail');
+      const open = det.style.display === 'none';
+      det.style.display = open ? 'block' : 'none';
+      e.target.textContent = (open ? '▾' : '▸') + ' More detail';
+    });
+  }
+
+  function load() {
+    msg.textContent = 'Loading…'; updateCsv();
+    fetch('/performance/asof?' + params()).then(r => r.json()).then(render)
+      .catch(() => { msg.textContent = 'Could not load snapshot.'; });
+  }
+  document.getElementById('snapView').addEventListener('click', load);
+  dateEl.addEventListener('change', updateCsv);
+  scopeEl.addEventListener('change', updateCsv);
+  updateCsv();
 })();
 </script>
 {% endblock %}

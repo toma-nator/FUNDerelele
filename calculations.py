@@ -2101,6 +2101,138 @@ def take_portfolio_snapshot():
     return True
 
 
+def get_snapshot_at(as_of, scope='portfolio'):
+    """Point-in-time snapshot of the portfolio (or one account) as of a date.
+
+    Reconstructs holdings from transactions dated ≤ as_of and values them at that
+    date's historical close (yfinance daily) and FX. Cash and contributions use
+    booked net_cad (CAD at transaction-time rates); GICs use their as-of value, and
+    the symmetric GIC cash adjustment credits matured interest / locks active
+    principal — all sharing the live engine's helpers. Returns headline value plus
+    optional detail (book, unrealized G/L, cash, GICs, contributions, per-holding)."""
+    from models import Transaction
+    from datetime import date, timedelta
+
+    today = date.today()
+    if as_of > today:
+        as_of = today
+    acct = None if scope in (None, '', 'portfolio') else scope
+
+    txns = (Transaction.query.order_by(Transaction.date.asc(), Transaction.id.asc()).all())
+    if acct:
+        txns = [t for t in txns if t.account == acct]
+    txns_to_date = [t for t in txns if t.date <= as_of]
+
+    base = {'ok': True, 'as_of': as_of.isoformat(), 'scope': acct or 'portfolio',
+            'total_value': 0.0, 'holdings_mv': 0.0, 'cash': 0.0, 'gic_value': 0.0,
+            'book_value': 0.0, 'unrealized_gl': 0.0, 'unrealized_gl_pct': 0.0,
+            'contributions': 0.0, 'num_holdings': 0, 'holdings': [], 'unpriced': []}
+    if not txns_to_date:
+        base['empty'] = True
+        return base
+
+    # Holdings as of the date (merge same ticker across accounts for a clean view).
+    raw_h = _holdings_acb(txns_to_date, 1.0)
+    merged = {}
+    for h in raw_h:
+        m = merged.setdefault(h['ticker'], {'ticker': h['ticker'], 'currency': h['currency'],
+                                            'qty': 0.0, 'book_value_cad': 0.0})
+        m['qty'] += h['qty']
+        m['book_value_cad'] += h['book_value_cad']
+        m['currency'] = h['currency']
+    holdings = [m for m in merged.values() if m['qty'] > 0.0001]
+
+    # Historical prices: daily closes from the first trade up to the as-of date.
+    tickers = sorted({h['ticker'] for h in holdings
+                      if ' ' not in h['ticker'] and h['ticker'] != 'CASH'})
+    fx = 1.365
+    price_map = {}
+    if tickers:
+        import yfinance as yf
+        import pandas as pd
+        symbols = tickers + ['USDCAD=X']
+        first_date = txns_to_date[0].date
+        try:
+            raw = yf.download(symbols, start=first_date.isoformat(),
+                              end=(as_of + timedelta(days=1)).isoformat(),
+                              auto_adjust=True, progress=False)
+        except Exception:
+            raw = pd.DataFrame()
+        if not raw.empty:
+            close_df = (raw['Close'] if isinstance(raw.columns, pd.MultiIndex)
+                        else raw[['Close']].rename(columns={'Close': symbols[0]}))
+            close_df.index = pd.to_datetime(close_df.index).normalize()
+
+            def _price_on(t):
+                if t not in close_df.columns:
+                    return None
+                col = close_df[t].dropna()
+                before = col[col.index <= pd.Timestamp(as_of)]
+                return float(before.iloc[-1]) if not before.empty else None
+
+            fx = _price_on('USDCAD=X') or fx
+            for t in tickers:
+                price_map[t] = _price_on(t)
+
+    holdings_mv = 0.0
+    priced_book = 0.0
+    book_total = 0.0
+    rows = []
+    unpriced = []
+    for h in holdings:
+        price = price_map.get(h['ticker'])
+        rate = fx if h['currency'] == 'USD' else 1.0
+        mv = (h['qty'] * price * rate) if price else 0.0
+        book_total += h['book_value_cad']
+        if price:
+            holdings_mv += mv
+            priced_book += h['book_value_cad']
+        else:
+            unpriced.append(h['ticker'])
+        rows.append({
+            'ticker': h['ticker'], 'currency': h['currency'], 'qty': round(h['qty'], 4),
+            'price': round(price, 4) if price else None,
+            'market_value_cad': round(mv, 2),
+            'book_value_cad': round(h['book_value_cad'], 2),
+            'unrealized_gl': round(mv - h['book_value_cad'], 2) if price else None,
+        })
+    rows.sort(key=lambda r: r['market_value_cad'], reverse=True)
+
+    # Cash = booked net_cad of every transaction ≤ as_of, plus the symmetric GIC
+    # adjustment (active −principal / matured +interest); GIC value = active GICs.
+    cash = sum((t.net_cad or 0.0) for t in txns_to_date)
+    gic_val_by = get_gic_value_by_account(as_of)
+    gic_adj_by = get_gic_cash_adjustment_by_account(as_of)
+    if acct:
+        gic_value = gic_val_by.get(acct, {}).get('value', 0.0)
+        cash += gic_adj_by.get(acct, 0.0)
+    else:
+        gic_value = sum(v['value'] for v in gic_val_by.values())
+        cash += sum(gic_adj_by.values())
+
+    contributions = sum((t.net_cad or 0.0) for t in txns_to_date
+                        if t.type == 'Deposit' and t.subtype not in ('RDSP Grant', 'RDSP Bond'))
+
+    unrealized_gl = holdings_mv - priced_book
+    total_value = holdings_mv + cash + gic_value
+
+    base.update({
+        'total_value': round(total_value, 2),
+        'holdings_mv': round(holdings_mv, 2),
+        'cash': round(cash, 2),
+        'gic_value': round(gic_value, 2),
+        'book_value': round(book_total, 2),
+        'unrealized_gl': round(unrealized_gl, 2),
+        'unrealized_gl_pct': round(unrealized_gl / priced_book * 100, 2) if priced_book else 0.0,
+        'contributions': round(contributions, 2),
+        'num_holdings': len(holdings),
+        'holdings': rows,
+        'unpriced': unpriced,
+        'fx_rate': round(fx, 4),
+    })
+    return base
+
+
 def get_performance_data():
     from models import PortfolioSnapshot
     import math

@@ -1304,6 +1304,61 @@ def performance_snapshot():
     return redirect(url_for('performance'))
 
 
+def _parse_asof_args():
+    from datetime import date
+    raw = (request.args.get('date') or '').strip()
+    try:
+        as_of = datetime.strptime(raw, '%Y-%m-%d').date()
+    except ValueError:
+        as_of = date.today()
+    return as_of, (request.args.get('scope') or 'portfolio').strip()
+
+
+@app.route('/performance/asof')
+def performance_asof():
+    from calculations import get_snapshot_at
+    as_of, scope = _parse_asof_args()
+    return jsonify(get_snapshot_at(as_of, scope))
+
+
+@app.route('/performance/asof.csv')
+def performance_asof_csv():
+    import csv, io
+    from flask import Response
+    from calculations import get_snapshot_at
+    as_of, scope = _parse_asof_args()
+    snap = get_snapshot_at(as_of, scope)
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(['Snapshot as of', snap['as_of']])
+    w.writerow(['Scope', snap['scope']])
+    w.writerow([])
+    w.writerow(['Total value (CAD)', f"{snap['total_value']:.2f}"])
+    w.writerow(['Holdings market value (CAD)', f"{snap['holdings_mv']:.2f}"])
+    w.writerow(['Cash (CAD)', f"{snap['cash']:.2f}"])
+    w.writerow(['GICs (CAD)', f"{snap['gic_value']:.2f}"])
+    w.writerow(['Book value (CAD)', f"{snap['book_value']:.2f}"])
+    w.writerow(['Unrealized G/L (CAD)', f"{snap['unrealized_gl']:.2f}"])
+    w.writerow(['Contributions to date (CAD)', f"{snap['contributions']:.2f}"])
+    w.writerow(['Holdings count', snap['num_holdings']])
+    if snap.get('unpriced'):
+        w.writerow(['Unpriced (no historical price)', ', '.join(snap['unpriced'])])
+    w.writerow([])
+    w.writerow(['Ticker', 'Currency', 'Qty', 'Price (native)',
+                'Market value (CAD)', 'Book (CAD)', 'Unrealized G/L (CAD)'])
+    for h in snap['holdings']:
+        w.writerow([h['ticker'], h['currency'], f"{h['qty']:g}",
+                    '' if h['price'] is None else f"{h['price']:.4f}",
+                    f"{h['market_value_cad']:.2f}", f"{h['book_value_cad']:.2f}",
+                    '' if h['unrealized_gl'] is None else f"{h['unrealized_gl']:.2f}"])
+
+    scope_slug = (snap['scope'] or 'portfolio').replace(' ', '_').replace('/', '-')
+    fname = f"snapshot_{snap['as_of']}_{scope_slug}.csv"
+    return Response(buf.getvalue(), mimetype='text/csv',
+                    headers={'Content-Disposition': f'attachment; filename="{fname}"'})
+
+
 @app.route('/performance/backfill', methods=['POST'])
 def performance_backfill():
     from calculations import backfill_performance_history
