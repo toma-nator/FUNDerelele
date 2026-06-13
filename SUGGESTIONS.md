@@ -22,16 +22,17 @@ Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈108 ideas)
+## Backlog at a glance (≈117 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
-| Charts | ~44 | ~26 finance-useful + ~15 fun/easter-egg (incl. composition-over-time, RDSP widget, top movers) |
-| Per-tab feature enhancements | ~29 | Performance, Dividends, Rebalancer, Watchlist, Cash Flows, Projections, Tax, Import, GICs, FX, RDSP (incl. ⭐ nest-egg floor) |
+| Charts | ~45 | ~27 finance-useful (incl. correlation/diversification heatmap) + ~15 fun/easter-egg (composition-over-time, RDSP widget, top movers) |
+| Per-tab feature enhancements | ~35 | Performance (MWR-vs-TWR, what-if replay), Dividends (payout-safety), Rebalancer, Watchlist, Cash Flows, Projections, Tax (asset-location, ✨ tax-loss harvester), Import, GICs, Holdings (manual NAV), FX, RDSP (incl. ⭐ nest-egg floor) |
+| AI / smart features | 1 | Portfolio commentary + "Ask your portfolio" (LLM grounded on your data) |
 | New tabs (big features) | 11 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt, Retirement (RRSP), Market research |
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
 | UI/UX polish | 6 | Restore-alerts, sidebar hide/reorder tabs, sparkline, chart descriptions/hide/star, daily-swing widget, trend indicator |
-| Infrastructure / hardening | 6 | Test suite, yfinance resilience, income tax, README screenshots, budget-app integration, robust sample data |
+| Infrastructure / hardening | 7 | Test suite, yfinance resilience, income tax, README screenshots, budget-app integration (+ read-only API endpoint), robust sample data |
 | Account / data model | 2 | Savings account (recurring-interest), curate available account types |
 | Canadian rules | 1 | RRSP room |
 | Internationalization | 1 | German → Spanish → French |
@@ -1102,6 +1103,112 @@ beta, blended risk — as a stacked-area / multi-line view, per account or overa
 the parked rolling-beta-over-time chart into a full composition history.)
 
 **Priority:** Impact: Med · Effort: medium–large
+
+## Read-only API endpoint — investment data source for the budget app
+
+A small **read-only JSON endpoint** (e.g. `GET /api/summary`) exposing this app's
+headline investment numbers — total invested value, value by account, cash, day
+change, all-time gain — so a **separate budgeting/accounts app** (the user is building
+one for income/spending/budgets) can pull the investment figure into its net-worth
+view. This app stays investment-only; the endpoint is the clean integration seam
+(pairs with the existing point-in-time snapshot + transactions CSV export). Keep it
+local-only / token-gated since it's personal data. _Effort: small — one route over
+`get_dashboard_stats` / `get_account_summary`._ Enables the "Budget / account-manager
+app integration" item below.
+
+**Priority:** Impact: Med · Effort: small
+
+## Tax — asset-location score (tax-efficient placement)
+
+Flag holdings that sit in a tax-inefficient account given Canadian rules, using the
+registered/non-reg data already on each account: e.g. **US dividend payers in a TFSA**
+(15% withholding is unrecoverable there but exempt in an RRSP), **interest/bonds in a
+non-registered** account (taxed at full marginal vs. sheltered), foreign income vs.
+the foreign-tax-credit. Output a per-holding "consider moving to X" hint + an overall
+asset-location score. Genuinely actionable and Canada-specific. _Effort: medium — a
+rules pass over holdings × account type × asset class (look-through already cached)._
+
+**Priority:** Impact: Med · Effort: medium
+
+## Holdings — manual price / NAV override per ticker
+
+Let any holding carry a **user-entered price/NAV** used when yfinance can't value it
+(some Canadian mutual funds, private/illiquid holdings, pre-IPO, delisted names like
+AVTE). Foundational — it makes *anything* trackable and feeds value everywhere
+(holdings, dashboard, snapshot, rebalancer). Show a small "manual price" badge + last-set
+date; live price takes over again if the symbol later resolves. _Effort: small–medium —
+a `manual_price` field (Setting or PriceCache column) + a fallback in the price read._
+
+**Priority:** Impact: Med · Effort: small–medium
+
+## Performance — money-weighted vs time-weighted, side by side
+
+The tab already computes **TWR** and money-weighted CAD benchmarks; add the portfolio's
+own **money-weighted return (IRR/XIRR)** next to its TWR as two stat cards. The gap
+tells a real story — TWR = how the holdings did, MWR = how *your contribution timing*
+did. _Effort: small — an XIRR over the dated cash flows you already have._
+
+**Priority:** Impact: Med · Effort: small
+
+## Dividends — payout safety / cut detection
+
+A per-holding **safety flag** from the dividend history you already store: detect a
+**cut or suspension** (a payment lower than the trailing run, or a missed period) and a
+**payout-trend** arrow (growing / flat / shrinking). Surfaces risk for the dividend-heavy
+user before it shows up in income. Pairs with the parked per-ticker drill-down.
+_Effort: small — a pass over each ticker's Dividend rows._
+
+**Priority:** Impact: Med _(dividend-friend feature)_ · Effort: small
+
+## Tax — tax-loss harvesting finder (cool + actually saves money)
+
+Scan for **non-registered** positions sitting at an unrealized loss that could be sold
+to **offset realized gains**, and rank them by loss harvested. The differentiator:
+this app **already computes the Canadian superficial-loss flag** (±30-day repurchase
+check in `get_tax_summary`), so the finder can flag when selling-then-rebuying would
+deny the loss, and suggest a **not-substantially-identical** swap to stay invested.
+Show: harvest candidates, $ loss available, tax saved at the marginal rate, and the
+30-day window. Professional-advisor-grade, and rare in that it's *cool and pays for
+itself*. _Effort: medium — a pass over non-reg holdings + the existing superficial-loss
+logic + a marginal-rate calc._
+
+**Priority:** Impact: **High** · Effort: medium _(strong "cool but genuinely useful" pick — build after the ⭐ nest-egg floor)_
+
+## AI / smart — portfolio commentary + "Ask your portfolio"
+
+LLM-powered layer over the structured data (Claude API):
+- **Auto commentary** — a monthly/quarterly plain-English recap ("up 3.2%, led by NVDA;
+  RDSP grant maxed; CJFGX dragged; cash is sitting idle") generated from the dashboard /
+  performance / dividend numbers already computed.
+- **Ask your portfolio** — a natural-language query box ("how much did I make on Apple?",
+  "what's my dividend income this year?", "which account is most tax-inefficient?")
+  answered from the data (tool-call the existing `calculations` functions / a read view).
+- **Watch:** keep it grounded — feed real computed numbers, don't let it free-hallucinate;
+  redact / local-key the API use since it's personal financial data.
+- **Effort:** medium — a prompt + a small tool/function layer exposing the existing stats.
+
+**Priority:** Impact: Med _(novel, very differentiating)_ · Effort: medium
+
+## Performance — "what-if" time machine (decision replay)
+
+Replay the portfolio's path under **alternate choices**: didn't sell AVTE, started the
+PAC a year earlier, held instead of trimmed, never bought X. Reuses your transactions +
+historical prices (the same `_holdings_acb` + `price_on` machinery as the snapshot) to
+re-derive an alternate value series and compare against actual. Fascinating and
+instructive ("that sale cost you $X"). _Effort: medium — a transaction-edit overlay +
+re-run of the historical valuation._
+
+**Priority:** Impact: Low–Med · Effort: medium
+
+## Charts — true-diversification / correlation heatmap
+
+A correlation matrix of the holdings' returns (from cached price history) + a
+**"diversification score"** — surfaces the "you *think* you're diversified, but
+everything moves together" reality (e.g. 8 tech-adjacent names). A coloured grid + one
+headline number. _Effort: small–medium — pairwise correlation over ~1yr daily returns
+(numpy, already available) + a Chart.js matrix/heatmap plugin._
+
+**Priority:** Impact: Med · Effort: small–medium
 
 ## Budget / account-manager app integration (much later)
 
