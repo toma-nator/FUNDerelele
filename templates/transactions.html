@@ -252,7 +252,7 @@
           </td>
           <td class="text-dim mono">{{ t.id }}</td>
           <td class="mono">{{ t.date.strftime('%Y-%m-%d') }}</td>
-          <td class="mono ticker">{{ t.ticker }}</td>
+          <td class="mono ticker">{{ t.ticker | tlabel }}</td>
           <td class="acct-cell"><span class="acct-badge acct-{{ t.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}" title="{{ t.account }}">{{ t.account }}</span></td>
           <td><span class="type-badge type-{{ t.type | lower }}">{{ t.type }}</span></td>
           <td class="r mono">{{ t.qty | num(4) }}</td>

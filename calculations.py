@@ -570,6 +570,7 @@ def get_account_summary():
         result.append({
             'name': account.name,
             'type': account.type,
+            'managed': bool(account.managed),
             'id': account.id,
             'holdings_mv': holdings_mv,
             'holdings_book': holdings_book,
@@ -597,6 +598,8 @@ def get_account_summary():
             'closed_holdings': closed_holdings,
         })
 
+    # Self-directed first, then managed; largest value first within each group.
+    result.sort(key=lambda a: (a['managed'], -(a['total_value'] or 0)))
     return result
 
 
@@ -610,6 +613,32 @@ def _cap_bucket(mc):
     if mc >= 2e9:
         return 'Mid cap'
     return 'Small cap'
+
+
+# Fund-name keywords → a sensible label when a fund has no sector look-through.
+# Ordered most-specific first (a "bond index fund" reads Fixed Income, not Index).
+_FUND_TYPE_HINTS = (
+    ('money market', 'Cash'), ('cash management', 'Cash'), ('high interest savings', 'Cash'),
+    ('treasury', 'Fixed Income'), ('bond', 'Fixed Income'), ('fixed income', 'Fixed Income'),
+    ('aggregate', 'Fixed Income'), ('mortgage', 'Fixed Income'), ('debenture', 'Fixed Income'),
+    ('gold', 'Commodities'), ('silver', 'Commodities'), ('commodit', 'Commodities'),
+    ('real estate', 'Real Estate'), ('reit', 'Real Estate'),
+    ('preferred', 'Preferred'),
+    ('index', 'Index'),
+)
+
+
+def _sector_fallback(m):
+    """Sector label when a holding has no sector look-through. Funds get a label
+    inferred from their name — bond → Fixed Income, money-market → Cash, gold →
+    Commodities, REIT → Real Estate, index → Index; anything we can't place (and
+    individual securities with no sector) stays 'Unclassified'."""
+    if m.get('asset_type') in ('ETF', 'Mutual Fund'):
+        name = (m.get('long_name') or '').lower()
+        for kw, label in _FUND_TYPE_HINTS:
+            if kw in name:
+                return label
+    return 'Unclassified'
 
 
 def get_account_breakdown(account_name):
@@ -658,7 +687,8 @@ def get_account_breakdown(account_name):
         elif m.get('sector'):
             sector[m['sector']] = sector.get(m['sector'], 0) + mv
         else:
-            sector['Unclassified'] = sector.get('Unclassified', 0) + mv
+            lbl = _sector_fallback(m)
+            sector[lbl] = sector.get(lbl, 0) + mv
 
         # Market cap — ETFs/mutual funds grouped as Fund; individual stocks bucketed
         if at in ('ETF', 'Mutual Fund'):
@@ -1303,7 +1333,7 @@ def _beta_bucket(beta, asset_type):
             return 'Medium'
         return 'High'
     at = asset_type or 'Equity'
-    if at in ('Bond', 'Cash', 'Mutualfund'):
+    if at in ('Bond', 'Cash', 'Mutual Fund'):
         return 'Low'
     if at == 'ETF':
         return 'Medium'
@@ -1319,7 +1349,7 @@ def _blend_bucket(beta, market_cap, asset_type, fund_sectors=None):
 
     # Volatility component (0..4)
     if beta is None:
-        b = {'Bond': 0, 'Cash': 0, 'Mutualfund': 1, 'ETF': 1}.get(at, 2)
+        b = {'Bond': 0, 'Cash': 0, 'Mutual Fund': 1, 'ETF': 1}.get(at, 2)
     elif beta < 0.7:
         b = 0
     elif beta < 1.0:
@@ -1334,7 +1364,7 @@ def _blend_bucket(beta, market_cap, asset_type, fund_sectors=None):
     # Size / idiosyncratic-uncertainty component (0=mega/diversified … 4=micro/unknown).
     if at in ('Bond', 'Cash'):
         s = 0
-    elif at in ('ETF', 'Mutualfund'):
+    elif at in ('ETF', 'Mutual Fund'):
         # More diversified (lower sector concentration) → lower uncertainty.
         fs = fund_sectors or {}
         if fs:
@@ -1361,7 +1391,7 @@ def _blend_bucket(beta, market_cap, asset_type, fund_sectors=None):
 _ALL_SECTORS = ['Technology', 'Financial Services', 'Healthcare', 'Consumer Cyclical',
                 'Consumer Defensive', 'Industrials', 'Energy', 'Utilities',
                 'Real Estate', 'Basic Materials', 'Communication Services']
-_ALL_ASSET_TYPES = ['Equity', 'ETF', 'Bond', 'Mutualfund', 'Cash']
+_ALL_ASSET_TYPES = ['Equity', 'ETF', 'Bond', 'Mutual Fund', 'Cash']
 _ALL_MARKET_CAPS = ['Mega cap', 'Large cap', 'Mid cap', 'Small cap', 'Fund']
 _ALL_CURRENCIES = ['CAD', 'USD']
 
@@ -1383,7 +1413,7 @@ def _bucket_weights(h, m, dimension):
             return {sec: w / tot for sec, w in m['fund_sectors'].items()}
         if m.get('sector'):
             return {m['sector']: 1.0}
-        return {'Unclassified': 1.0}
+        return {_sector_fallback(m): 1.0}
     if dimension == 'asset_type':
         return {(m.get('asset_type') or 'Equity'): 1.0}
     if dimension == 'market_cap':
@@ -1544,8 +1574,12 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
              for k, v in agg.items()],
             key=lambda x: x['value'], reverse=True)
 
+    # Managed accounts count in the read-only Overall view but can't be traded, so
+    # the per-account targeting is view-only for them.
+    managed_set = {a.name for a in Account.query.filter_by(managed=True).all()}
     base_result = {
         'account': account, 'accounts': acct_names,
+        'managed_accounts': sorted(managed_set), 'is_managed': account in managed_set,
         'dimension': dimension, 'dimension_label': REBAL_DIM_LABELS[dimension],
         'dimensions': [(d, REBAL_DIM_LABELS[d]) for d in REBAL_DIMENSIONS],
         'mode': mode, 'overall_views': overall_views,
@@ -2178,6 +2212,20 @@ def get_snapshot_at(as_of, scope='portfolio'):
             for t in tickers:
                 price_map[t] = _price_on(t)
 
+    # Friendly fund labels (mutual funds → name unless kept-as-ticker in Settings).
+    from price_service import get_holdings_metadata
+    from models import Setting
+    import json as _json, re as _re
+    _meta = get_holdings_metadata([h['ticker'] for h in holdings]) if holdings else {}
+    _sft = Setting.query.get('fund_show_ticker')
+    _show = {t.strip().upper() for t in ((_sft.value.split(',')) if _sft and _sft.value else []) if t.strip()}
+
+    def _flabel(tk):
+        m = _meta.get(tk, {})
+        if m.get('asset_type') == 'Mutual Fund' and m.get('long_name') and tk.upper() not in _show:
+            return _re.sub(r'\s+NL$', '', _re.sub(r'\s*\([^)]*\)\s*$', '', m['long_name'])).strip()
+        return tk
+
     holdings_mv = 0.0
     priced_book = 0.0
     book_total = 0.0
@@ -2194,7 +2242,8 @@ def get_snapshot_at(as_of, scope='portfolio'):
         else:
             unpriced.append(h['ticker'])
         rows.append({
-            'ticker': h['ticker'], 'currency': h['currency'], 'qty': round(h['qty'], 4),
+            'ticker': h['ticker'], 'label': _flabel(h['ticker']),
+            'currency': h['currency'], 'qty': round(h['qty'], 4),
             'price': round(price, 4) if price else None,
             'market_value_cad': round(mv, 2),
             'book_value_cad': round(h['book_value_cad'], 2),

@@ -127,7 +127,10 @@ def build_overview():
     }
 
     room_total, has_room = _room_total()
-    perf = [h for h in holdings if (h['book_value_cad'] or 0) > 1]
+    # Exclude unpriced holdings (e.g. a just-imported fund before its first price
+    # fetch) so best/worst don't compare None against a float.
+    perf = [h for h in holdings
+            if (h['book_value_cad'] or 0) > 1 and h['unrealized_gl_pct'] is not None]
     best = max(perf, key=lambda h: h['unrealized_gl_pct']) if perf else None
     worst = min(perf, key=lambda h: h['unrealized_gl_pct']) if perf else None
     naccts = len({h['account'] for h in holdings})

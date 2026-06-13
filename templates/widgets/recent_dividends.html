@@ -6,7 +6,7 @@
     {% for r in rows %}
     <tr>
       <td class="text-dim">{{ r.date }}</td>
-      <td class="mono ticker">{{ r.ticker }}</td>
+      <td class="mono ticker">{{ r.ticker | tlabel }}</td>
       <td class="text-dim">{{ r.account }}</td>
       <td class="r mono text-green">{{ r.amount }}</td>
     </tr>

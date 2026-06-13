@@ -47,6 +47,7 @@ def run_migrations():
         _add_col('transactions', 'recurring_id', 'INTEGER')
         _add_col('accounts', 'cash_balance', 'FLOAT DEFAULT 0')
         _add_col('accounts', 'horizon', 'VARCHAR(20)')
+        _add_col('accounts', 'managed', 'BOOLEAN DEFAULT 0')
         _add_col('price_cache', 'meta_json', 'TEXT')
         _add_col('recurring_rules', 'dollar_based', 'BOOLEAN DEFAULT 0')
 
@@ -280,6 +281,48 @@ def num_filter(v, decimals=4):
     if v is None:
         return '—'
     return f'{v:,.{decimals}f}'
+
+
+def _clean_fund_name(name):
+    import re
+    name = re.sub(r'\s*\([^)]*\)\s*$', '', name or '')   # drop trailing "(code)"
+    name = re.sub(r'\s+NL$', '', name)                    # drop trailing " NL"
+    return name.strip()
+
+
+def fund_label_map():
+    """{ticker: friendly name} for mutual funds — shown by default instead of the
+    cryptic symbol. Tickers listed in the `fund_show_ticker` setting are excluded
+    (the user chose to keep the symbol). Cached per request."""
+    from flask import g
+    if hasattr(g, '_fund_labels'):
+        return g._fund_labels
+    import json
+    show_ticker = set()
+    s = Setting.query.get('fund_show_ticker')
+    if s and s.value:
+        show_ticker = {t.strip().upper() for t in s.value.split(',') if t.strip()}
+    out = {}
+    for pc in PriceCache.query.all():
+        if not pc.meta_json:
+            continue
+        try:
+            m = json.loads(pc.meta_json)
+        except Exception:
+            continue
+        if (m.get('asset_type') == 'Mutual Fund' and m.get('long_name')
+                and pc.ticker.upper() not in show_ticker):
+            out[pc.ticker] = _clean_fund_name(m['long_name'])
+    g._fund_labels = out
+    return out
+
+
+@app.template_filter('tlabel')
+def tlabel_filter(ticker):
+    """Display a mutual fund by its friendly name; everything else by its ticker."""
+    if not ticker:
+        return ticker
+    return fund_label_map().get(ticker, ticker)
 
 
 # ── Core routes ───────────────────────────────────────────────────────────────
@@ -580,6 +623,15 @@ def update_account_type(name):
     return redirect(url_for('accounts'))
 
 
+@app.route('/accounts/<name>/management', methods=['POST'])
+def update_account_management(name):
+    account = Account.query.filter_by(name=name).first_or_404()
+    account.managed = (request.form.get('management', '') == 'Managed')
+    db.session.commit()
+    flash(f"{name} set to {'Managed' if account.managed else 'Self-directed'}.", 'success')
+    return redirect(url_for('accounts'))
+
+
 @app.route('/accounts/<name>/horizon', methods=['POST'])
 def update_account_horizon(name):
     account = Account.query.filter_by(name=name).first_or_404()
@@ -677,6 +729,16 @@ def import_upload():
         return redirect(url_for('import_page'))
     try:
         r = parse_upload(file, broker, account_override=account_override)
+        # Price the imported tickers now so new holdings don't sit unpriced.
+        if r['imported']:
+            try:
+                from price_service import refresh_prices
+                from calculations import get_holdings
+                tkrs = sorted({h['ticker'] for h in get_holdings()
+                               if h['ticker'] and h['ticker'] != 'CASH' and ' ' not in h['ticker']})
+                refresh_prices(tkrs)
+            except Exception:
+                pass
         msg = f"Imported {r['imported']} transaction(s)"
         if r['skipped']:
             msg += f", skipped {r['skipped']} duplicate(s)"
@@ -962,6 +1024,14 @@ def settings():
             else:
                 db.session.add(Setting(key='rdsp_equity_map', value=json.dumps(eq)))
 
+        # Mutual funds to show by ticker instead of their friendly name.
+        show_ticker = ','.join(t.strip().upper() for t in request.form.getlist('fund_show_ticker') if t.strip())
+        sft = Setting.query.get('fund_show_ticker')
+        if sft:
+            sft.value = show_ticker
+        else:
+            db.session.add(Setting(key='fund_show_ticker', value=show_ticker))
+
         db.session.commit()
         flash('Settings saved.', 'success')
         return redirect(url_for('settings'))
@@ -978,7 +1048,24 @@ def settings():
     overrides = _parse_tfsa_overrides(gs('tfsa_limit_overrides', ''))
     tfsa_limit_known = (cy in TFSA_ANNUAL_LIMITS) or (cy in overrides)
 
+    # Mutual-fund display preferences (friendly name vs ticker).
+    import json as _json
+    _show_set = {t.strip().upper() for t in gs('fund_show_ticker', '').split(',') if t.strip()}
+    fund_tickers = []
+    for pc in PriceCache.query.all():
+        if not pc.meta_json:
+            continue
+        try:
+            _m = _json.loads(pc.meta_json)
+        except Exception:
+            continue
+        if _m.get('asset_type') == 'Mutual Fund' and _m.get('long_name'):
+            fund_tickers.append({'ticker': pc.ticker, 'name': _clean_fund_name(_m['long_name']),
+                                 'show_ticker': pc.ticker.upper() in _show_set})
+    fund_tickers.sort(key=lambda x: x['ticker'])
+
     return render_template('settings.html',
+                           fund_tickers=fund_tickers,
                            fx_rate=gs('fx_usd_cad', '1.365'),
                            fx_manual=gs('fx_manual', '0'),
                            fx_manual_rate=gs('fx_manual_rate', ''),

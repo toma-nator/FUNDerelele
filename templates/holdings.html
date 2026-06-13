@@ -74,8 +74,9 @@
             data-search="{{ (h.ticker ~ ' ' ~ h.account ~ ' ' ~ h.currency) | lower }}">
           <td class="text-dim mono col-rownum">{{ loop.index }}</td>
           <td class="mono ticker" data-val="{{ h.ticker }}">
-            {{ h.ticker }}{% if h.closed %} <span class="closed-badge">closed</span>{% endif %}
-            {% if names.get(h.ticker) %}<div class="ticker-name">{{ names[h.ticker] }}</div>{% endif %}
+            {{ h.ticker | tlabel }}{% if h.closed %} <span class="closed-badge">closed</span>{% endif %}
+            {% if h.ticker | tlabel != h.ticker %}<div class="ticker-name">{{ h.ticker }}</div>
+            {% elif names.get(h.ticker) %}<div class="ticker-name">{{ names[h.ticker] }}</div>{% endif %}
           </td>
           <td data-val="{{ h.account }}"><span class="acct-badge acct-{{ h.account | lower | replace(' ', '-') | replace('(','') | replace(')','') }}">{{ h.account }}</span></td>
           <td class="mono" data-val="{{ h.currency }}">{{ h.currency }}</td>

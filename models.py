@@ -42,6 +42,7 @@ class Account(db.Model):
     type = db.Column(db.String(20))
     cash_balance = db.Column(db.Float, default=0)
     horizon = db.Column(db.String(20))  # time-horizon bucket override; None = derive from type
+    managed = db.Column(db.Boolean, default=False)  # True = advisor/fund-managed (not self-traded)
 
 
 class Setting(db.Model):

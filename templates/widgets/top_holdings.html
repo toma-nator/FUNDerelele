@@ -12,7 +12,7 @@
   <tbody>
     {% for r in rows %}
     <tr>
-      <td class="mono ticker">{{ r.ticker }}</td>
+      <td class="mono ticker">{{ r.ticker | tlabel }}</td>
       <td class="text-dim">{{ r.account }}</td>
       <td class="r mono">{{ r.mv }}</td>
       <td class="r mono {{ r.gl_cls }}">{{ r.gl }}</td>

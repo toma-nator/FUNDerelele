@@ -824,6 +824,16 @@ body.customizing .nav-hidden { display: flex; opacity: .45; }
 .accounts-grid.detail {
   grid-template-columns: 1fr;
 }
+/* Self-directed vs Managed section headers (span the grid; hidden in detail) */
+.account-section {
+  grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px; flex-wrap: wrap; padding: 8px 2px 2px; margin-top: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: .74rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim);
+}
+.account-section-sub { font-weight: 400; letter-spacing: 0; text-transform: none; font-size: .76rem; color: var(--text-muted); }
+.accounts-grid.detail .account-section { display: none; }
+
 /* Expanded detail content is hidden in the overview, revealed on selection */
 .account-extra { display: none; }
 .accounts-grid.detail .account-extra { display: block; }
@@ -1029,6 +1039,15 @@ a.hero-delta:hover { text-decoration: underline; }
 .account-room .account-holdings-label { padding: 8px 0; border-bottom: none; }
 .room-note { font-size: .72rem; color: var(--text-muted); margin: 6px 0 0; }
 .room-note a { color: var(--accent); text-decoration: none; }
+
+/* Inline/content links app-wide — accent with a subtle underline that brightens on
+   hover, instead of the browser-default blue/purple. Scoped to class-less links so
+   chrome (nav items, chips, buttons, badges — all classed) is untouched. */
+a:not([class]) {
+  color: var(--accent); text-decoration: none;
+  border-bottom: 1px solid rgba(0,200,240,.35); transition: border-color .15s;
+}
+a:not([class]):hover { border-bottom-color: var(--accent); }
 .stat-cap { display: block; font-size: .68rem; color: var(--text-muted); margin-top: 2px; }
 .room-reminder {
   font-size: .75rem; color: var(--text-dim);

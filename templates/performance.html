@@ -399,7 +399,7 @@
       + '<th class="r">Value</th><th class="r">Book</th><th class="r">G/L</th></tr></thead><tbody>';
     d.holdings.forEach(h => {
       const hgl = h.unrealized_gl == null ? 'text-dim' : (h.unrealized_gl >= 0 ? 'text-green' : 'text-red');
-      html += '<tr><td class="mono ticker">' + h.ticker + '</td><td class="text-dim">' + h.currency + '</td>'
+      html += '<tr><td class="mono ticker">' + (h.label || h.ticker) + '</td><td class="text-dim">' + h.currency + '</td>'
         + '<td class="r mono">' + h.qty.toLocaleString() + '</td>'
         + '<td class="r mono">' + (h.price == null ? '—' : h.price.toLocaleString()) + '</td>'
         + '<td class="r mono">' + (h.price == null ? '—' : cad(h.market_value_cad)) + '</td>'

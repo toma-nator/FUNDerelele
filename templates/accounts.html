@@ -13,7 +13,16 @@
 {% endif %}
 
 <div class="accounts-grid" id="accountsGrid">
+  {% set show_sections = (accounts | selectattr('managed') | list | length) > 0 %}
   {% for acc in accounts %}
+  {% if show_sections and (loop.first or accounts[loop.index0 - 1].managed != acc.managed) %}
+  {% set group = accounts | selectattr('managed', 'equalto', acc.managed) | list %}
+  <div class="account-section">
+    {{ 'Managed' if acc.managed else 'Self-directed' }}
+    <span class="account-section-sub">{{ group | length }} account{{ 's' if group | length != 1 }} ·
+      {{ (group | map(attribute='total_value') | sum) | cad }}{% if acc.managed %} · advisor / fund-run{% endif %}</span>
+  </div>
+  {% endif %}
   <div class="card account-card" data-account="{{ acc.name }}">
     <div class="account-header">
       <span class="account-name">{{ acc.name }}</span>
@@ -34,6 +43,14 @@
             {% for h in horizon_buckets %}
             <option value="{{ h }}" {% if h == acc.horizon %}selected{% endif %}>{{ h }}</option>
             {% endfor %}
+          </select>
+        </form>
+        <form method="post" action="{{ url_for('update_account_management', name=acc.name) }}"
+              style="margin:0">
+          <select name="management" onchange="this.form.submit()" class="account-horizon-select"
+                  title="Managed = run by an advisor/fund (not self-traded); still counts in all totals">
+            <option value="Self-directed" {% if not acc.managed %}selected{% endif %}>Self-directed</option>
+            <option value="Managed" {% if acc.managed %}selected{% endif %}>Managed</option>
           </select>
         </form>
       </div>
@@ -103,7 +120,7 @@
         <tbody>
           {% for h in acc.holdings %}
           <tr>
-            <td class="mono ticker">{{ h.ticker }}</td>
+            <td class="mono ticker">{{ h.ticker | tlabel }}</td>
             <td class="r mono">{{ h.qty | num(2) }}</td>
             <td class="r mono">{{ h.market_value_cad | cad }}</td>
             <td class="r mono {{ h.unrealized_gl | gl_class }}">{{ h.unrealized_gl | signed_cad }}</td>
@@ -228,7 +245,7 @@
             {% endif %}
             {% for h in g.holdings %}
             <tr>
-              <td class="mono ticker">{{ h.ticker }}</td>
+              <td class="mono ticker">{{ h.ticker | tlabel }}</td>
               <td class="r mono">{{ h.qty | num(2) }}</td>
               <td class="r mono">{{ h.avg_cost_cad | cad }}</td>
               <td class="r mono">{{ h.book_value_cad | cad }}</td>
@@ -252,7 +269,7 @@
             {% endfor %}
             {% for h in acc.closed_holdings %}
             <tr class="closed-row">
-              <td class="mono ticker">{{ h.ticker }} <span class="closed-badge">closed</span></td>
+              <td class="mono ticker">{{ h.ticker | tlabel }} <span class="closed-badge">closed</span></td>
               <td class="r mono text-dim">—</td>
               <td class="r mono text-dim">—</td>
               <td class="r mono text-dim">—</td>

@@ -120,6 +120,26 @@
       </div>
     </div>
 
+    {% if fund_tickers %}
+    <!-- Mutual-fund display: friendly name (default) vs ticker -->
+    <div style="border-top:1px solid var(--border-sub);padding:16px 20px">
+      <label style="display:block;margin-bottom:4px">Mutual fund names</label>
+      <p style="font-size:.72rem;color:var(--text-muted);margin-bottom:10px">
+        Mutual funds show their <strong>friendly name</strong> by default (their symbols are cryptic).
+        Tick a fund to show its <strong>ticker</strong> instead.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        {% for f in fund_tickers %}
+        <label class="perf-check" style="justify-content:flex-start;gap:8px">
+          <input type="checkbox" name="fund_show_ticker" value="{{ f.ticker }}" {% if f.show_ticker %}checked{% endif %}>
+          <span class="mono" style="min-width:120px">{{ f.ticker }}</span>
+          <span class="text-dim" style="font-size:.82rem">{{ f.name }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
     <div style="padding:16px 20px">
       <button type="submit" class="btn btn-primary">Save Settings</button>
     </div>
