@@ -205,6 +205,31 @@ def get_cash_by_account():
     return result
 
 
+def managed_account_names():
+    """Set of account names flagged as advisor/fund-managed (not self-traded)."""
+    return {a.name for a in Account.query.filter_by(managed=True).all()}
+
+
+def managed_stats_mode():
+    """How managed accounts count in stats: 'all' (default), 'wealth' (net worth +
+    allocation only), or 'accounts_only' (nowhere but the Accounts page)."""
+    from models import Setting
+    s = Setting.query.get('managed_in_stats')
+    mode = (s.value if s and s.value else 'all')
+    return mode if mode in ('all', 'wealth', 'accounts_only') else 'all'
+
+
+def managed_included_in(area):
+    """Whether managed accounts should be counted in a given stats area:
+    'total', 'breakdown', 'performance', 'dividends', 'tax'."""
+    mode = managed_stats_mode()
+    if mode == 'all':
+        return True
+    if mode == 'accounts_only':
+        return False
+    return area in ('total', 'breakdown')   # 'wealth'
+
+
 def get_dashboard_stats(holdings):
     total_mv = sum(h['market_value_cad'] or 0 for h in holdings)
     total_book = sum(h['book_value_cad'] for h in holdings)
@@ -223,8 +248,20 @@ def get_dashboard_stats(holdings):
         acc = h['account']
         account_breakdown[acc] = account_breakdown.get(acc, 0) + (h['market_value_cad'] or 0)
 
+    total_portfolio = total_mv + total_cash + total_gics
+    # Split out advisor/fund-managed accounts so the headline can show what the user
+    # actually self-directs vs. the managed sleeve (only meaningful if any exist).
+    managed = managed_account_names()
+    gic_by_acct = get_gic_value_by_account()
+    managed_total = (sum(h['market_value_cad'] or 0 for h in holdings if h['account'] in managed)
+                     + sum(v for a, v in cash_by_account.items() if a in managed)
+                     + sum(v['value'] for a, v in gic_by_acct.items() if a in managed))
+
     return {
-        'total_portfolio': total_mv + total_cash + total_gics,
+        'total_portfolio': total_portfolio,
+        'has_managed': bool(managed),
+        'managed_total': round(managed_total, 2),
+        'self_directed_total': round(total_portfolio - managed_total, 2),
         'total_mv': total_mv,
         'total_book': total_book,
         'total_unrealized': total_unrealized,
@@ -824,7 +861,15 @@ def get_dividend_stats(scope='portfolio'):
     # get_holdings, where it adds shares + 'reinvested' book cost.)
     dq = Transaction.query.filter(Transaction.type.in_(['Dividend', 'Interest']))
     wq = Transaction.query.filter_by(type='WithholdingTax')
-    if scope and scope != 'portfolio':
+    managed = managed_account_names()
+    if scope == 'self_directed':
+        if managed:
+            dq = dq.filter(Transaction.account.notin_(managed))
+            wq = wq.filter(Transaction.account.notin_(managed))
+    elif scope == 'managed':
+        dq = dq.filter(Transaction.account.in_(managed))
+        wq = wq.filter(Transaction.account.in_(managed))
+    elif scope and scope != 'portfolio':
         dq = dq.filter_by(account=scope)
         wq = wq.filter_by(account=scope)
     dividends = dq.order_by(Transaction.date.asc()).all()
@@ -867,7 +912,11 @@ def get_dividend_stats(scope='portfolio'):
             r['ttm'] -= w.amount_cad
 
     # Current holdings → book, market value, and forward income (current yields)
-    holdings = [h for h in get_holdings() if scope == 'portfolio' or h['account'] == scope]
+    holdings = [h for h in get_holdings()
+                if scope == 'portfolio'
+                or (scope == 'self_directed' and h['account'] not in managed)
+                or (scope == 'managed' and h['account'] in managed)
+                or h['account'] == scope]
     book_by, mv_by, fwd_by = {}, {}, {}
     for h in holdings:
         book_by[h['ticker']] = book_by.get(h['ticker'], 0) + h['book_value_cad']
@@ -1114,6 +1163,10 @@ def get_tax_summary(year=None, inclusion_rate=None, marginal_rate=None):
         marginal_rate = _tax_rate('tax_marginal_rate', 0.25)
 
     all_txns = Transaction.query.order_by(Transaction.date.asc(), Transaction.id.asc()).all()
+    # Managed accounts can be excluded from tax stats (managed-in-stats setting).
+    if not managed_included_in('tax'):
+        _mgd = managed_account_names()
+        all_txns = [t for t in all_txns if t.account not in _mgd]
     fx_rate = get_fx_rate()
 
     # Selectable years: every year from first activity to now, even with no sells.
@@ -1213,7 +1266,10 @@ def get_tax_summary(year=None, inclusion_rate=None, marginal_rate=None):
     unrealized_rows = []
     u_gl_total = 0.0
     u_gl_nonreg = 0.0
+    _tax_mgd = set() if managed_included_in('tax') else managed_account_names()
     for h in get_holdings():
+        if h['account'] in _tax_mgd:
+            continue
         reg = is_registered(h['account'])
         gl = h['unrealized_gl'] or 0.0
         u_gl_total += gl
@@ -1547,7 +1603,12 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
     # ---- Overall portfolio allocation (read-only), multiple view lenses ----
     # Each lens is fractional (ETF look-through) and includes total cash so the
     # view sums to the whole portfolio. Independent of the targeting dimension.
-    total_cash = sum(c for c in cash_by.values() if c > 0)
+    # The Overall view is a read-only breakdown, so it honours the managed-in-stats
+    # setting (same as the Charts allocation): managed shows in all/wealth, excluded
+    # in accounts_only.
+    ov_skip = set() if managed_included_in('breakdown') else managed_account_names()
+    ov_holdings = [h for h in all_holdings if h['account'] not in ov_skip]
+    total_cash = sum(c for a, c in cash_by.items() if c > 0 and a not in ov_skip)
     view_fns = {
         'sector': lambda h, m: _bucket_weights(h, m, 'sector'),
         'asset_class': lambda h, m: _asset_class_weights(m),
@@ -1559,7 +1620,7 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
     overall_views = {}
     for vk, fn in view_fns.items():
         agg, tot = {}, 0.0
-        for h in all_holdings:
+        for h in ov_holdings:
             mv = h['market_value_cad']
             tot += mv
             for b, w in fn(h, meta_all.get(h['ticker'], {})).items():
@@ -1574,8 +1635,8 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
              for k, v in agg.items()],
             key=lambda x: x['value'], reverse=True)
 
-    # Managed accounts count in the read-only Overall view but can't be traded, so
-    # the per-account targeting is view-only for them.
+    # Managed accounts can't be traded, so per-account targeting is view-only for
+    # them (the Overall breakdown above already honours the managed-in-stats setting).
     managed_set = {a.name for a in Account.query.filter_by(managed=True).all()}
     base_result = {
         'account': account, 'accounts': acct_names,
@@ -2150,14 +2211,22 @@ def get_snapshot_at(as_of, scope='portfolio'):
     today = date.today()
     if as_of > today:
         as_of = today
-    acct = None if scope in (None, '', 'portfolio') else scope
+    managed = managed_account_names()
+    if scope in (None, '', 'portfolio'):
+        in_scope, scope_label = None, 'portfolio'
+    elif scope == 'self_directed':
+        in_scope, scope_label = (lambda a: a not in managed), 'self-directed'
+    elif scope == 'managed':
+        in_scope, scope_label = (lambda a: a in managed), 'managed'
+    else:
+        in_scope, scope_label = (lambda a: a == scope), scope
 
     txns = (Transaction.query.order_by(Transaction.date.asc(), Transaction.id.asc()).all())
-    if acct:
-        txns = [t for t in txns if t.account == acct]
+    if in_scope:
+        txns = [t for t in txns if in_scope(t.account)]
     txns_to_date = [t for t in txns if t.date <= as_of]
 
-    base = {'ok': True, 'as_of': as_of.isoformat(), 'scope': acct or 'portfolio',
+    base = {'ok': True, 'as_of': as_of.isoformat(), 'scope': scope_label,
             'total_value': 0.0, 'holdings_mv': 0.0, 'cash': 0.0, 'gic_value': 0.0,
             'book_value': 0.0, 'unrealized_gl': 0.0, 'unrealized_gl_pct': 0.0,
             'contributions': 0.0, 'num_holdings': 0, 'holdings': [], 'unpriced': []}
@@ -2256,12 +2325,12 @@ def get_snapshot_at(as_of, scope='portfolio'):
     cash = sum((t.net_cad or 0.0) for t in txns_to_date)
     gic_val_by = get_gic_value_by_account(as_of)
     gic_adj_by = get_gic_cash_adjustment_by_account(as_of)
-    if acct:
-        gic_value = gic_val_by.get(acct, {}).get('value', 0.0)
-        cash += gic_adj_by.get(acct, 0.0)
-    else:
+    if in_scope is None:
         gic_value = sum(v['value'] for v in gic_val_by.values())
         cash += sum(gic_adj_by.values())
+    else:
+        gic_value = sum(v['value'] for a, v in gic_val_by.items() if in_scope(a))
+        cash += sum(adj for a, adj in gic_adj_by.items() if in_scope(a))
 
     contributions = sum((t.net_cad or 0.0) for t in txns_to_date
                         if t.type == 'Deposit' and t.subtype not in ('RDSP Grant', 'RDSP Bond'))
@@ -2517,8 +2586,14 @@ def get_performance_series(scope='portfolio'):
     import pandas as pd
     from datetime import date, timedelta
 
+    managed = managed_account_names()
     q = Transaction.query
-    if scope and scope != 'portfolio':
+    if scope == 'self_directed':
+        if managed:
+            q = q.filter(Transaction.account.notin_(managed))
+    elif scope == 'managed':
+        q = q.filter(Transaction.account.in_(managed))
+    elif scope and scope != 'portfolio':
         q = q.filter_by(account=scope)
     txns = q.order_by(Transaction.date.asc(), Transaction.id.asc()).all()
 
@@ -2534,7 +2609,11 @@ def get_performance_series(scope='portfolio'):
         out = dict(hist)
         out['market_value'] = list(hist['market_value'])
         try:
-            live = [h for h in get_holdings() if scope == 'portfolio' or h['account'] == scope]
+            live = [h for h in get_holdings()
+                    if scope == 'portfolio'
+                    or (scope == 'self_directed' and h['account'] not in managed)
+                    or (scope == 'managed' and h['account'] in managed)
+                    or h['account'] == scope]
             live_mv = sum(h['market_value_cad'] or 0 for h in live)
             if out['market_value'] and live_mv:
                 out['market_value'][-1] = round(live_mv, 2)

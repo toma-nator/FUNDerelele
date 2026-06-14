@@ -11,6 +11,7 @@ from calculations import (
     get_holdings, get_dashboard_stats, get_account_breakdown, get_dividend_stats,
     get_cashflow_stats, get_gic_stats, get_performance_series, get_planning_stats,
     get_projections, run_monte_carlo, get_cash_by_account,
+    managed_account_names, managed_included_in,
 )
 from models import Account, Transaction
 
@@ -86,24 +87,56 @@ def catalog_grouped():
 # ── Shared helpers ──────────────────────────────────────────────────────────
 # Every builder accepts `account` (None = whole portfolio / "All Accounts").
 
+# A chart's `account` scope value can be a literal account, '' / None (= All
+# Accounts, honouring the managed-in-stats setting), or the explicit group
+# overrides 'self_directed' / 'managed'.
+_GROUP_SCOPES = ('self_directed', 'managed')
+
+
+def _keep_for(account, area):
+    """Predicate(account_name) for a chart's scope. self_directed/managed are
+    explicit overrides; '' / None honours the setting for `area`."""
+    managed = managed_account_names()
+    if account == 'self_directed':
+        return lambda a: a not in managed
+    if account == 'managed':
+        return lambda a: a in managed
+    if account:
+        return lambda a: a == account
+    skip = set() if managed_included_in(area) else managed
+    return lambda a: a not in skip
+
+
 def _holdings(account):
+    managed = managed_account_names()
+    if account == 'self_directed':
+        return [h for h in get_holdings() if h['account'] not in managed]
+    if account == 'managed':
+        return [h for h in get_holdings() if h['account'] in managed]
     return [h for h in get_holdings() if (not account or h['account'] == account)]
 
 
 def _scope(account):
-    return account if account else 'portfolio'
+    # 'self_directed' / 'managed' and literal accounts pass through (the perf/
+    # dividend series understand them); '' honours the managed-in-stats setting.
+    if account:
+        return account
+    return 'portfolio' if managed_included_in('performance') else 'self_directed'
 
 
 def _breakdown(account):
     """Allocation lists by asset_type/sector/market_cap/currency for one account,
-    or the whole portfolio (merged) when account is None."""
+    a group ('self_directed'/'managed'), or the whole portfolio (merged)."""
     keys = ('asset_type', 'sector', 'market_cap', 'currency')
-    if account:
+    if account and account not in _GROUP_SCOPES:
         bd = get_account_breakdown(account)
         return {k: bd.get(k, []) for k in keys} if bd.get('ok') else {k: [] for k in keys}
     from collections import defaultdict
+    keep = _keep_for(account, 'breakdown')
     agg = {k: defaultdict(float) for k in keys}
     for a in Account.query.all():
+        if not keep(a.name):
+            continue
         bd = get_account_breakdown(a.name)
         if not bd.get('ok'):
             continue
@@ -120,17 +153,23 @@ def _breakdown(account):
 
 
 def _scoped_value(account):
-    mv = sum(h['market_value_cad'] or 0 for h in _holdings(account))
+    keep = _keep_for(account, 'total')
+    mv = sum(h['market_value_cad'] or 0 for h in get_holdings() if keep(h['account']))
     cash_map = get_cash_by_account()
-    cash = cash_map.get(account, 0.0) if account else sum(cash_map.values())
-    return mv + cash
+    return mv + sum(v for a, v in cash_map.items() if keep(a))
 
 
 def _default_monthly_contrib(account=None):
     from datetime import date, timedelta
     cutoff = date.today() - timedelta(days=365)
     q = Transaction.query.filter(Transaction.type == 'Deposit', Transaction.date >= cutoff)
-    if account:
+    managed = managed_account_names()
+    if account == 'self_directed':
+        if managed:
+            q = q.filter(Transaction.account.notin_(managed))
+    elif account == 'managed':
+        q = q.filter(Transaction.account.in_(managed))
+    elif account:
         q = q.filter_by(account=account)
     tot = sum((r.net_cad or 0) for r in q.all()
               if r.subtype not in ('RDSP Grant', 'RDSP Bond') and (r.net_cad or 0) > 0)

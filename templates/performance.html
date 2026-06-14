@@ -62,6 +62,7 @@
         <label class="perf-check"><input type="checkbox" id="perfBench" checked> Benchmarks</label>
         <label class="perf-check"><input type="checkbox" id="perfPct"> % return</label>
         <label class="perf-check" id="avgWrap"><input type="checkbox" id="perfAvg"> Avg rate</label>
+        {% if has_managed %}<label class="perf-check" id="managedWrap" title="Include advisor/fund-managed accounts"><input type="checkbox" id="perfManaged" {% if managed_default %}checked{% endif %}> Managed</label>{% endif %}
         <span id="barLineWrap" style="display:none;gap:6px;align-items:center">
           <span style="font-size:.72rem;color:var(--text-dim)">Bar overlay</span>
           <select id="perfBarLine" class="filter-select">
@@ -132,7 +133,8 @@
   const C = { accent: '#00c8f0', dim: '#5a7a96', grid: '#1a3050',
               green: '#00e676', red: '#ff4d4d', bench: ['#9b72f5', '#ff8c42', '#ffd740'] };
   const state = { data: null, scope: 'portfolio', type: 'line', range: 'all',
-                  cash: true, bench: true, pct: false, avg: false, barLine: 'S&P 500' };
+                  cash: true, bench: true, pct: false, avg: false,
+                  managed: {{ 'true' if managed_default | default(true) else 'false' }}, barLine: 'S&P 500' };
   let chart = null;
   const msg = document.getElementById('perfMsg');
 
@@ -205,7 +207,9 @@
 
   function fetchScope() {
     msg.textContent = 'Loading…';
-    fetch('/performance/data?scope=' + encodeURIComponent(state.scope))
+    // On the whole-portfolio view, unchecking "Managed" swaps to self-directed only.
+    const eff = (state.scope === 'portfolio' && !state.managed) ? 'self_directed' : state.scope;
+    fetch('/performance/data?scope=' + encodeURIComponent(eff))
       .then(r => r.json())
       .then(d => { state.data = d; msg.textContent = d.ok ? '' : 'Some historical prices unavailable.'; render(); })
       .catch(() => { msg.textContent = 'Could not load performance data.'; });
@@ -345,6 +349,8 @@
   document.getElementById('perfBench').addEventListener('change', e => { state.bench = e.target.checked; render(); });
   document.getElementById('perfPct').addEventListener('change', e => { state.pct = e.target.checked; render(); });
   document.getElementById('perfAvg').addEventListener('change', e => { state.avg = e.target.checked; render(); });
+  const pm = document.getElementById('perfManaged');
+  if (pm) pm.addEventListener('change', e => { state.managed = e.target.checked; fetchScope(); });
   document.getElementById('perfBarLine').addEventListener('change', e => { state.barLine = e.target.value; render(); });
 
   fetchScope();

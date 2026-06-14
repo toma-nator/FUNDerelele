@@ -1104,6 +1104,17 @@ the parked rolling-beta-over-time chart into a full composition history.)
 
 **Priority:** Impact: Med · Effort: medium–large
 
+## Dashboard — combined self-directed + managed widget (listed separately)
+
+A widget that shows **both** self-directed and managed holdings/value in one place but
+**clearly separated into two sections** (self-directed first, then a "Managed" subgroup
+with its own subtotal) — so you get the full picture at a glance without managed
+muddying the self-directed list. Complements Top Holdings (which is self-directed-only)
+and the dashboard total click-switch. _Effort: small — a grouped variant of the
+holdings widget keyed on `Account.managed`._
+
+**Priority:** Impact: Low–Med · Effort: small
+
 ## Read-only API endpoint — investment data source for the budget app
 
 A small **read-only JSON endpoint** (e.g. `GET /api/summary`) exposing this app's

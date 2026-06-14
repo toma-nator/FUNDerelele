@@ -8,7 +8,7 @@ from datetime import date
 from calculations import (
     get_holdings, get_dashboard_stats, get_dividend_stats, get_account_summary,
     get_gic_stats, get_performance_series, get_performance_data, get_contribution_room,
-    ROOM_TYPES,
+    managed_included_in, ROOM_TYPES,
 )
 from charts import _realized_by_year
 from models import Transaction, Account
@@ -107,7 +107,7 @@ def build_overview():
     """Hero + every KPI in one pass (shared computations)."""
     holdings = get_holdings()
     st = get_dashboard_stats(holdings)
-    ds = get_dividend_stats('portfolio')
+    ds = get_dividend_stats('portfolio' if managed_included_in('dividends') else 'self_directed')
     contrib = _personal_contributions()
     realized = _realized_by_year(None)
 
@@ -124,6 +124,10 @@ def build_overview():
         'unrealized_pct': _pct(st['total_unrealized_pct']), 'unrealized_cls': _cls(st['total_unrealized']),
         'day': _signed(st['total_day_change']), 'day_cls': _cls(st['total_day_change']),
         'num_holdings': st['num_holdings'], 'cash': _cad(st['total_cash']),
+        'has_managed': st.get('has_managed', False),
+        'self_directed': _cad(st.get('self_directed_total', total)),
+        'managed': _cad(st.get('managed_total', 0.0)),
+        'default_total_mode': 'total' if managed_included_in('total') else 'self_directed',
     }
 
     room_total, has_room = _room_total()
@@ -171,7 +175,7 @@ def build_overview():
 
 
 def sparkline():
-    s = get_performance_series('portfolio')
+    s = get_performance_series('portfolio' if managed_included_in('performance') else 'self_directed')
     return {'labels': s['labels'],
             'values': [round((s['market_value'][i] or 0) + (s['cash'][i] or 0), 2)
                        for i in range(len(s['labels']))]}
@@ -256,14 +260,22 @@ def w_account_highlights(basis='contrib', cols_csv=''):
 
 
 def w_top_holdings(count='5'):
+    from calculations import managed_account_names
     hs = get_holdings()
+    # Top Holdings is a "your positions" view, so drop advisor/fund-managed
+    # accounts (you don't trade those) when any exist.
+    managed = managed_account_names()
+    self_directed_only = bool(managed) and any(h['account'] in managed for h in hs)
+    if self_directed_only:
+        hs = [h for h in hs if h['account'] not in managed]
     total = sum(h['market_value_cad'] or 0 for h in hs) or 1
     hs = sorted(hs, key=lambda h: (h['market_value_cad'] or 0), reverse=True)
     total_n = len(hs)
     # count is '5' / '10' / 'all' (default 5); anything else falls back to 5.
     n = total_n if count == 'all' else (int(count) if str(count).isdigit() else 5)
     shown = hs[:n]
-    return {'count': count, 'total_n': total_n,
+    return {'count': count, 'total_n': total_n, 'self_directed_only': self_directed_only,
+            'title_suffix': 'self-directed' if self_directed_only else None,
             'rows': [{'ticker': h['ticker'], 'account': h['account'],
                       'mv': _cad(h['market_value_cad'] or 0),
                       'gl': _signed(h['unrealized_gl'] or 0), 'gl_cls': _cls(h['unrealized_gl'] or 0),

@@ -364,7 +364,8 @@ def dashboard_widget():
     else:
         ctx = fn()
     html = render_template(f'widgets/{wid}.html', **ctx)
-    return jsonify({'kind': 'html', 'title': dash.HTML_WIDGET_NAMES.get(wid, wid), 'html': html})
+    return jsonify({'kind': 'html', 'title': dash.HTML_WIDGET_NAMES.get(wid, wid),
+                    'title_suffix': ctx.get('title_suffix'), 'html': html})
 
 
 @app.route('/holdings')
@@ -822,9 +823,11 @@ def cashflows():
 
 @app.route('/dividends')
 def dividends():
-    from calculations import get_dividend_stats
+    from calculations import get_dividend_stats, managed_included_in
     scope = request.args.get('scope', 'portfolio')
-    stats = get_dividend_stats(scope)
+    # The whole-portfolio view honours the managed-in-stats setting.
+    eff_scope = 'self_directed' if (scope == 'portfolio' and not managed_included_in('dividends')) else scope
+    stats = get_dividend_stats(eff_scope)
     accounts = [r[0] for r in Transaction.query.filter_by(type='Dividend')
                 .with_entities(Transaction.account).distinct().all()]
     accounts.sort()
@@ -1024,6 +1027,15 @@ def settings():
             else:
                 db.session.add(Setting(key='rdsp_equity_map', value=json.dumps(eq)))
 
+        # How managed accounts count in stats: all / wealth / accounts_only.
+        if 'managed_in_stats' in request.form:
+            mode = request.form.get('managed_in_stats', 'all')
+            ms = Setting.query.get('managed_in_stats')
+            if ms:
+                ms.value = mode
+            else:
+                db.session.add(Setting(key='managed_in_stats', value=mode))
+
         # Mutual funds to show by ticker instead of their friendly name.
         show_ticker = ','.join(t.strip().upper() for t in request.form.getlist('fund_show_ticker') if t.strip())
         sft = Setting.query.get('fund_show_ticker')
@@ -1064,8 +1076,11 @@ def settings():
                                  'show_ticker': pc.ticker.upper() in _show_set})
     fund_tickers.sort(key=lambda x: x['ticker'])
 
+    from calculations import managed_account_names, managed_stats_mode
     return render_template('settings.html',
                            fund_tickers=fund_tickers,
+                           managed_exists=bool(managed_account_names()),
+                           managed_in_stats=managed_stats_mode(),
                            fx_rate=gs('fx_usd_cad', '1.365'),
                            fx_manual=gs('fx_manual', '0'),
                            fx_manual_rate=gs('fx_manual_rate', ''),
@@ -1225,11 +1240,13 @@ def charts():
     from charts import catalog_grouped
     # Only offer accounts that actually have transactions — empty/stale accounts
     # shouldn't clutter the scope dropdown.
+    from calculations import managed_account_names
     used = _used_account_names()
     accounts = [a.name for a in Account.query.order_by(Account.name).all()
                 if a.name in used]
     return render_template('charts.html', active='charts',
-                           groups=catalog_grouped(), accounts=accounts)
+                           groups=catalog_grouped(), accounts=accounts,
+                           has_managed=bool(managed_account_names()))
 
 
 # ── RDSP ──────────────────────────────────────────────────────────────────────
@@ -1407,10 +1424,14 @@ def rebalancer_targets():
 
 @app.route('/performance')
 def performance():
+    from calculations import managed_account_names, managed_included_in
     accounts = [r[0] for r in Transaction.query.with_entities(Transaction.account).distinct().all()]
     accounts.sort()
+    has_managed = bool(managed_account_names())
+    managed_default = managed_included_in('performance')  # check-bar initial state
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
-    return render_template('performance.html', accounts=accounts,
+    return render_template('performance.html', accounts=accounts, has_managed=has_managed,
+                           managed_default=managed_default,
                            last_updated=last_updated, active='performance')
 
 

@@ -971,6 +971,10 @@ a.hero-delta:hover { text-decoration: underline; }
 .snap-toggle { display: inline-block; margin-top: 6px; color: var(--accent); text-decoration: none; font-size: .8rem; }
 .snap-toggle:hover { text-decoration: underline; }
 
+/* Small tag beside a widget title (e.g. Top Holdings · self-directed) */
+.wgt-title-tag { font-size: .66rem; font-weight: 500; letter-spacing: .04em; color: var(--text-muted); text-transform: none; }
+.wgt-title-tag::before { content: '· '; }
+
 /* Friendly fund/company name under a holding's ticker symbol */
 .ticker-name { font-size: .68rem; font-weight: 400; color: var(--text-dim); letter-spacing: 0; text-transform: none; margin-top: 1px; white-space: normal; max-width: 220px; }
 

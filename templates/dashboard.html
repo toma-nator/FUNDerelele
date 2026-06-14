@@ -11,8 +11,8 @@
 <div class="hero-card" id="heroCard">
   <button class="te-btn te-x hero-hide" id="heroHide" title="Hide hero strip">×</button>
   <div class="hero-main">
-    <div class="hero-label">TOTAL PORTFOLIO</div>
-    <div class="hero-value mono">{{ hero.total }}</div>
+    <div class="hero-label" id="heroLabel">TOTAL PORTFOLIO</div>
+    <div class="hero-value mono" id="heroTotal">{{ hero.total }}</div>
     <div class="hero-deltas">
       <a href="#" class="hero-delta" id="heroOverall" title="Click to switch basis"></a>
       <span class="hero-dot">·</span>
@@ -103,6 +103,27 @@
     heroBasis = heroBasis === 'contrib' ? 'unrealized' : 'contrib';
     localStorage.setItem('dashHeroBasis', heroBasis);
     renderHero();
+  });
+
+  // ── Total mode: click the headline to cycle Total → Self-directed → Managed
+  // (only when a managed account exists). Persists like the basis toggle. ──
+  const TOTAL_MODES = ['total', 'self_directed', 'managed'];
+  const TOTAL_LABEL = { total: 'TOTAL PORTFOLIO', self_directed: 'SELF-DIRECTED', managed: 'MANAGED' };
+  const TOTAL_VALUE = { total: HERO.total, self_directed: HERO.self_directed, managed: HERO.managed };
+  let totalMode = localStorage.getItem('dashTotalMode') || HERO.default_total_mode || 'total';
+  function renderTotal() {
+    if (!HERO.has_managed || !TOTAL_MODES.includes(totalMode)) totalMode = 'total';
+    document.getElementById('heroLabel').textContent = TOTAL_LABEL[totalMode];
+    document.getElementById('heroTotal').textContent = TOTAL_VALUE[totalMode];
+    const t = document.getElementById('heroTotal');
+    t.style.cursor = HERO.has_managed ? 'pointer' : '';
+    t.title = HERO.has_managed ? 'Click to switch: total / self-directed / managed' : '';
+  }
+  document.getElementById('heroTotal').addEventListener('click', () => {
+    if (!HERO.has_managed) return;
+    totalMode = TOTAL_MODES[(TOTAL_MODES.indexOf(totalMode) + 1) % TOTAL_MODES.length];
+    localStorage.setItem('dashTotalMode', totalMode);
+    renderTotal();
   });
 
   function applyHero() {
@@ -257,6 +278,10 @@
     if (w.id === 'top_holdings') url += '&count=' + (w.count || '5');
     fetch(url).then(r => r.json()).then(d => {
       if (wcharts[idx]) { wcharts[idx].destroy(); delete wcharts[idx]; }
+      // A widget can tag its title (e.g. Top Holdings → "self-directed").
+      const titleEl = card.querySelector('.dash-widget-title');
+      if (titleEl) titleEl.innerHTML = (WIDGET_NAMES[w.id] || w.id)
+        + (d.title_suffix ? ' <span class="wgt-title-tag">' + d.title_suffix + '</span>' : '');
       if (d.kind === 'error') { body.innerHTML = '<div class="empty-row">' + (d.error || 'Error') + '</div>'; return; }
       if (d.kind === 'chart') {
         const cd = d.data;
@@ -357,7 +382,7 @@
   });
 
   // init
-  renderHero(); applyHero(); applyAlerts(); loadSparkline();
+  renderHero(); renderTotal(); applyHero(); applyAlerts(); loadSparkline();
   renderKpis(); refreshAddKpi(); renderWidgets();
 })();
 </script>

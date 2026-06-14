@@ -31,6 +31,10 @@
       </select>
       <select class="chart-account" title="Filter by account">
         <option value="">All Accounts</option>
+        {% if has_managed %}
+        <option value="self_directed">All Self-Directed</option>
+        <option value="managed">All Managed</option>
+        {% endif %}
         {% for a in accounts %}
         <option value="{{ a }}">{{ a }}</option>
         {% endfor %}
