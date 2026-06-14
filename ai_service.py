@@ -12,6 +12,7 @@ Validation, watchlist add, and caching live in later phases.
 """
 
 import json
+from datetime import datetime, date
 
 DEFAULT_CLAUDE_MODEL = 'claude-opus-4-8'
 DEFAULT_CHATGPT_MODEL = 'gpt-5.5'
@@ -128,6 +129,13 @@ POSITION CAPS (as a % of cash_to_deploy)
 - When a cap stops you from filling a gap with your preferred name, record it in cap_notes — state the \
 ticker, what you wanted to deploy, the cap, and where you rerouted the rest.
 
+SELLS — ONLY IF REQUIRED
+- Deploy the available cash first; this is primarily a cash-deployment plan. Recommend a Sell only when \
+(a) a priority gap needs more funding than the cash alone can provide, or (b) a current holding sits in a \
+bucket listed in over_target_buckets (it is above its target). Keep sells minimal — trim the most \
+over-target / highest-risk overweight first. Sell proceeds fund additional Buys; set \
+leftover_cash = cash_to_deploy + total Sells − total Buys (≈ 0 when fully deployed).
+
 SECURITIES — MUST BE REAL
 - Use real, currently-listed tickers. VERIFY each candidate with web search before recommending it.
 - Use correct symbols for the exchange: Canadian listings use a .TO suffix; Canadian Depositary \
@@ -161,6 +169,23 @@ Keep the summary tight and professional. End caveats with a one-line "Not financ
 
 
 # ── Payload assembly ─────────────────────────────────────────────────────────────
+
+def _over_target_buckets(account):
+    """Buckets currently above target across the dimensions that have saved targets, so the
+    model can propose trimming an overweight (sells only if required)."""
+    from calculations import (REBAL_DIMENSIONS, REBAL_DIM_LABELS, get_rebal_targets,
+                              get_rebalancer_data)
+    out = []
+    for dim in REBAL_DIMENSIONS:
+        if not get_rebal_targets(account, dim):
+            continue
+        d = get_rebalancer_data(account=account, dimension=dim, mode='full')
+        for b in d['buckets']:
+            if b['drift'] > MIN_TRADE_CAD and b['label'] != 'Cash':
+                out.append({'dimension': REBAL_DIM_LABELS.get(dim, dim),
+                            'bucket': b['label'], 'over_by_cad': b['drift']})
+    return out
+
 
 def build_payload(account, style='mixed'):
     """Minimized input for the model — no account number is included."""
@@ -200,6 +225,8 @@ def build_payload(account, style='mixed'):
         by_dim.setdefault(g['dimension_label'], []).append({
             'bucket': g['bucket'], 'amount_cad': g['amount_cad'], 'gap_pct': g['gap_pct']})
         for c in g.get('candidates', []):
+            if c.get('source') == 'idea':
+                continue  # drop hard-coded curated ETFs — let the AI research its own names
             cands.setdefault(c['ticker'], c.get('source', ''))
 
     return {
@@ -207,6 +234,7 @@ def build_payload(account, style='mixed'):
                     'tax_note': tax_note},
         'cash_to_deploy': cash,
         'gaps_by_dimension': by_dim,
+        'over_target_buckets': _over_target_buckets(account),
         'current_holdings': current,
         'watchlist_candidates': [{'ticker': t, 'source': s} for t, s in sorted(cands.items())],
         'constraints': {
@@ -339,3 +367,155 @@ def generate_rebalance_plan(payload, provider, model=None):
     if provider == 'claude':
         return _claude_plan(payload, model)
     raise AIConfigError(f'Unknown AI provider: {provider}')
+
+
+# ── Validation (yfinance — free) ─────────────────────────────────────────────────
+
+def validate_plan(plan, account):
+    """Resolve every suggested ticker against yfinance (free). Annotates the plan with
+    `_verified` (new-watchlist names that resolve and aren't already tracked/held),
+    `_skipped` (with a reason), and `_invalid_trades` (trade tickers that don't resolve).
+    Adds nothing to the watchlist — that's `add_picks_to_watchlist`."""
+    from models import WatchlistItem
+    from price_service import fetch_prices_batch, get_holdings_metadata
+    from calculations import get_holdings
+
+    held = {h['ticker'].upper() for h in get_holdings()}
+    on_wl = {w.ticker.upper() for w in WatchlistItem.query.all()}
+    wl_tickers = [w['ticker'] for w in plan.get('new_watchlist', [])]
+    trade_tickers = [t['ticker'] for t in plan.get('trades', [])]
+    candidates = list({*wl_tickers, *trade_tickers})
+    prices = fetch_prices_batch(candidates) if candidates else {}
+    metas = get_holdings_metadata(candidates) if candidates else {}
+
+    verified, skipped = [], []
+    for w in plan.get('new_watchlist', []):
+        tk = w['ticker']
+        up = tk.upper()
+        if up in held:
+            skipped.append({**w, 'reason': 'already held'})
+        elif up in on_wl:
+            skipped.append({**w, 'reason': 'already on watchlist'})
+        elif tk in prices:
+            verified.append({**w,
+                             'live_price': prices[tk]['price'],
+                             'currency': prices[tk].get('currency', 'CAD'),
+                             'company': (metas.get(tk, {}) or {}).get('long_name') or w.get('company', '')})
+        else:
+            skipped.append({**w, 'reason': "couldn't verify ticker"})
+
+    plan['_verified'] = verified
+    plan['_skipped'] = skipped
+    plan['_invalid_trades'] = [t['ticker'] for t in plan.get('trades', [])
+                               if t['ticker'] not in prices and t['ticker'].upper() not in held]
+    return plan
+
+
+def add_picks_to_watchlist(plan):
+    """Add the validated `_verified` new-watchlist names (run validate_plan first) with an
+    AI-provenance note. Returns the list of tickers added."""
+    from models import db, WatchlistItem
+    provider = plan.get('_provider', 'AI')
+    today = date.today()
+    existing = {w.ticker.upper() for w in WatchlistItem.query.all()}
+    added = []
+    for w in plan.get('_verified', []):
+        up = w['ticker'].upper()
+        if up in existing:
+            continue
+        note = f"AI rebalancer pick · {provider} · {today.isoformat()}"
+        if w.get('note'):
+            note += f" — {w['note']}"
+        db.session.add(WatchlistItem(
+            ticker=up,
+            company=w.get('company', '') or '',
+            currency=(w.get('currency') or 'CAD'),
+            added_price=w.get('live_price'),
+            added_date=today,
+            notes=note,
+        ))
+        existing.add(up)
+        added.append(up)
+    if added:
+        db.session.commit()
+    return added
+
+
+# ── Per-account caching (settings table) ─────────────────────────────────────────
+
+def _plan_key(account):
+    slug = account.lower().replace(' ', '_').replace('-', '_')
+    return f'ai_plan_{slug}'
+
+
+def compute_fingerprint(payload):
+    """Stable hash of the inputs that should invalidate a cached plan when they change."""
+    import hashlib
+    relevant = {
+        'cash': payload.get('cash_to_deploy'),
+        'gaps': payload.get('gaps_by_dimension'),
+        'over': payload.get('over_target_buckets'),
+        'holdings': sorted((h['ticker'], h['value_cad']) for h in payload.get('current_holdings', [])),
+        'style': payload.get('constraints', {}).get('implementation_style'),
+    }
+    blob = json.dumps(relevant, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def save_cached_plan(account, plan, payload, style):
+    from models import db, Setting
+    rec = {
+        'plan': plan,
+        'generated_at': datetime.utcnow().isoformat(),
+        'provider': plan.get('_provider'),
+        'model': plan.get('_model'),
+        'style': style,
+        'fingerprint': compute_fingerprint(payload),
+    }
+    key = _plan_key(account)
+    s = Setting.query.get(key)
+    if s:
+        s.value = json.dumps(rec)
+    else:
+        db.session.add(Setting(key=key, value=json.dumps(rec)))
+    db.session.commit()
+
+
+def load_cached_plan(account):
+    """The cached record {plan, generated_at, provider, model, style, fingerprint} or None."""
+    raw = _get_setting(_plan_key(account))
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+
+def clear_cached_plan(account):
+    from models import db, Setting
+    s = Setting.query.get(_plan_key(account))
+    if s:
+        db.session.delete(s)
+        db.session.commit()
+
+
+def plan_is_stale(record, account):
+    """True if the cached plan's inputs no longer match the account's current state."""
+    if not record:
+        return False
+    payload = build_payload(account, record.get('style', 'mixed'))
+    return record.get('fingerprint') != compute_fingerprint(payload)
+
+
+# ── Orchestration (THE billable call — only invoke on an explicit user action) ──
+
+def run_and_cache(account, provider, style=None, model=None):
+    """Build payload → generate (web search, ~$ per run) → validate → cache. Returns the
+    plan dict. This is the only function that costs money; never call it on page load."""
+    style = style or _get_setting('ai_impl_style_default', 'mixed')
+    payload = build_payload(account, style)
+    plan = generate_rebalance_plan(payload, provider, model)
+    validate_plan(plan, account)
+    save_cached_plan(account, plan, payload, style)
+    return plan
