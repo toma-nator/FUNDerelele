@@ -163,6 +163,82 @@
   </div>
 </form>
 
+<!-- AI Rebalancer — keys + provider/style defaults (own form so the main form isn't blanked) -->
+<form method="POST" action="{{ url_for('settings') }}">
+<div class="card" style="margin-bottom:20px">
+  <div class="settings-section">
+    <div class="settings-section-title">AI Rebalancer</div>
+    <input type="hidden" name="ai_form" value="1">
+    <p style="font-size:.75rem;color:var(--text-muted);margin-bottom:14px">
+      Powers the AI rebalance-plan suggestions on the <strong>Watchlist</strong> tab. Add an API key for Claude and/or ChatGPT.
+      Keys are stored locally in your database, never logged, and only sent to the provider you pick when you click <em>Generate</em>.
+      <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener" style="color:var(--accent)">Get a Claude key</a> ·
+      <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" style="color:var(--accent)">Get a ChatGPT key</a>
+    </p>
+
+    <div class="form-row" style="padding:0;margin-bottom:14px">
+      <div class="form-group" style="min-width:280px">
+        <label>Claude API key {% if ai_claude_key_set %}<span class="text-green" style="font-size:.72rem">· saved</span>{% endif %}</label>
+        <input class="form-input mono" name="anthropic_api_key" type="password" autocomplete="off"
+               placeholder="{% if ai_claude_key_set %}•••••••••• (blank = keep){% else %}sk-ant-…{% endif %}">
+        {% if ai_claude_key_set %}
+        <label class="perf-check" style="justify-content:flex-start;gap:6px;margin-top:6px;font-size:.72rem">
+          <input type="checkbox" name="clear_anthropic_api_key"> Clear saved key
+        </label>{% endif %}
+      </div>
+      <div class="form-group" style="min-width:280px">
+        <label>ChatGPT API key {% if ai_chatgpt_key_set %}<span class="text-green" style="font-size:.72rem">· saved</span>{% endif %}</label>
+        <input class="form-input mono" name="openai_api_key" type="password" autocomplete="off"
+               placeholder="{% if ai_chatgpt_key_set %}•••••••••• (blank = keep){% else %}sk-…{% endif %}">
+        {% if ai_chatgpt_key_set %}
+        <label class="perf-check" style="justify-content:flex-start;gap:6px;margin-top:6px;font-size:.72rem">
+          <input type="checkbox" name="clear_openai_api_key"> Clear saved key
+        </label>{% endif %}
+      </div>
+    </div>
+
+    <div class="form-row" style="padding:0;margin-bottom:14px">
+      <div class="form-group" style="min-width:170px">
+        <label>Default provider</label>
+        <select class="form-input" name="ai_provider_default">
+          <option value="claude" {% if ai_provider_default == 'claude' %}selected{% endif %}>Claude</option>
+          <option value="chatgpt" {% if ai_provider_default == 'chatgpt' %}selected{% endif %}>ChatGPT</option>
+          <option value="ask" {% if ai_provider_default == 'ask' %}selected{% endif %}>Ask each time</option>
+        </select>
+      </div>
+      <div class="form-group" style="min-width:210px">
+        <label>Default implementation style</label>
+        <select class="form-input" name="ai_impl_style_default">
+          <option value="etf_heavy" {% if ai_impl_style_default == 'etf_heavy' %}selected{% endif %}>ETF-heavy (passive)</option>
+          <option value="mixed" {% if ai_impl_style_default == 'mixed' %}selected{% endif %}>Mixed</option>
+          <option value="stock_heavy" {% if ai_impl_style_default == 'stock_heavy' %}selected{% endif %}>Stock-heavy (active)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row" style="padding:0;margin-bottom:6px">
+      <div class="form-group" style="min-width:230px">
+        <label>Claude model override (optional)</label>
+        <input class="form-input mono" name="ai_model_claude" placeholder="claude-opus-4-8" value="{{ ai_model_claude }}">
+      </div>
+      <div class="form-group" style="min-width:230px">
+        <label>ChatGPT model override (optional)</label>
+        <input class="form-input mono" name="ai_model_chatgpt" placeholder="provider default" value="{{ ai_model_chatgpt }}">
+      </div>
+    </div>
+    <p style="font-size:.72rem;color:var(--text-muted)">
+      Leave model overrides blank to use the recommended defaults (Claude: <span class="mono">claude-opus-4-8</span>).
+      Implementation style biases the whole plan; you can still swap individual picks. Research uses generic,
+      category-level web queries only — never your balances or account details.
+    </p>
+
+    <div style="padding:14px 0 0">
+      <button type="submit" class="btn btn-primary">Save AI settings</button>
+    </div>
+  </div>
+</div>
+</form>
+
 <!-- Data & Backup lives outside the settings form (restore is its own upload form) -->
 <div class="card" style="margin-bottom:20px">
   <div class="settings-section">

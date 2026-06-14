@@ -1010,6 +1010,34 @@ def gics_delete(id):
 @app.route('/settings', methods=['GET', 'POST'])
 def settings():
     if request.method == 'POST':
+        # AI Rebalancer settings live in their own form (marker `ai_form`) so saving
+        # them never blanks the main settings. API keys are only updated when a new
+        # value is typed; a per-key "clear" checkbox wipes a stored key.
+        if 'ai_form' in request.form:
+            for key in ('ai_provider_default', 'ai_impl_style_default',
+                        'ai_model_claude', 'ai_model_chatgpt'):
+                val = request.form.get(key, '').strip()
+                s = Setting.query.get(key)
+                if s:
+                    s.value = val
+                else:
+                    db.session.add(Setting(key=key, value=val))
+            for prov in ('anthropic_api_key', 'openai_api_key'):
+                new_val = request.form.get(prov, '').strip()
+                clear = request.form.get('clear_' + prov) == 'on'
+                s = Setting.query.get(prov)
+                if clear:
+                    if s:
+                        s.value = ''
+                elif new_val:  # empty + not clearing → keep the existing key
+                    if s:
+                        s.value = new_val
+                    else:
+                        db.session.add(Setting(key=prov, value=new_val))
+            db.session.commit()
+            flash('AI settings saved.', 'success')
+            return redirect(url_for('settings'))
+
         keys = [
             'fx_manual', 'fx_manual_rate', 'price_refresh_mins',
             'room_method', 'birth_year', 'tfsa_limit_overrides',
@@ -1109,6 +1137,12 @@ def settings():
                            room_anchor_tfsa=gs('room_anchor_tfsa', ''),
                            room_anchor_fhsa=gs('room_anchor_fhsa', ''),
                            rdsp_equity_map=__import__('rdsp_view').equity_safe_map(),
+                           ai_provider_default=gs('ai_provider_default', 'claude'),
+                           ai_impl_style_default=gs('ai_impl_style_default', 'mixed'),
+                           ai_model_claude=gs('ai_model_claude', ''),
+                           ai_model_chatgpt=gs('ai_model_chatgpt', ''),
+                           ai_claude_key_set=bool(gs('anthropic_api_key', '')),
+                           ai_chatgpt_key_set=bool(gs('openai_api_key', '')),
                            active='settings')
 
 
