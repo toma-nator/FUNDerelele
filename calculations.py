@@ -1394,53 +1394,71 @@ def _beta_bucket(beta, asset_type):
     return 'High'
 
 
-def _blend_bucket(beta, market_cap, asset_type, fund_sectors=None):
-    """Blended risk/uncertainty (0=Very Low … 4=Very High) combining volatility
-    (beta) with company size/maturity (market cap). A big, established name stays
-    moderate even if volatile; a small, unknown name rates highest. Funds are
-    discounted by how diversified they are (sector concentration)."""
-    at = asset_type or 'Equity'
+# ── Blended-risk classifier ───────────────────────────────────────────────────
+# Volatility-driven (PRIIPs/UCITS-style) with a single-name size adjustment and a
+# manual override layer. Precedence: (1) per-ticker override → (2) measured
+# annualized volatility → band, plus a size nudge/floor for single names →
+# (3) asset-class default when no volatility history exists. RISK_OVERRIDES is the
+# written, version-controlled record of what's pinned where.
+RISK_OVERRIDES = {
+    # Very Low — cash equivalents, money-market, ultra-short / T-bill ETFs
+    'PSA.TO': 'Very Low', 'CASH.TO': 'Very Low', 'CSAV.TO': 'Very Low',
+    'CBIL.TO': 'Very Low', 'ZST.TO': 'Very Low', 'HISA.TO': 'Very Low',
+    'CMR.TO': 'Very Low', 'MNY.TO': 'Very Low',
+    # Low — broad investment-grade bond funds
+    'ZAG.TO': 'Low', 'VAB.TO': 'Low', 'XBB.TO': 'Low', 'BND': 'Low', 'AGG': 'Low',
+    # High — high-yield / junk bonds (volatility understates credit/tail risk)
+    'HYG': 'High', 'JNK': 'High', 'XHY.TO': 'High', 'CHB.TO': 'High',
+    # Very High — leveraged / inverse ETFs and crypto
+    'TQQQ': 'Very High', 'SQQQ': 'Very High', 'UPRO': 'Very High',
+    'SOXL': 'Very High', 'BITO': 'Very High',
+    'BTC-USD': 'Very High', 'ETH-USD': 'Very High',
+}
 
-    # Volatility component (0..4)
-    if beta is None:
-        b = {'Bond': 0, 'Cash': 0, 'Mutual Fund': 1, 'ETF': 1}.get(at, 2)
-    elif beta < 0.7:
-        b = 0
-    elif beta < 1.0:
-        b = 1
-    elif beta < 1.3:
-        b = 2
-    elif beta < 1.7:
-        b = 3
-    else:
-        b = 4
+# Annualized-volatility band ceilings (fractions) → index into _BLEND_BUCKETS.
+# At/above the last ceiling → 'Very High'.
+_VOL_BAND_CEILINGS = [0.05, 0.11, 0.18, 0.30]  # <5% VLow · <11% Low · <18% Mod · <30% High
 
-    # Size / idiosyncratic-uncertainty component (0=mega/diversified … 4=micro/unknown).
-    if at in ('Bond', 'Cash'):
-        s = 0
-    elif at in ('ETF', 'Mutual Fund'):
-        # More diversified (lower sector concentration) → lower uncertainty.
-        fs = fund_sectors or {}
-        if fs:
-            tot = sum(fs.values()) or 1
-            hhi = sum((v / tot) ** 2 for v in fs.values())  # 1/N (broad) … 1 (one sector)
-            s = 0 if hhi < 0.25 else (1 if hhi < 0.5 else 2)
-        else:
-            s = 1
-    elif market_cap is None:
-        s = 4
-    elif market_cap >= 200e9:
-        s = 0
-    elif market_cap >= 10e9:
-        s = 1
-    elif market_cap >= 2e9:
-        s = 2
-    elif market_cap >= 300e6:
-        s = 3
-    else:
-        s = 4
+# Asset-class fallback when no volatility history exists (rare — most listed
+# securities have price history). A single equity defaults conservatively to High.
+_ASSET_CLASS_RISK = {
+    'Cash': 'Very Low', 'Bond': 'Low', 'ETF': 'Moderate',
+    'Mutual Fund': 'Moderate', 'Equity': 'High',
+}
 
-    return _BLEND_BUCKETS[int(round((b + s) / 2))]
+_MEGA_CAP = 100e9   # single names this big are nudged down one band (floor Low)
+_SMALL_CAP = 2e9    # single names this small are floored at High
+
+
+def _vol_band_idx(vol):
+    for i, ceil in enumerate(_VOL_BAND_CEILINGS):
+        if vol < ceil:
+            return i
+    return 4  # Very High
+
+
+def _blend_bucket(ticker, m):
+    """Blended-risk bucket (Very Low … Very High) for one holding. Measured
+    volatility drives it; single names are nudged down (mega cap) or floored at
+    High (small/micro); per-ticker overrides and an asset-class fallback handle
+    the edges (cash, bonds, leveraged/crypto, and tickers with no history)."""
+    ov = RISK_OVERRIDES.get(ticker)
+    if ov:
+        return ov
+    at = m.get('asset_type') or 'Equity'
+    if at == 'Cash':
+        return 'Very Low'
+    vol = m.get('volatility')
+    if vol is not None:
+        idx = _vol_band_idx(vol)
+        if at == 'Equity':  # single-name size adjustment
+            mc = m.get('market_cap')
+            if mc is not None and mc >= _MEGA_CAP:
+                idx = max(1, idx - 1)     # big, established → down one (floor Low)
+            elif mc is not None and mc < _SMALL_CAP:
+                idx = max(idx, 3)         # small / micro → floor at High
+        return _BLEND_BUCKETS[idx]
+    return _ASSET_CLASS_RISK.get(at, 'High')
 
 _ALL_SECTORS = ['Technology', 'Financial Services', 'Healthcare', 'Consumer Cyclical',
                 'Consumer Defensive', 'Industrials', 'Energy', 'Utilities',
@@ -1479,14 +1497,13 @@ def _bucket_weights(h, m, dimension):
     if dimension == 'beta':
         return {_beta_bucket(m.get('beta'), m.get('asset_type')): 1.0}
     if dimension == 'blend':
-        return {_blend_bucket(m.get('beta'), m.get('market_cap'),
-                              m.get('asset_type'), m.get('fund_sectors')): 1.0}
+        return {_blend_bucket(h.get('ticker'), m): 1.0}
     return {'Unclassified': 1.0}
 
 
 def _bucket_of_ticker(ticker, currency, m, dimension):
     """Single dominant bucket for a non-held ticker (watchlist classification)."""
-    w = _bucket_weights({'currency': currency}, m, dimension)
+    w = _bucket_weights({'currency': currency, 'ticker': ticker}, m, dimension)
     return max(w, key=w.get) if w else 'Unclassified'
 
 
@@ -1649,8 +1666,8 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
     }
     if not account:
         return {**base_result, 'buckets': [], 'trades': [], 'new_positions': [],
-                'cash': 0, 'deploy_cash': 0, 'invested': 0, 'targets_set': False,
-                'cash_after': 0, 'target_total': 0}
+                'risk_groups': [], 'cash': 0, 'deploy_cash': 0, 'invested': 0,
+                'targets_set': False, 'cash_after': 0, 'target_total': 0}
 
     holdings = [h for h in all_holdings if h['account'] == account]
     cash = cash_by.get(account, 0.0)
@@ -1830,11 +1847,44 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
         })
     new_positions.sort(key=lambda x: x['amount_cad'], reverse=True)
 
+    # Per-holding risk transparency (blend dimension only): holdings grouped by the
+    # basket they land in, each basket carrying its total + % of the account, so the
+    # classification is auditable and shows what's in each basket at a glance.
+    risk_groups = []
+    if dimension == 'blend':
+        by_bucket = {}
+        for h in holdings:
+            m = meta_all.get(h['ticker'], {})
+            vol = m.get('volatility')
+            by_bucket.setdefault(_blend_bucket(h['ticker'], m), []).append({
+                'ticker': h['ticker'],
+                'vol_pct': round(vol * 100, 1) if vol is not None else None,
+                'overridden': h['ticker'] in RISK_OVERRIDES,
+                'value': round(h['market_value_cad'], 2), 'is_cash': False,
+            })
+        # Cash sits in Very Low (near-cash / guaranteed) so the card reflects the
+        # whole account — typically the goal is to deploy it down to zero.
+        if cash > 0.005:
+            by_bucket.setdefault('Very Low', []).append({
+                'ticker': 'Cash', 'vol_pct': None, 'overridden': False,
+                'value': round(cash, 2), 'is_cash': True,
+            })
+        tot = (invested + max(cash, 0.0)) or 1
+        for b in _BLEND_BUCKETS:  # ordered Very Low → Very High
+            items = by_bucket.get(b)
+            if not items:
+                continue
+            items.sort(key=lambda x: x['value'], reverse=True)
+            bt = sum(x['value'] for x in items)
+            risk_groups.append({'bucket': b, 'total': round(bt, 2),
+                                'pct': round(bt / tot * 100, 1), 'holdings': items})
+
     return {
         **base_result,
         'buckets': buckets,
         'trades': trades,
         'new_positions': new_positions,
+        'risk_groups': risk_groups,
         'cash': round(cash, 2),
         'deploy_cash': round(deploy_cash, 2),
         'invested': round(invested, 2),

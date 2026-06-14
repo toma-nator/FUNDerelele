@@ -379,9 +379,22 @@ def holdings():
     tickers = sorted({h['ticker'] for h in data if h['ticker'] and h['ticker'] != 'CASH'})
     meta = get_holdings_metadata(tickers)
     names = {t: (meta.get(t, {}).get('long_name') or '') for t in tickers}
+    # Blended-risk bucket + measured volatility per ticker (same classifier as the
+    # Rebalancer), for the Vol / Risk columns. `rank` drives the risk sort order.
+    from calculations import _blend_bucket, _BLEND_BUCKETS
+    risk = {}
+    for t in tickers:
+        m = meta.get(t, {})
+        vol = m.get('volatility')
+        bucket = _blend_bucket(t, m)
+        risk[t] = {
+            'vol_pct': round(vol * 100, 1) if vol is not None else None,
+            'bucket': bucket,
+            'rank': _BLEND_BUCKETS.index(bucket) if bucket in _BLEND_BUCKETS else None,
+        }
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
     return render_template('holdings.html', holdings=data, accounts=accounts,
-                           currencies=currencies, names=names,
+                           currencies=currencies, names=names, risk=risk,
                            last_updated=last_updated, active='holdings')
 
 

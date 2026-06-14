@@ -246,6 +246,49 @@
   </div>
 </div>
 {% endif %}
+
+{# ── Holdings by risk (blend dimension only): grouped by basket, collapsible ── #}
+{% if data.dimension == 'blend' and data.risk_groups %}
+<style>
+  details.risk-card > summary { cursor: pointer; list-style: none; }
+  details.risk-card > summary::-webkit-details-marker { display: none; }
+  details.risk-card > summary .caret { display: inline-block; transition: transform .15s; opacity: .6; }
+  details.risk-card[open] > summary .caret { transform: rotate(90deg); }
+  details.risk-card tr.risk-group > td { font-weight: 600; background: rgba(255,255,255,.03); border-top: 1px solid var(--border-sub); }
+</style>
+<details class="card risk-card">
+  <summary class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+    <span>Blended Risk Allocation <span class="card-sub">holdings grouped by basket · measured volatility</span></span>
+    <span class="caret">▸</span>
+  </summary>
+  <div class="table-scroll">
+    <table class="data-table">
+      <thead>
+        <tr><th>Holding</th><th class="r">Value</th><th class="r">Volatility</th></tr>
+      </thead>
+      <tbody>
+        {% for g in data.risk_groups %}
+        <tr class="risk-group">
+          <td style="font-size:.82rem">{{ g.bucket }} <span class="text-dim" style="font-weight:400">· {{ '%.0f' % g.pct }}% of account</span></td>
+          <td class="r mono">{{ g.total | cad }}</td>
+          <td></td>
+        </tr>
+        {% for r in g.holdings %}
+        <tr>
+          <td class="mono{% if r.is_cash %} text-dim{% endif %}" style="padding-left:1.6rem">{{ r.ticker }}{% if r.is_cash %} <span class="text-dim" style="font-size:.74rem">· to deploy</span>{% elif r.overridden %} <span class="text-dim" style="font-size:.74rem">· override</span>{% endif %}</td>
+          <td class="r mono">{{ r.value | cad }}</td>
+          <td class="r mono text-dim">{% if r.vol_pct is not none %}{{ '%.1f' % r.vol_pct }}%{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="text-dim" style="padding:8px 16px;font-size:.74rem">
+    Volatility is annualized stdev of ~1y daily returns. Single large-caps are nudged down a band, small-caps floored at High; cash, bonds, leveraged &amp; crypto are set by override. “—” means no price history yet, so the asset-class default is used.
+  </div>
+</details>
+{% endif %}
 {% endif %}{# not is_managed — managed accounts show no trade recommendations #}
 {% endif %}{# is_managed → message-only card #}
 

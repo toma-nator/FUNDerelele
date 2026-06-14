@@ -65,6 +65,8 @@
           <th class="r" data-sort data-type="num">Dividends <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">Reinv % <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">Realized G/L <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">Vol <span class="sort-arrow"></span></th>
+          <th data-sort data-type="num">Risk <span class="sort-arrow"></span></th>
         </tr>
       </thead>
       <tbody>
@@ -111,9 +113,12 @@
             {% if h.reinvested_pct %}{{ '%.0f' % h.reinvested_pct }}%{% else %}—{% endif %}
           </td>
           <td class="r mono {{ h.realized_gl_cad | gl_class }}" data-val="{{ h.realized_gl_cad }}">{{ h.realized_gl_cad | signed_cad }}</td>
+          {% set rk = risk.get(h.ticker) %}
+          <td class="r mono text-dim" data-val="{{ rk.vol_pct if rk and rk.vol_pct is not none else '' }}">{% if rk and rk.vol_pct is not none %}{{ '%.1f' % rk.vol_pct }}%{% else %}—{% endif %}</td>
+          <td class="mono" style="font-size:.82rem" data-val="{{ rk.rank if rk and rk.rank is not none else '' }}">{% if rk and rk.bucket %}{{ rk.bucket }}{% else %}—{% endif %}</td>
         </tr>
         {% else %}
-        <tr><td colspan="17" class="empty-row">No holdings yet. Add transactions to see your portfolio here.</td></tr>
+        <tr><td colspan="19" class="empty-row">No holdings yet. Add transactions to see your portfolio here.</td></tr>
         {% endfor %}
       </tbody>
     </table>

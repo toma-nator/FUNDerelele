@@ -27,7 +27,8 @@ def _fetch_one_metadata(ticker):
     """Fetch classification metadata for a single ticker (asset type, sector,
     market cap, and ETF look-through sector/asset-class weightings)."""
     meta = {'asset_type': None, 'sector': None, 'market_cap': None,
-            'fund_sectors': None, 'fund_assets': None, 'beta': None, 'long_name': None}
+            'fund_sectors': None, 'fund_assets': None, 'beta': None,
+            'volatility': None, 'long_name': None}
     try:
         tk = yf.Ticker(ticker)
         info = tk.info or {}
@@ -42,6 +43,16 @@ def _fetch_one_metadata(ticker):
         # report beta3Year.
         b = info.get('beta') or info.get('beta3Year')
         meta['beta'] = float(b) if b else None
+        # Annualized volatility (stdev of ~1y daily returns × √252) — the primary
+        # input to blended-risk classification. One-time cached like the rest.
+        meta['volatility'] = None
+        try:
+            hist = tk.history(period='1y', auto_adjust=True)['Close'].dropna()
+            rets = hist.pct_change().dropna()
+            if len(rets) > 20:
+                meta['volatility'] = round(float(rets.std() * (252 ** 0.5)), 4)
+        except Exception:
+            pass
         # Forward annual dividend per share (ticker currency) + yield (%), with
         # fallbacks for ETFs that don't report dividendRate.
         dr = info.get('dividendRate') or info.get('trailingAnnualDividendRate')
@@ -79,7 +90,7 @@ def get_holdings_metadata(tickers, force=False):
         if pc and pc.meta_json and not force:
             try:
                 m = json.loads(pc.meta_json)
-                if 'dividend_rate' in m and 'beta' in m and 'long_name' in m:  # re-fetch caches missing newer fields
+                if 'dividend_rate' in m and 'beta' in m and 'volatility' in m and 'long_name' in m:  # re-fetch caches missing newer fields
                     result[t] = m
                     continue
             except Exception:

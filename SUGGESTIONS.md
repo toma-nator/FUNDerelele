@@ -406,25 +406,34 @@ other buckets), so the "Projected" column lands short of the targets.
 
 **Priority:** Impact: Med · Effort: medium
 
-## Rebalancer — risk targeting by historical volatility
+## Rebalancer — Blended-Risk follow-ups
 
-The Risk dimension currently buckets holdings Low/Medium/High by market **beta**
-(`price_service` caches `info['beta']`/`beta3Year`, with an asset-type fallback
-when beta is missing). Beta is market-relative; an absolute volatility measure is
-more robust and covers the ETFs/securities that don't report a beta.
+_Shipped:_ the **Blended Risk** dimension is now **volatility-driven** (PRIIPs/UCITS-style
+annualized-stdev bands: <5% Very Low · <11% Low · <18% Moderate · <30% High · ≥30% Very
+High) with a single-name **size adjustment** (mega-cap ≥$100B nudged down a band, small/
+micro <$2B floored at High) and a per-ticker **override layer** (`RISK_OVERRIDES` in
+`calculations.py` — cash/bond/high-yield-junk/leveraged/crypto pinned). Volatility is cached
+in `price_cache.meta_json` (`volatility`); each holding's measured vol % + bucket shows in a
+"Holdings by Risk" card on the Rebalancer when targeting by Blended Risk. (The separate
+**Beta** dimension is unchanged.)
 
-- **Add:** compute annualized **standard deviation of ~1yr daily returns** from
-  yfinance price history per ticker, cache it in `price_cache.meta_json`
-  alongside `beta`, and offer a "Risk basis: Beta / Volatility" toggle (or a
-  blended score). Bucket by tunable thresholds.
-- **Bonus:** show the actual beta/volatility number per holding in the account
-  view so the bucketing is transparent, and make the bucket thresholds editable.
-- **Watch:** history fetches are heavier than the one-shot `.info` call — fetch
-  once and cache; refresh lazily.
-- **Effort:** medium — `_fetch_one_metadata` history pull + a basis toggle in the
-  risk classifier.
+Still parked:
 
-**Priority:** Impact: Low–Med · Effort: medium
+- **Fold GICs into the allocation (view-only).** GICs live in their own table and aren't in
+  the Rebalancer's holdings, so the Very Low bucket understates how much guaranteed money
+  you hold — which makes the RDSP glide **over-de-risk**. Add GIC market values as view-only
+  Very Low holdings (never buy/sell recommendations, like managed accounts) so current
+  allocation + the RDSP glide are honest. _Effort: small–medium — fold `gic_value` into
+  `get_rebalancer_data`'s holdings + the blend allocation._
+- **Glide-down targets Very Low + Low (not just Very Low).** The RDSP glide hand-off seeds a
+  single Very Low target; broaden the safe sleeve to a Very Low + Low mix (cash/GIC/T-bills +
+  bond funds) so de-risking isn't all near-cash. _Effort: small — extend the seed split._
+- **Settings UI to edit risk overrides + bands.** `RISK_OVERRIDES` and the vol band ceilings
+  are code constants today. A Settings editor (per-ticker bucket + tunable band cutoffs,
+  stored in `settings`) would let the override list be managed without code edits. _Effort:
+  medium — a settings table/UI + a read path in the classifier._
+
+**Priority:** Impact: Med _(GIC fold matters for the RDSP glide)_ · Effort: small–medium
 
 ## Rebalancer — strategy presets (one-click target templates)
 
