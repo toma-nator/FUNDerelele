@@ -12,7 +12,7 @@
   <a href="{{ url_for('rebalancer', view='overall') }}"
      class="acct-chip {% if overall_mode %}active{% endif %}">Overall Portfolio</a>
   {% for acc in data.accounts %}
-  <a href="{{ url_for('rebalancer', account=acc, dimension=data.dimension, mode=data.mode) }}"
+  <a href="{{ url_for('rebalancer', account=acc, dimension=data.dimension, mode=data.mode, shares=data.shares_mode) }}"
      class="acct-chip {% if not overall_mode and data.account == acc %}active{% endif %}">{{ acc }}{% if acc in data.managed_accounts %} <span style="opacity:.55;font-size:.82em">· managed</span>{% endif %}</a>
   {% endfor %}
 </div>
@@ -65,22 +65,23 @@
   <div style="display:flex;gap:.4rem;align-items:center">
     <span class="text-dim" style="font-size:.78rem">Target by</span>
     {% for d, label in data.dimensions %}
-    <a href="{{ url_for('rebalancer', account=data.account, dimension=d, mode=data.mode) }}"
+    <a href="{{ url_for('rebalancer', account=data.account, dimension=d, mode=data.mode, shares=data.shares_mode) }}"
        class="acct-chip {% if data.dimension == d %}active{% endif %}">{{ label }}</a>
     {% endfor %}
   </div>
   {% if not data.is_managed %}
   <div style="display:flex;gap:.4rem;align-items:center">
     <span class="text-dim" style="font-size:.78rem">Mode</span>
-    <a href="{{ url_for('rebalancer', account=data.account, dimension=data.dimension, mode='cash', deploy=data.deploy_cash) }}"
+    <a href="{{ url_for('rebalancer', account=data.account, dimension=data.dimension, mode='cash', deploy=data.deploy_cash, shares=data.shares_mode) }}"
        class="acct-chip {% if data.mode == 'cash' %}active{% endif %}">Deploy cash</a>
-    <a href="{{ url_for('rebalancer', account=data.account, dimension=data.dimension, mode='full', deploy=data.deploy_cash) }}"
+    <a href="{{ url_for('rebalancer', account=data.account, dimension=data.dimension, mode='full', deploy=data.deploy_cash, shares=data.shares_mode) }}"
        class="acct-chip {% if data.mode == 'full' %}active{% endif %}">Full rebalance</a>
   </div>
   <form method="GET" action="{{ url_for('rebalancer') }}" style="display:flex;gap:.4rem;align-items:center">
     <input type="hidden" name="account" value="{{ data.account }}">
     <input type="hidden" name="dimension" value="{{ data.dimension }}">
     <input type="hidden" name="mode" value="{{ data.mode }}">
+    <input type="hidden" name="shares" value="{{ data.shares_mode }}">
     <span class="text-dim" style="font-size:.78rem">Cash to deploy</span>
     <input class="form-input mono no-spin" name="deploy" type="number" step="100" min="0"
            value="{{ '%g' % data.deploy_cash }}" style="width:110px;padding:4px 8px">
@@ -122,6 +123,7 @@
       <input type="hidden" name="account" value="{{ data.account }}">
       <input type="hidden" name="dimension" value="{{ data.dimension }}">
       <input type="hidden" name="mode" value="{{ data.mode }}">
+      <input type="hidden" name="shares" value="{{ data.shares_mode }}">
       <div class="table-scroll">
         <table class="data-table">
           <thead>
@@ -171,9 +173,14 @@
 {# ── Recommended trades ── #}
 {% if not data.is_managed %}
 <div class="card">
-  <div class="card-header">
-    Recommended Trades
-    <span class="card-sub">{{ data.trades | length }} · {{ 'deploy available cash' if data.mode == 'cash' else 'full rebalance' }}</span>
+  <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+    <span>Recommended Trades <span class="card-sub">{{ data.trades | length }} · {{ 'deploy available cash' if data.mode == 'cash' else 'full rebalance' }}</span></span>
+    <div class="seg">
+      <button type="button" class="seg-btn {% if data.shares_mode == 'frac' %}active{% endif %}"
+              onclick="location.href='{{ url_for('rebalancer', account=data.account, dimension=data.dimension, mode=data.mode, deploy=data.deploy_cash, shares='frac') }}'">Fractional</button>
+      <button type="button" class="seg-btn {% if data.shares_mode == 'whole' %}active{% endif %}"
+              onclick="location.href='{{ url_for('rebalancer', account=data.account, dimension=data.dimension, mode=data.mode, deploy=data.deploy_cash, shares='whole') }}'">Whole</button>
+    </div>
   </div>
   {% if data.trades %}
   <div class="table-scroll">
@@ -201,7 +208,7 @@
     </table>
   </div>
   <div class="text-dim" style="padding:10px 16px;font-size:.74rem">
-    Share counts are approximate (live CAD price). ETFs span multiple {{ data.dimension_label | lower }} buckets, so a single trade shifts several — the “Projected” column reflects that.
+    {% if data.shares_mode == 'whole' %}Rounded to whole shares (amount = shares × live CAD price).{% else %}Share counts are approximate (live CAD price).{% endif %} ETFs span multiple {{ data.dimension_label | lower }} buckets, so a single trade shifts several — the “Projected” column reflects that.
   </div>
   {% elif data.targets_set %}
   <div class="empty-row">On target — no trades needed{{ ' with the cash available' if data.mode == 'cash' }}.</div>
@@ -275,7 +282,7 @@
         </tr>
         {% for r in g.holdings %}
         <tr>
-          <td class="mono{% if r.is_cash %} text-dim{% endif %}" style="padding-left:1.6rem">{{ r.ticker }}{% if r.is_cash %} <span class="text-dim" style="font-size:.74rem">· to deploy</span>{% elif r.overridden %} <span class="text-dim" style="font-size:.74rem">· override</span>{% endif %}</td>
+          <td class="mono{% if r.muted %} text-dim{% endif %}" style="padding-left:1.6rem">{{ r.ticker }}{% if r.tag %} <span class="text-dim" style="font-size:.74rem">· {{ r.tag }}</span>{% elif r.overridden %} <span class="text-dim" style="font-size:.74rem">· override</span>{% endif %}</td>
           <td class="r mono">{{ r.value | cad }}</td>
           <td class="r mono text-dim">{% if r.vol_pct is not none %}{{ '%.1f' % r.vol_pct }}%{% else %}—{% endif %}</td>
         </tr>

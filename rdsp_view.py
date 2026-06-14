@@ -248,6 +248,11 @@ GLIDE_DEFAULT_LEN    = 10     # default glide length (years)
 GLIDE_FINISH_CAP_AGE = 70     # fully de-risked by, at the latest
 GLIDE_TARGET_DEFAULT = 80.0   # default % safe at the end of the glide
 FULL_SAFE_RETURN     = 0.04   # "full-safe" return floor (GIC-level)
+# Safe-sleeve seed split: keep the safe sleeve almost entirely in Low (bonds) until
+# withdrawals near, ramping a Very Low (cash/GIC) reserve up to ~this % of the
+# portfolio by the year withdrawals begin — enough to cover ~2 years of withdrawals.
+# Low takes the remainder of the safe sleeve throughout.
+VERY_LOW_END_RESERVE = 15.0
 SAFE_BLEND_BUCKETS = {'Very Low'}   # the genuinely defensive end of the Blended-Risk scale
 # (deliberately NOT 'Low' — broad equity ETFs land there but are still equities, so
 # counting them would make a de-risking glide trivial.)
@@ -636,20 +641,37 @@ def get_rdsp_view(return_label=DEFAULT_PRESET, contribute_until_year=None,
               'grant': r.grant, 'bond': r.bond} for r in rows]
 
     # ── Glide-path playbook payload ──
-    # Per-year safe/growth split + implied return, plus a Rebalancer seed that sets
-    # ONLY the Very Low (safe) target — the Rebalancer spreads the rest across the
-    # current buckets. The earliest upcoming year is the actionable hand-off.
+    # Per-year safe/growth split + implied return, plus a Rebalancer seed that splits
+    # the safe sleeve between Very Low (cash/GIC/T-bills) and Low (bond funds): keep it
+    # almost entirely in bonds early (longer horizon), ramping a Very Low cash reserve
+    # up to ~VERY_LOW_END_RESERVE% of the portfolio by the glide's end (≈2 yrs of
+    # withdrawals). Low takes the rest; the Rebalancer spreads the remaining (growth)
+    # % across the current buckets. Earliest year = actionable.
     glide_rows = []
     if draw_style == 'glide':
         actionable_year = glide_step_rows[0]['year'] if glide_step_rows else None
+        # The cash reserve is for the withdrawal phase, so ramp it by nearness to the
+        # withdrawal start (not glide progress): ~0 early, reaching the full reserve by
+        # the year withdrawals begin, then held. Keeps cash from sitting idle years out.
+        cash_ramp = wd_start_year - glide_begin
         for s in glide_step_rows:
             safe = s['safe_pct']
             grow = round(100 - safe, 1)
+            cash_p = max(0.0, min(1.0, (s['year'] - glide_begin) / cash_ramp)) if cash_ramp > 0 else 1.0
+            very_low = round(min(safe, VERY_LOW_END_RESERVE * cash_p), 1)
+            low = round(safe - very_low, 1)
+            seed = (f'Very Low:{very_low},Low:{low}' if very_low > 0.05
+                    else f'Low:{low}') if low > 0.05 else f'Very Low:{very_low}'
+            # Liquid-cash floor seed (Asset Type dimension) — GICs don't count as Cash
+            # there, so this surfaces a "need this much actual cash" gap even when the
+            # Very Low risk bucket is already filled by (locked) GICs.
+            cash_seed = f'Cash:{very_low}' if very_low > 0.05 else None
             glide_rows.append({
                 'year': s['year'], 'age': s['year'] - by,
                 'safe_pct': safe, 'growth_pct': grow,
+                'very_low_pct': very_low, 'low_pct': low,
                 'ret': round(rdsp.blended_return(safe, rate, g_safe_ret) * 100, 2),
-                'seed': f'Very Low:{safe}',
+                'seed': seed, 'cash_seed': cash_seed,
                 'is_current': s['year'] == actionable_year,
             })
     glide = {

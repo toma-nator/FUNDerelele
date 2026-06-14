@@ -1381,6 +1381,7 @@ def rebalancer():
     account = request.args.get('account', '').strip() or None
     dimension = request.args.get('dimension', 'sector').strip()
     mode = request.args.get('mode', 'cash').strip()
+    whole_shares = request.args.get('shares', '').strip() == 'whole'
     deploy_raw = request.args.get('deploy', '').strip()
     try:
         deploy_cash = float(deploy_raw) if deploy_raw else None
@@ -1402,7 +1403,8 @@ def rebalancer():
                 pass
         targets_override = ov or None
     data = get_rebalancer_data(account=account, dimension=dimension, mode=mode,
-                               deploy_cash=deploy_cash, targets_override=targets_override)
+                               deploy_cash=deploy_cash, targets_override=targets_override,
+                               whole_shares=whole_shares)
     # Overall mode is the default landing view (like the Accounts overview);
     # picking an account chip switches to that account's rebalancer.
     overall_mode = (view == 'overall') or (account is None)
@@ -1432,7 +1434,8 @@ def rebalancer_targets():
     else:
         flash('Targets saved.', 'success')
     return redirect(url_for('rebalancer', account=account, dimension=dimension,
-                            mode=request.form.get('mode', 'cash')))
+                            mode=request.form.get('mode', 'cash'),
+                            shares=request.form.get('shares', 'frac')))
 
 
 # ── Performance ───────────────────────────────────────────────────────────────

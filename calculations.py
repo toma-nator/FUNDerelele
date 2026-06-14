@@ -1592,7 +1592,7 @@ def _watchlist_by_bucket(dimension):
 
 
 def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_cash=None,
-                        targets_override=None):
+                        targets_override=None, whole_shares=False):
     """Per-account rebalancing analysis + trade recommendations. `targets_override`
     (a {bucket: pct} dict) pre-fills the targets without persisting them — used by
     the RDSP glide-path hand-off to seed a Blended-Risk split for review."""
@@ -1658,7 +1658,8 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
         'managed_accounts': sorted(managed_set), 'is_managed': account in managed_set,
         'dimension': dimension, 'dimension_label': REBAL_DIM_LABELS[dimension],
         'dimensions': [(d, REBAL_DIM_LABELS[d]) for d in REBAL_DIMENSIONS],
-        'mode': mode, 'overall_views': overall_views,
+        'mode': mode, 'shares_mode': 'whole' if whole_shares else 'frac',
+        'overall_views': overall_views,
         'overall_view_labels': [('sector', 'Sector'), ('asset_class', 'Asset Class'),
                                 ('market_cap', 'Market Cap'), ('currency', 'Currency'),
                                 ('beta', 'Beta'), ('blend', 'Blended Risk')],
@@ -1673,6 +1674,12 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
     cash = cash_by.get(account, 0.0)
     avail_cash = max(0.0, cash)
     invested = sum(h['market_value_cad'] for h in holdings)
+    # GICs are guaranteed → Very Low. They're view-only (never traded), folded into
+    # the Blended-Risk allocation so the risk view + recommendations don't treat
+    # GIC-backed safety as missing (which would over-recommend buying Very Low). Cash
+    # stays deployable fuel, so it isn't counted as already-allocated here.
+    gic_safe = (get_gic_value_by_account().get(account, {}).get('value', 0.0)
+                if dimension == 'blend' else 0.0)
     targets = dict(targets_override) if targets_override else get_rebal_targets(account, dimension)   # {bucket: pct}
 
     # For Asset Type, cash is itself an asset class held in the account, so it's
@@ -1691,8 +1698,8 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
         if deploy_cash is None:
             deploy_cash = avail_cash
         deploy_cash = max(0.0, min(deploy_cash, avail_cash))
-        base = invested + deploy_cash
-        pct_base = invested
+        base = invested + gic_safe + deploy_cash
+        pct_base = invested + gic_safe
 
     # Per-holding fractional exposure and current bucket dollars.
     hold_exp, current = [], {}
@@ -1703,6 +1710,8 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
             current[b] = current.get(b, 0) + h['market_value_cad'] * frac
     if cash_as_bucket and cash > 0:
         current['Cash'] = current.get('Cash', 0) + cash
+    if gic_safe > 0:  # GICs sit in Very Low (held safety, not tradable)
+        current['Very Low'] = current.get('Very Low', 0) + gic_safe
 
     # A partial seed (the RDSP glide hand-off only sets Very Low) leaves the rest of
     # the money where it is: spread the remaining % across the other buckets by their
@@ -1733,18 +1742,25 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
     # Cash is never a tradable holding — it's the funding source, not a buy/sell.
     tradable_short = {b: s for b, s in shortfalls.items() if b != 'Cash'}
 
-    # Buckets with no holding to buy into can't be filled by trades; their share
-    # of cash stays uninvested and they're surfaced as new-position suggestions.
+    # A targeted bucket with no holding to buy into can't absorb cash; if we split
+    # the budget across all shortfalls (including those), that share goes unspent.
+    # Restrict the split to *buyable* buckets so the cash spills into them instead
+    # of sitting idle — unbuyable gaps still surface as new-position suggestions,
+    # and any cash beyond the buyable buckets' room to target legitimately stays put.
     if mode == 'cash':
-        total_short = sum(tradable_short.values())
-        spend = min(deploy_cash, total_short)
+        buyable = {}
         for b, short in tradable_short.items():
-            if short <= 0 or total_short <= 0:
+            if short <= 0:
                 continue
-            buy_b = short / total_short * spend
             exps, tot = _exposed(b)
-            if tot <= 0:
-                continue
+            if tot > 0:
+                buyable[b] = (short, exps, tot)
+        total_short = sum(s for s, _, _ in buyable.values())
+        spend = min(deploy_cash, total_short)
+        for b, (short, exps, tot) in buyable.items():
+            if total_short <= 0:
+                break
+            buy_b = short / total_short * spend
             for h, e in exps:
                 trade_by_ticker[h['ticker']] += buy_b * (e / tot)
     else:  # full rebalance — sell surpluses, buy shortfalls
@@ -1769,6 +1785,16 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
     for h in holdings:
         if trade_by_ticker[h['ticker']] < -h['market_value_cad']:
             trade_by_ticker[h['ticker']] = -h['market_value_cad']
+
+    # Whole-share mode: round each ticker's trade to a whole number of shares
+    # (recomputing the dollar amount from price) so recommendations are directly
+    # executable. Done before the trade list / cash_after / projected so they all
+    # reflect the rounded trades.
+    if whole_shares:
+        for h in holdings:
+            price = h['live_price_cad']
+            if price:
+                trade_by_ticker[h['ticker']] = round(trade_by_ticker[h['ticker']] / price) * price
 
     # Build trade list with share counts from live prices.
     trades = []
@@ -1860,16 +1886,19 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
                 'ticker': h['ticker'],
                 'vol_pct': round(vol * 100, 1) if vol is not None else None,
                 'overridden': h['ticker'] in RISK_OVERRIDES,
-                'value': round(h['market_value_cad'], 2), 'is_cash': False,
+                'value': round(h['market_value_cad'], 2), 'muted': False, 'tag': None,
             })
-        # Cash sits in Very Low (near-cash / guaranteed) so the card reflects the
-        # whole account — typically the goal is to deploy it down to zero.
+        # GICs (guaranteed) and cash both sit in Very Low so the card reflects the
+        # whole account. GICs are held safety; cash is deployable fuel (goal: $0).
+        if gic_safe > 0.005:
+            by_bucket.setdefault('Very Low', []).append({
+                'ticker': 'GICs', 'vol_pct': None, 'overridden': False,
+                'value': round(gic_safe, 2), 'muted': True, 'tag': 'guaranteed'})
         if cash > 0.005:
             by_bucket.setdefault('Very Low', []).append({
                 'ticker': 'Cash', 'vol_pct': None, 'overridden': False,
-                'value': round(cash, 2), 'is_cash': True,
-            })
-        tot = (invested + max(cash, 0.0)) or 1
+                'value': round(cash, 2), 'muted': True, 'tag': 'to deploy'})
+        tot = (invested + gic_safe + max(cash, 0.0)) or 1
         for b in _BLEND_BUCKETS:  # ordered Very Low → Very High
             items = by_bucket.get(b)
             if not items:

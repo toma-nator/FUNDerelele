@@ -414,26 +414,45 @@ High) with a single-name **size adjustment** (mega-cap ≥$100B nudged down a ba
 micro <$2B floored at High) and a per-ticker **override layer** (`RISK_OVERRIDES` in
 `calculations.py` — cash/bond/high-yield-junk/leveraged/crypto pinned). Volatility is cached
 in `price_cache.meta_json` (`volatility`); each holding's measured vol % + bucket shows in a
-"Holdings by Risk" card on the Rebalancer when targeting by Blended Risk. (The separate
-**Beta** dimension is unchanged.)
+"Blended Risk Allocation" card (grouped by basket, collapsible) on the Rebalancer when
+targeting by Blended Risk, plus sortable **Vol / Risk** columns on the Holdings tab. (The
+separate **Beta** dimension is unchanged.)
+
+Also shipped since:
+- **GICs folded into the blend allocation (view-only).** `get_rebalancer_data` counts the
+  account's GIC value as Very Low (never tradable) so the risk view + recommendations stop
+  over-buying Very Low; GICs show as a "guaranteed" line in the allocation card. Cash shows
+  as "to deploy". (The glide's `current_safe_pct` already counted GICs.)
+- **Whole-share toggle** on Recommended Trades (rounds trades to whole shares; default off).
+- **Cash-mode spill** — deploy-cash now spills into buyable buckets instead of leaving the
+  share of an unbuyable target's cash idle.
+- **Glide-down seeds Very Low + Low.** The RDSP glide hand-off splits the safe sleeve — kept
+  almost entirely in Low (bonds) until withdrawals near, ramping a Very Low cash reserve up to
+  ~2 yrs of withdrawals (`VERY_LOW_END_RESERVE`) by the **withdrawal-start year** (not glide
+  end, so cash doesn't sit idle). The glide table shows the per-year Very Low / Low split.
+- **Cash-floor hand-off.** Each glide row also offers a **Cash →** link that seeds the *Asset
+  Type* dimension with `Cash:<reserve%>` — GICs don't count as Cash there, so it surfaces a
+  "need this much *liquid* cash" gap even when the Very Low risk bucket is full of (locked)
+  GICs. Pairs with the **Risk →** (blend) link.
 
 Still parked:
 
-- **Fold GICs into the allocation (view-only).** GICs live in their own table and aren't in
-  the Rebalancer's holdings, so the Very Low bucket understates how much guaranteed money
-  you hold — which makes the RDSP glide **over-de-risk**. Add GIC market values as view-only
-  Very Low holdings (never buy/sell recommendations, like managed accounts) so current
-  allocation + the RDSP glide are honest. _Effort: small–medium — fold `gic_value` into
-  `get_rebalancer_data`'s holdings + the blend allocation._
-- **Glide-down targets Very Low + Low (not just Very Low).** The RDSP glide hand-off seeds a
-  single Very Low target; broaden the safe sleeve to a Very Low + Low mix (cash/GIC/T-bills +
-  bond funds) so de-risking isn't all near-cash. _Effort: small — extend the seed split._
+- **Adjustable reserve-years in Settings.** `VERY_LOW_END_RESERVE` (~3 yrs of withdrawals) is a
+  code constant; expose a Settings input so the cash-reserve target is user-tunable. _Effort:
+  small — a setting + read path in `rdsp_view`._
+- **Exact per-year cash sizing.** Size the cash floor from the projection's actual per-year
+  withdrawal amounts instead of a fixed ~3-yr reserve. _Effort: small–medium._
+
+- **Fold GICs into the *Overall* lens too.** The per-account blend view counts GICs; the
+  Overall Portfolio → Blended Risk lens doesn't yet. _Effort: small._
 - **Settings UI to edit risk overrides + bands.** `RISK_OVERRIDES` and the vol band ceilings
   are code constants today. A Settings editor (per-ticker bucket + tunable band cutoffs,
   stored in `settings`) would let the override list be managed without code edits. _Effort:
   medium — a settings table/UI + a read path in the classifier._
+- **Normalize-targets-to-100% button** in the targets editor (proportionally rescale inputs).
+  _Effort: tiny — client-side JS._
 
-**Priority:** Impact: Med _(GIC fold matters for the RDSP glide)_ · Effort: small–medium
+**Priority:** Impact: Low–Med _(remaining items are conveniences)_ · Effort: small–medium
 
 ## Rebalancer — strategy presets (one-click target templates)
 

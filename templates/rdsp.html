@@ -299,16 +299,34 @@
     </div>
     <div class="table-scroll rdsp-plan">
       <table class="data-table">
-        <thead><tr><th>Year · Age</th><th class="r">Safe %</th><th class="r">Growth %</th><th class="r">Exp. return</th><th></th></tr></thead>
+        <thead><tr>
+          <th>Year · Age</th>
+          <th class="r">Safe %</th>
+          <th class="r">Very Low / Low</th>
+          <th class="r">Growth %</th>
+          <th class="r">Exp. return</th>
+          <th class="r">Hand off to Rebalancer</th>
+        </tr></thead>
         <tbody>
           {% for r in view.glide.rows %}
           <tr{% if r.is_current %} class="glide-now"{% endif %}>
             <td>{{ r.year }} · {{ r.age }}</td>
             <td class="r">{{ r.safe_pct }}%</td>
+            <td class="r mono">{{ r.very_low_pct }}% / {{ r.low_pct }}%</td>
             <td class="r">{{ r.growth_pct }}%</td>
             <td class="r">{{ r.ret }}%</td>
-            <td class="r"><a class="btn btn-sm{% if r.is_current %} rdsp-addlump{% endif %}"
-                 href="{{ url_for('rebalancer', account=view.glide.rebalancer_account, dimension='blend', seed=r.seed) }}">→ Rebalancer</a></td>
+            <td class="r">
+              <div style="display:flex;gap:.3rem;justify-content:flex-end">
+                <a class="btn btn-sm{% if r.is_current %} rdsp-addlump{% endif %}"
+                   title="Seed Blended-Risk targets (Very Low / Low / growth) into the Rebalancer"
+                   href="{{ url_for('rebalancer', account=view.glide.rebalancer_account, dimension='blend', seed=r.seed) }}">Risk →</a>
+                {% if r.cash_seed %}
+                <a class="btn btn-sm"
+                   title="Seed a liquid-cash floor (≈3 yrs of withdrawals) into the Rebalancer — GICs don't count as cash here"
+                   href="{{ url_for('rebalancer', account=view.glide.rebalancer_account, dimension='asset_type', seed=r.cash_seed) }}">Cash →</a>
+                {% endif %}
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
