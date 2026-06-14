@@ -121,18 +121,19 @@
     </div>
 
     {% if managed_exists %}
-    <!-- How managed (advisor/fund-run) accounts count in stats -->
+    <!-- Managed (advisor/fund-run) accounts in stats -->
     <div style="border-top:1px solid var(--border-sub);padding:16px 20px">
-      <label style="display:block;margin-bottom:4px">Managed accounts in stats</label>
+      <input type="hidden" name="managed_form" value="1">
+      <label style="display:block;margin-bottom:4px">Managed accounts</label>
       <p style="font-size:.72rem;color:var(--text-muted);margin-bottom:10px">
-        Advisor/fund-managed accounts always show on the Accounts page. Choose how much
-        they count toward your other numbers. (Top Holdings stays self-directed regardless.)
+        By default, advisor/fund-managed accounts count toward your <strong>net worth and
+        allocation</strong> (you own them) but stay out of <strong>holdings, performance,
+        dividends, and tax</strong> (the fund runs its own trades, income, and tax).
       </p>
-      <select class="form-input" name="managed_in_stats" style="max-width:340px">
-        <option value="all" {% if managed_in_stats == 'all' %}selected{% endif %}>Include everywhere (default)</option>
-        <option value="wealth" {% if managed_in_stats == 'wealth' %}selected{% endif %}>Net worth &amp; allocation only (not performance / dividends / tax)</option>
-        <option value="accounts_only" {% if managed_in_stats == 'accounts_only' %}selected{% endif %}>Accounts page only (exclude from everything)</option>
-      </select>
+      <label class="perf-check" style="justify-content:flex-start;gap:8px">
+        <input type="checkbox" name="managed_separate" {% if managed_separate %}checked{% endif %}>
+        Treat managed accounts as fully separate — exclude from <em>everything</em> (Accounts page only)
+      </label>
     </div>
     {% endif %}
 

@@ -1129,6 +1129,24 @@ app integration" item below.
 
 **Priority:** Impact: Med · Effort: small
 
+## Tax — managed-account handling + a fuller tax engine
+
+Managed accounts are currently **excluded** from the Tax tab (a fund runs its own
+trades/income/tax), with a warning note reminding the user to check **non-registered**
+managed accounts separately. Two follow-ups parked:
+
+- **Proper non-registered managed tax.** Rather than excluding them, optionally fold a
+  non-registered managed account's realized gains / income into the tax estimate (it's
+  still the user's to report) — e.g. a per-account "include in tax" override, or import
+  the broker's T-slip / realized-gain summary for managed accounts where we can't see
+  the internal trades.
+- **Better tax system overall.** Beyond capital gains: eligible-dividend gross-up +
+  dividend tax credit, interest at full marginal, US withholding as a foreign tax
+  credit, and a year-end tax package (see the parked items). Managed-account handling
+  folds into this.
+
+**Priority:** Impact: Med _(don't-miss-a-tax-bill safety)_ · Effort: medium–large
+
 ## Tax — asset-location score (tax-efficient placement)
 
 Flag holdings that sit in a tax-inefficient account given Canadian rules, using the

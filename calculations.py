@@ -210,24 +210,22 @@ def managed_account_names():
     return {a.name for a in Account.query.filter_by(managed=True).all()}
 
 
-def managed_stats_mode():
-    """How managed accounts count in stats: 'all' (default), 'wealth' (net worth +
-    allocation only), or 'accounts_only' (nowhere but the Accounts page)."""
+def managed_fully_separate():
+    """True if managed accounts are excluded from ALL stats (visible only on the
+    Accounts page) — the optional 'fully separate' setting."""
     from models import Setting
-    s = Setting.query.get('managed_in_stats')
-    mode = (s.value if s and s.value else 'all')
-    return mode if mode in ('all', 'wealth', 'accounts_only') else 'all'
+    s = Setting.query.get('managed_separate')
+    return bool(s and (s.value or '').lower() in ('1', 'true', 'yes', 'on'))
 
 
 def managed_included_in(area):
-    """Whether managed accounts should be counted in a given stats area:
-    'total', 'breakdown', 'performance', 'dividends', 'tax'."""
-    mode = managed_stats_mode()
-    if mode == 'all':
-        return True
-    if mode == 'accounts_only':
+    """Whether managed accounts count in a stats area. Principle: they count toward
+    what you OWN — net worth + allocation — but stay out of activity views (holdings,
+    performance, dividends, tax), since a fund runs its own trades/income/tax. The
+    'fully separate' setting excludes them from everything, including net worth."""
+    if managed_fully_separate():
         return False
-    return area in ('total', 'breakdown')   # 'wealth'
+    return area in ('total', 'breakdown')
 
 
 def get_dashboard_stats(holdings):

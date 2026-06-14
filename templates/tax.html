@@ -92,6 +92,18 @@
 </div>
 {% endif %}
 
+{% if managed_accounts_excluded %}
+<div class="card" style="margin-bottom:18px;padding:11px 16px;font-size:.8rem;border-left:3px solid var(--yellow)">
+  <strong style="color:var(--text)">⚠ Managed accounts are excluded here.</strong>
+  {{ managed_accounts_excluded | join(', ') }} {{ 'are' if managed_accounts_excluded | length != 1 else 'is' }}
+  marked Managed, so {{ 'their' if managed_accounts_excluded | length != 1 else 'its' }} gains/income
+  aren't in these figures. That's fine for <em>registered</em> managed accounts (RRSP/TFSA/etc. — already
+  sheltered), but a <strong>non-registered</strong> managed account's gains are still yours to report —
+  check those separately. Manage this on the <a href="{{ url_for('accounts') }}">Accounts</a> /
+  <a href="{{ url_for('settings') }}">Settings</a> pages.
+</div>
+{% endif %}
+
 {# ── GIC interest income (matured, non-registered) ── #}
 {% if gic_interest_rows %}
 <div class="card">

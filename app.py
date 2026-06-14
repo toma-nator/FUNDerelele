@@ -1027,14 +1027,14 @@ def settings():
             else:
                 db.session.add(Setting(key='rdsp_equity_map', value=json.dumps(eq)))
 
-        # How managed accounts count in stats: all / wealth / accounts_only.
-        if 'managed_in_stats' in request.form:
-            mode = request.form.get('managed_in_stats', 'all')
-            ms = Setting.query.get('managed_in_stats')
+        # Managed accounts: fully separate (exclude from everything) checkbox.
+        if 'managed_form' in request.form:
+            val = '1' if request.form.get('managed_separate') == 'on' else '0'
+            ms = Setting.query.get('managed_separate')
             if ms:
-                ms.value = mode
+                ms.value = val
             else:
-                db.session.add(Setting(key='managed_in_stats', value=mode))
+                db.session.add(Setting(key='managed_separate', value=val))
 
         # Mutual funds to show by ticker instead of their friendly name.
         show_ticker = ','.join(t.strip().upper() for t in request.form.getlist('fund_show_ticker') if t.strip())
@@ -1076,11 +1076,11 @@ def settings():
                                  'show_ticker': pc.ticker.upper() in _show_set})
     fund_tickers.sort(key=lambda x: x['ticker'])
 
-    from calculations import managed_account_names, managed_stats_mode
+    from calculations import managed_account_names, managed_fully_separate
     return render_template('settings.html',
                            fund_tickers=fund_tickers,
                            managed_exists=bool(managed_account_names()),
-                           managed_in_stats=managed_stats_mode(),
+                           managed_separate=managed_fully_separate(),
                            fx_rate=gs('fx_usd_cad', '1.365'),
                            fx_manual=gs('fx_manual', '0'),
                            fx_manual_rate=gs('fx_manual_rate', ''),
@@ -1329,11 +1329,13 @@ def chart_data(chart_id):
 
 @app.route('/tax')
 def tax():
-    from calculations import get_tax_summary
+    from calculations import get_tax_summary, managed_account_names
     year = request.args.get('year', type=int)
     data = get_tax_summary(year)
+    managed = sorted(managed_account_names())
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
-    return render_template('tax.html', **data, last_updated=last_updated, active='tax')
+    return render_template('tax.html', **data, managed_accounts_excluded=managed,
+                           last_updated=last_updated, active='tax')
 
 
 @app.route('/tax/rates', methods=['POST'])
