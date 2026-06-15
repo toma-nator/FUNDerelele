@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, flash
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, Response
 from datetime import datetime
 import json
 import os
@@ -323,6 +323,30 @@ def tlabel_filter(ticker):
     if not ticker:
         return ticker
     return fund_label_map().get(ticker, ticker)
+
+
+@app.template_filter('mktcap')
+def mktcap_filter(v):
+    from calculations import _fmt_mktcap
+    return _fmt_mktcap(v) if v else '—'
+
+
+@app.template_filter('sparkline')
+def sparkline_filter(series, width=150, height=34):
+    """A list of closes → an SVG polyline 'points' string scaled to width×height
+    (y inverted so up = up), with a little vertical padding."""
+    pts = [float(v) for v in (series or []) if v is not None]
+    if len(pts) < 2:
+        return ''
+    lo, hi = min(pts), max(pts)
+    rng = (hi - lo) or 1.0
+    pad, n = 3.0, len(pts)
+    out = []
+    for i, v in enumerate(pts):
+        x = i / (n - 1) * width
+        y = (height - pad) - (v - lo) / rng * (height - 2 * pad)
+        out.append(f'{x:.1f},{y:.1f}')
+    return ' '.join(out)
 
 
 # ── Core routes ───────────────────────────────────────────────────────────────
@@ -957,6 +981,100 @@ def watchlist_ai_clear():
         ai_service.clear_cached_plan(account)
         flash('AI plan cleared.', 'info')
     return redirect(url_for('watchlist', ai_account=account))
+
+
+# ── AI deep-dive report (free render of the cached plan + enrichment) ──────────────
+
+def _load_report_ctx(account):
+    """(report_data, template-context) for an account's cached plan, or (None, None).
+    Uses the cached report_data when present (new plans); else computes it live so
+    plans generated before phase 2 still render."""
+    import ai_service, report_service
+    from datetime import datetime
+    rec = ai_service.load_cached_plan(account) if account else None
+    if not rec:
+        return None, None
+    r = rec.get('report_data')
+    if not r:
+        try:
+            r = report_service.build_report_data(account, rec['plan'])
+        except Exception:
+            return None, None
+    gen = rec.get('generated_at')
+    try:
+        gd = datetime.fromisoformat(gen).strftime('%b %d, %Y') if gen else ''
+    except Exception:
+        gd = ''
+    ctx = {'gen_date': gd, 'provider': rec.get('provider') or r.get('provider'),
+           'model': rec.get('model') or r.get('model'), 'style': rec.get('style')}
+    return r, ctx
+
+
+def _find_edge():
+    """Path to msedge.exe, or None."""
+    import os
+    for base in (os.environ.get('ProgramFiles(x86)'), os.environ.get('ProgramFiles'),
+                 os.environ.get('LocalAppData')):
+        if not base:
+            continue
+        p = os.path.join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe')
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _html_to_pdf(html):
+    """Render an HTML string to PDF bytes via headless Edge. Raises on failure."""
+    import os, tempfile, subprocess, shutil
+    edge = _find_edge()
+    if not edge:
+        raise RuntimeError('Microsoft Edge was not found, so the PDF export is unavailable.')
+    tmp = tempfile.mkdtemp(prefix='ai_report_')
+    try:
+        html_path = os.path.join(tmp, 'report.html')
+        pdf_path = os.path.join(tmp, 'report.pdf')
+        with open(html_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+        url = 'file:///' + html_path.replace('\\', '/')
+        subprocess.run([edge, '--headless', '--disable-gpu', '--no-first-run',
+                        '--user-data-dir=' + os.path.join(tmp, 'profile'),
+                        '--print-to-pdf=' + pdf_path, url],
+                       timeout=90, check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if not os.path.exists(pdf_path):
+            raise RuntimeError('Edge produced no PDF (rendering failed).')
+        with open(pdf_path, 'rb') as f:
+            return f.read()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+@app.route('/watchlist/ai/report')
+def watchlist_ai_report():
+    account = request.args.get('account', '').strip()
+    r, ctx = _load_report_ctx(account)
+    if not r:
+        flash('No AI plan to report on — generate one first.', 'error')
+        return redirect(url_for('watchlist', ai_account=account))
+    return render_template('ai_report.html', r=r, **ctx)
+
+
+@app.route('/watchlist/ai/report.pdf')
+def watchlist_ai_report_pdf():
+    account = request.args.get('account', '').strip()
+    r, ctx = _load_report_ctx(account)
+    if not r:
+        flash('No AI plan to report on — generate one first.', 'error')
+        return redirect(url_for('watchlist', ai_account=account))
+    html = render_template('ai_report.html', r=r, **ctx)
+    try:
+        pdf = _html_to_pdf(html)
+    except Exception as e:
+        flash(f'PDF export failed: {e}', 'error')
+        return redirect(url_for('watchlist_ai_report', account=account))
+    slug = account.lower().replace(' ', '_').replace('-', '_') or 'account'
+    return Response(pdf, mimetype='application/pdf',
+                    headers={'Content-Disposition': f'attachment; filename=ai_rebalance_{slug}.pdf'})
 
 
 @app.route('/ticker/<ticker>/review')

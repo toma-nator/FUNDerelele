@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI Rebalance Deep-Dive — {{ r.account }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ── Midnight Terminal palette (matches static/css/style.css) ── */
+  :root{
+    --bg-base:#07111e; --bg-surface:#0c1929; --bg-card:#101f33; --border:#1a3050; --border-sub:#122540;
+    --text:#c8d8e8; --text-dim:#5a7a96; --text-muted:#2e4a62;
+    --accent:#00c8f0; --accent-dim:#0088bb;
+    --green:#00e676; --red:#ff4d4d; --yellow:#ffd740; --purple:#9b72f5; --orange:#ff8c42;
+    --sans:'Inter',system-ui,sans-serif;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{font-size:13px}
+  body{font-family:var(--sans);background:var(--bg-base);color:var(--text);line-height:1.5;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .num,td,.val,.chip-val,.ba,th{font-variant-numeric:tabular-nums}
+  .dim{color:var(--text-dim)} .muted{color:var(--text-muted)}
+  .green{color:var(--green)} .red{color:var(--red)} .amber{color:var(--yellow)} .accent{color:var(--accent)}
+  .r{text-align:right} .c{text-align:center}
+  .sheet{max-width:8.5in;margin:0 auto;padding:44px 40px}
+  .sheet + .sheet{break-before:page;page-break-before:always}
+
+  /* sections / cards */
+  .card{background:var(--bg-surface);border:1px solid var(--border-sub);border-radius:10px;
+    margin-bottom:18px;overflow:hidden;page-break-inside:avoid}
+  .card-h{padding:11px 16px;border-bottom:1px solid var(--border-sub);font-weight:600;font-size:.92rem;
+    display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+  .card-h .sub{font-weight:400;font-size:.74rem;color:var(--text-dim)}
+  .card-b{padding:14px 16px}
+  .sec-label{font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);
+    margin-bottom:7px;font-weight:600}
+
+  /* cover */
+  .cover{border:1px solid var(--border);border-radius:12px;background:
+    linear-gradient(135deg,rgba(0,200,240,.10),rgba(155,114,245,.06) 60%,transparent);
+    padding:26px 30px;margin-bottom:20px}
+  .cover .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:600}
+  .cover h1{font-size:1.6rem;font-weight:700;margin:8px 0 4px;letter-spacing:-.01em}
+  .cover .acct{font-size:.95rem;color:var(--text)}
+  .cover .acct .tkr{color:var(--accent)}
+  .cover .meta{font-size:.74rem;color:var(--text-dim);margin-top:10px;display:flex;gap:14px;flex-wrap:wrap}
+  .cover .meta b{color:var(--text);font-weight:500}
+  .thesis{margin-top:14px;padding-top:13px;border-top:1px solid var(--border-sub);font-size:.9rem;line-height:1.6}
+
+  /* stat chips */
+  .chips{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:14px}
+  .chip{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 11px;text-align:left}
+  .chip .lbl{font-size:.58rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+  .chip-val{font-size:1.06rem;font-weight:600;margin-top:2px;letter-spacing:-.01em}
+
+  /* tables */
+  table{width:100%;border-collapse:collapse;font-size:.8rem}
+  th{text-align:left;font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);
+    font-weight:600;padding:7px 10px;border-bottom:1px solid var(--border)}
+  td{padding:7px 10px;border-bottom:1px solid var(--border-sub)}
+  tr:last-child td{border-bottom:none}
+  .tkr{font-weight:600}
+  .badge{display:inline-block;padding:1px 8px;border-radius:5px;font-size:.7rem;font-weight:600}
+  .b-buy{background:rgba(0,230,118,.12);color:var(--green)}
+  .b-sell{background:rgba(255,77,77,.12);color:var(--red)}
+
+  /* allocation bars */
+  .alloc-row{margin-bottom:12px}
+  .alloc-row:last-child{margin-bottom:0}
+  .alloc-name{font-size:.74rem;color:var(--text-dim);margin-bottom:5px;display:flex;justify-content:space-between}
+  .seg-pair{display:flex;flex-direction:column;gap:5px}
+  .seg-line{display:flex;align-items:center;gap:8px}
+  .seg-tag{font-size:.6rem;color:var(--text-muted);width:42px;flex:none;text-transform:uppercase;letter-spacing:.04em}
+  .bar{flex:1;height:18px;border-radius:4px;overflow:hidden;display:flex;background:var(--bg-base);
+    border:1px solid var(--border-sub)}
+  .bar span{height:100%;display:flex;align-items:center;justify-content:center;font-size:.6rem;
+    color:#06121f;font-weight:600;overflow:hidden;white-space:nowrap}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.68rem;color:var(--text-dim);margin-top:4px}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+
+  /* portfolio risk & cost before -> after */
+  .prisk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+  .prisk{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+  .prisk .lbl{font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)}
+  .prisk .ba{font-size:1rem;font-weight:600;margin:3px 0 2px;letter-spacing:-.01em}
+  .prisk .ba .now{color:var(--text-dim);font-weight:500}
+  .prisk .delta{font-size:.66rem}
+
+  /* per-holding deep dive */
+  .holding{border:1px solid var(--border);border-radius:9px;padding:13px 15px;margin-bottom:13px;
+    background:var(--bg-card)}
+  .holding-h{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:9px}
+  .holding-tkr{font-size:1.04rem;font-weight:700;color:var(--accent)}
+  .holding-name{font-size:.78rem;color:var(--text-dim)}
+  .stat-grid{display:grid;gap:7px;margin:9px 0}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g5{grid-template-columns:repeat(5,1fr)}
+  .stat{background:var(--bg-surface);border:1px solid var(--border-sub);border-radius:6px;padding:6px 9px}
+  .stat .lbl{font-size:.56rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}
+  .stat .val{font-size:.86rem;font-weight:600;margin-top:1px}
+  .stat.fit{border-color:rgba(0,200,240,.35)}
+  .rationale{font-size:.82rem;line-height:1.55;margin:6px 0}
+  .sub-note{font-size:.74rem;color:var(--text-dim);line-height:1.5;margin-top:5px}
+  .sources a{color:var(--text-dim);text-decoration:underline}
+  .spark-wrap{display:flex;align-items:center;gap:10px;margin:8px 0}
+  .spark-meta{font-size:.7rem;color:var(--text-dim)}
+
+  /* alternatives comparison */
+  .alt-tbl{font-size:.76rem;margin-top:4px;border:1px solid var(--border-sub);border-radius:6px;overflow:hidden}
+  .alt-tbl th{padding:5px 9px;border-bottom:1px solid var(--border-sub)}
+  .alt-tbl td{padding:5px 9px}
+  .alt-tbl tr.sel{background:rgba(0,200,240,.08)}
+  .alt-tbl tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+  .alt-tbl .pick{color:var(--accent);font-weight:600}
+
+  ul.notes{margin:6px 0 0 18px;font-size:.8rem;line-height:1.55}
+  ul.notes li{margin-bottom:3px}
+
+  .foot{font-size:.68rem;color:var(--text-muted);line-height:1.55;border-top:1px solid var(--border-sub);
+    padding-top:12px;margin-top:6px}
+
+  .chips,.prisk-grid,.stat-grid,.alt-tbl,.seg-pair,.spark-wrap,table,.holding{break-inside:avoid;page-break-inside:avoid}
+  .sec-label,.card-h,.holding-h,.alloc-name{break-after:avoid;page-break-after:avoid}
+  @page{size:Letter;margin:0}
+  @media print{ html,body{background:var(--bg-base)} .sheet{max-width:none} }
+</style>
+</head>
+<body>
+
+{# ── palette for allocation segments (same colour per bucket across Now/After) ── #}
+{% set PAL = ['var(--accent)','#5fd6a8','var(--yellow)','var(--orange)','var(--purple)','var(--text-dim)','#e06c9f','#6ca0e0'] %}
+
+{# ── reusable pieces ─────────────────────────────────────────────────────────── #}
+{% macro alloc_card(r) %}
+  <div class="card">
+    <div class="card-h"><span>Before → After Allocation</span><span class="sub">how the plan moves you toward target · free look-through</span></div>
+    <div class="card-b">
+      {% for a in r.allocation %}
+      <div class="alloc-row"{% if not loop.first %} style="margin-top:14px"{% endif %}>
+        <div class="alloc-name"><span>{{ a.label }}</span></div>
+        <div class="seg-pair">
+          <div class="seg-line"><span class="seg-tag">Now</span>
+            <div class="bar">{% for row in a.rows %}{% if row.before > 0 %}<span style="width:{{ row.before }}%;background:{{ PAL[loop.index0 % PAL|length] }}">{% if row.before >= 9 %}{{ row.bucket }} {{ row.before|round|int }}%{% endif %}</span>{% endif %}{% endfor %}</div></div>
+          <div class="seg-line"><span class="seg-tag">After</span>
+            <div class="bar">{% for row in a.rows %}{% if row.after > 0 %}<span style="width:{{ row.after }}%;background:{{ PAL[loop.index0 % PAL|length] }}">{% if row.after >= 9 %}{{ row.bucket }} {{ row.after|round|int }}%{% endif %}</span>{% endif %}{% endfor %}</div></div>
+        </div>
+        <div class="legend">{% for row in a.rows %}<span><i style="background:{{ PAL[loop.index0 % PAL|length] }}"></i>{{ row.bucket }}</span>{% endfor %}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endmacro %}
+
+{% macro trades_card(trades, stats, continued) %}
+  <div class="card">
+    <div class="card-h"><span>Recommended Trades</span><span class="sub">{{ 'continued · CAD' if continued else 'verified against live quotes · CAD' }}</span></div>
+    <table>
+      <thead><tr><th>Action</th><th>Ticker</th><th>Held</th><th class="r">$ CAD</th><th class="r">~Shares</th>
+        <th class="r">Price</th><th class="r">% of side</th><th>Sector</th><th>Risk</th><th>Cap</th></tr></thead>
+      <tbody>
+        {% for t in trades %}
+        <tr>
+          <td><span class="badge {{ 'b-buy' if t.action == 'Buy' else 'b-sell' }}">{{ t.action }}</span></td>
+          <td class="tkr">{{ t.ticker }}</td>
+          <td class="{{ 'green' if t.currently_held else 'dim' }}">{{ 'Yes' if t.currently_held else 'No' }}</td>
+          <td class="r {{ 'green' if t.action == 'Buy' else 'red' }}">{{ t.amount_cad | cad }}</td>
+          <td class="r dim">{% if t.shares_calc %}{{ '%g'|format(t.shares_calc) }}{% else %}—{% endif %}</td>
+          <td class="r dim">{% if t.live_price_cad %}{{ t.live_price_cad | cad }}{% else %}—{% endif %}</td>
+          <td class="r dim">{% if t.action == 'Buy' and stats.buys %}{{ (t.amount_cad / stats.buys * 100)|round|int }}%{% elif t.action == 'Sell' and stats.sells %}{{ (t.amount_cad / stats.sells * 100)|round|int }}%{% else %}—{% endif %}</td>
+          <td>{{ t.sector }}</td>
+          <td>{{ t.risk_bucket }}</td>
+          <td>{{ t.market_cap }}{% if t.is_fund %} <span class="dim">·fund</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endmacro %}
+
+{% macro dividend_card(d) %}
+  {% set hi = [d.before, d.after, 1]|max %}
+  <div class="card">
+    <div class="card-h"><span>Dividend Impact</span><span class="sub">forward 12-month income</span></div>
+    <div class="card-b">
+      <div style="display:flex;gap:28px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1;min-width:230px">
+          <div class="seg-line" style="margin-bottom:9px"><span class="seg-tag">Now</span>
+            <div class="bar" style="height:22px"><span style="width:{{ (d.before / hi * 100)|round(1) }}%;background:var(--accent-dim)">{{ d.before | cad }} / yr</span></div></div>
+          <div class="seg-line"><span class="seg-tag">After</span>
+            <div class="bar" style="height:22px"><span style="width:{{ (d.after / hi * 100)|round(1) }}%;background:var(--green)">{{ d.after | cad }} / yr</span></div></div>
+        </div>
+        <div style="display:flex;gap:9px">
+          <div class="chip"><div class="lbl">Income Δ</div><div class="chip-val {{ 'green' if d.delta >= 0 else 'red' }}">{{ d.delta | signed_cad }} / yr</div></div>
+          <div class="chip"><div class="lbl">Yield on book</div><div class="chip-val">{% if d.yield_before is not none %}{{ '%.1f'|format(d.yield_before) }}% → {{ '%.1f'|format(d.yield_after) }}%{% else %}—{% endif %}</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endmacro %}
+
+{% macro pct1(v) %}{% if v is not none %}{{ '%.1f'|format(v) }}%{% else %}—{% endif %}{% endmacro %}
+
+{% macro prisk_cell(label, before, after, dp, unit) %}
+  {% if before is not none and after is not none %}
+  {% set d = after - before %}
+  <div class="prisk"><div class="lbl">{{ label }}</div>
+    <div class="ba"><span class="now">{{ '%.*f'|format(dp, before) }}{{ unit }}</span> → {{ '%.*f'|format(dp, after) }}{{ unit }}</div>
+    <div class="delta {{ 'green' if d <= 0 else 'red' }}">{{ '↓' if d <= 0 else '↑' }} {{ '%.*f'|format(dp, d|abs) }}{{ unit }}</div></div>
+  {% else %}
+  <div class="prisk"><div class="lbl">{{ label }}</div><div class="ba dim">—</div></div>
+  {% endif %}
+{% endmacro %}
+
+{% macro holding_card(h, stats) %}
+  <div class="holding">
+    <div class="holding-h">
+      <div><span class="holding-tkr">{{ h.ticker }}</span> <span class="holding-name">{{ h.name }}</span></div>
+      <span class="badge b-buy">Buy {{ h.amount_cad | cad }}{% if stats.buys %} · {{ h.pct_of_buys|round|int }}% of buys{% endif %}</span>
+    </div>
+    {% if h.spark %}
+    <div class="spark-wrap">
+      <svg width="150" height="34" viewBox="0 0 150 34"><polyline fill="none" stroke="var(--accent)" stroke-width="1.6" points="{{ h.spark | sparkline(150,34) }}"/></svg>
+      <span class="spark-meta">12-mo price{% if h.ret_1y is not none %} · {{ '%+.0f'|format(h.ret_1y) }}%{% endif %}</span>
+    </div>
+    {% endif %}
+    <div class="stat-grid g4">
+      <div class="stat"><div class="lbl">Price</div><div class="val">{{ h.price_cad | cad }}</div></div>
+      <div class="stat"><div class="lbl">Yield</div><div class="val green">{% if h.yield is not none %}{{ '%.2f'|format(h.yield) }}%{% else %}—{% endif %}</div></div>
+      <div class="stat"><div class="lbl">MER</div><div class="val">{% if h.mer is not none %}{{ '%.2f'|format(h.mer) }}%{% else %}—{% endif %}</div></div>
+      <div class="stat"><div class="lbl">{{ 'Fund size' if h.is_fund else 'Market cap' }}</div><div class="val">{{ (h.aum if h.is_fund else h.market_cap) | mktcap }}</div></div>
+    </div>
+    <div class="stat-grid g5">
+      <div class="stat"><div class="lbl">Beta</div><div class="val">{% if h.beta is not none %}{{ '%.2f'|format(h.beta) }}{% else %}—{% endif %}</div></div>
+      <div class="stat"><div class="lbl">Volatility (1-yr)</div><div class="val">{{ pct1(h.volatility) }}</div></div>
+      <div class="stat"><div class="lbl">Max drawdown</div><div class="val">{{ pct1(h.max_dd) }}</div></div>
+      <div class="stat"><div class="lbl">52-wk range</div><div class="val">{% if h.range_low and h.range_high %}{{ '%g–%g'|format(h.range_low, h.range_high) }}{% else %}—{% endif %}</div></div>
+      <div class="stat fit"><div class="lbl">Corr. to book</div><div class="val accent">{% if h.corr_to_book is not none %}{{ '%.2f'|format(h.corr_to_book) }}{% if h.corr_tag %} · {{ h.corr_tag }}{% endif %}{% else %}—{% endif %}</div></div>
+    </div>
+    {% if h.rationale %}<p class="rationale">{{ h.rationale }}</p>{% endif %}
+    {% if h.gaps_addressed %}<div class="sub-note">Closes: {{ h.gaps_addressed | join(', ') }}</div>{% endif %}
+    {% if h.alternates %}
+    <div class="sec-label" style="margin:10px 0 3px">Alternatives compared</div>
+    <table class="alt-tbl">
+      <thead><tr><th>ETF</th><th class="r">Yield</th><th class="r">MER</th><th class="r">AUM</th><th class="r">1-yr return</th><th class="r">Volatility</th></tr></thead>
+      <tbody>
+        <tr class="sel"><td class="pick">{{ h.ticker }} — selected</td>
+          <td class="r">{% if h.yield is not none %}{{ '%.1f'|format(h.yield) }}%{% else %}—{% endif %}</td>
+          <td class="r">{% if h.mer is not none %}{{ '%.2f'|format(h.mer) }}%{% else %}—{% endif %}</td>
+          <td class="r">{{ h.aum | mktcap }}</td>
+          <td class="r">{% if h.ret_1y is not none %}{{ '%+.1f'|format(h.ret_1y) }}%{% else %}—{% endif %}</td>
+          <td class="r">{{ pct1(h.volatility) }}</td></tr>
+        {% for a in h.alternates %}
+        <tr><td>{{ a.ticker }}{% if a.profile %} <span class="dim">({{ a.profile }})</span>{% endif %}</td>
+          <td class="r">{% if a.yield is not none %}{{ '%.1f'|format(a.yield) }}%{% else %}—{% endif %}</td>
+          <td class="r">{% if a.mer is not none %}{{ '%.2f'|format(a.mer) }}%{% else %}—{% endif %}</td>
+          <td class="r">{{ a.aum | mktcap }}</td>
+          <td class="r">{% if a.ret_1y is not none %}{{ '%+.1f'|format(a.ret_1y) }}%{% else %}—{% endif %}</td>
+          <td class="r">{{ pct1(a.volatility) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% if h.description %}<div class="sub-note"><b>About:</b> {{ h.description }}</div>{% endif %}
+    {% if h.sources %}<div class="sub-note sources"><b>Sources:</b> {% for s in h.sources %}<a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.title }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+  </div>
+{% endmacro %}
+
+{# ── SHEET 1: cover · summary · portfolio risk ─────────────────────────────────── #}
+<div class="sheet">
+  <div class="cover">
+    <div class="kicker">AI Rebalance · Deep-Dive Report</div>
+    <h1>Full-Rebalance Plan &amp; Research Brief</h1>
+    <div class="acct">{{ r.account }} <span class="dim">· {{ r.account_type }}</span></div>
+    <div class="meta">
+      {% if gen_date %}<span>Generated <b>{{ gen_date }}</b></span>{% endif %}
+      {% if provider %}<span>Provider <b>{{ provider }}</b>{% if model %} · {{ model }}{% endif %}</span>{% endif %}
+      {% if style %}<span>Style <b>{{ style }}</b></span>{% endif %}
+    </div>
+    {% if r.thesis %}<div class="thesis"><b>Thesis.</b> {{ r.thesis }}</div>
+    {% else %}<div class="thesis"><b>Thesis.</b> Deploys {{ r.stats.net | cad }} across {{ r.holdings_detail|length }} new position(s) to move the account toward its rebalancer targets.</div>{% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card-h"><span>Executive Summary</span><span class="sub">at a glance</span></div>
+    <div class="card-b">
+      <div class="chips">
+        <div class="chip"><div class="lbl">Buys</div><div class="chip-val green">{{ r.stats.buys | cad }}</div></div>
+        <div class="chip"><div class="lbl">Sells</div><div class="chip-val red">{{ r.stats.sells | cad }}</div></div>
+        <div class="chip"><div class="lbl">Net deployed</div><div class="chip-val">{{ r.stats.net | cad }}</div></div>
+        <div class="chip"><div class="lbl">Leftover cash</div><div class="chip-val">{{ r.stats.leftover | cad }}</div></div>
+        <div class="chip"><div class="lbl">New names</div><div class="chip-val">{{ r.stats.n_new }}</div></div>
+      </div>
+      {% if r.summary %}<p style="font-size:.88rem;line-height:1.65">{{ r.summary }}</p>{% endif %}
+    </div>
+  </div>
+
+  {% set rb, ra = r.risk.before, r.risk.after %}
+  <div class="card">
+    <div class="card-h"><span>Portfolio Risk &amp; Cost — Before → After</span><span class="sub">whole-account effect · lower is greener here</span></div>
+    <div class="card-b">
+      <div class="prisk-grid">
+        {{ prisk_cell('Book beta', rb.beta, ra.beta, 2, '') }}
+        {{ prisk_cell('Est. volatility (1-yr)', rb.volatility, ra.volatility, 1, '%') }}
+        {{ prisk_cell('Blended fee (MER)', rb.mer, ra.mer, 2, '%') }}
+        {{ prisk_cell('Top-holding weight', rb.top_weight, ra.top_weight, 1, '%') }}
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── allocation · trades · dividend (split when ≥ 11 trades) ───────────────────── #}
+{% set trades = r.trades %}
+{% set nt = trades | length %}
+{% set split = nt > 10 %}
+{% set half = (nt // 2) if split else nt %}
+<div class="sheet">
+  {{ alloc_card(r) }}
+  {{ trades_card(trades[:half], r.stats, false) }}
+  {% if not split %}{{ dividend_card(r.dividend) }}{% endif %}
+</div>
+{% if split %}
+<div class="sheet">
+  {{ trades_card(trades[half:], r.stats, true) }}
+  {{ dividend_card(r.dividend) }}
+</div>
+{% endif %}
+
+{# ── per-holding deep dive (two per sheet) ─────────────────────────────────────── #}
+{% for pair in r.holdings_detail | batch(2) %}
+<div class="sheet">
+  {% if loop.first %}<div class="sec-label">Per-Holding Deep Dive</div>{% endif %}
+  {% for h in pair %}{{ holding_card(h, r.stats) }}{% endfor %}
+</div>
+{% endfor %}
+
+{# ── risks · caps · caveats ────────────────────────────────────────────────────── #}
+<div class="sheet">
+  <div class="card">
+    <div class="card-h"><span>Risk, Position Caps &amp; Caveats</span></div>
+    <div class="card-b">
+      {% if r.cap_notes %}
+      <div class="sec-label">Position caps applied</div>
+      <ul class="notes">{% for c in r.cap_notes %}<li>{{ c }}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if r.risks_remaining %}
+      <div class="sec-label" style="margin-top:12px">Risks that remain</div>
+      <ul class="notes">{% for c in r.risks_remaining %}<li>{{ c }}</li>{% endfor %}</ul>
+      {% endif %}
+      {% if r.caveats %}
+      <div class="sec-label" style="margin-top:12px">Caveats</div>
+      <ul class="notes">{% for c in r.caveats %}<li>{{ c }}</li>{% endfor %}</ul>
+      {% endif %}
+    </div>
+  </div>
+  <div class="foot">
+    Generated by the Portfolio Tracker AI Rebalancer{% if provider %} · {{ provider }}{% if model %} {{ model }}{% endif %}{% endif %}{% if gen_date %} · {{ gen_date }}{% endif %}.
+    Figures are estimates from live yfinance quotes and public fund data. Not investment advice. Past performance does not guarantee future results.
+    &nbsp;·&nbsp; Portfolio Tracker · Midnight Terminal
+  </div>
+</div>
+
+</body>
+</html>
