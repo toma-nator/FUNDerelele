@@ -114,12 +114,19 @@ def _system_prompt(style):
 Turn the account's Rebalancer "gaps" into a concrete, executable BUY plan that consolidates as many \
 gaps as possible, then source specific securities that fit.
 
-CASH & SIZING
-- Deploy only the cash available (cash_to_deploy). Never exceed it. Account for every dollar and report \
-any remainder in leftover_cash.
-- Close the primary dollar gaps (the Sector dimension, when present) as precisely as you can, WHILE \
-ALSO honouring the secondary tilts (Blended Risk and Market Cap buckets to favour). Prefer single \
-securities that satisfy several gaps at once over one-security-per-gap.
+GOAL — FULL REBALANCE
+- Produce a FULL REBALANCE across ALL targeted dimensions (sector, asset class / allocation, blended \
+risk, market cap, beta, currency — whichever have targets). BUY under-target gaps and SELL over-target \
+holdings, funded by the sells plus available cash. Net cash used (total Buys − total Sells) must NOT \
+exceed cash_to_deploy; report leftover_cash = cash_to_deploy + total Sells − total Buys.
+- PRIORITISE BY DOLLAR SIZE ACROSS ALL DIMENSIONS, not dimension by dimension: address the single \
+largest remaining cash gap first — whatever dimension it sits in — then the next largest, and so on down \
+to the smallest, until the cash is deployed. Each security affects several dimensions at once, so after \
+every pick re-evaluate which gap is now largest. Do NOT privilege the Sector dimension; sector exposure \
+should fall out naturally from the securities you choose.
+- When choosing HOW to fill a gap, weight keeping BLENDED RISK and ASSET ALLOCATION on target most \
+heavily (these matter most), then the remaining tilts. Prefer one security that closes several large \
+gaps at once. Note the single biggest trade-off you had to make in caveats.
 
 POSITION CAPS (as a % of cash_to_deploy)
 - ETFs / diversified funds: no cap (they're already diversified).
@@ -129,12 +136,10 @@ POSITION CAPS (as a % of cash_to_deploy)
 - When a cap stops you from filling a gap with your preferred name, record it in cap_notes — state the \
 ticker, what you wanted to deploy, the cap, and where you rerouted the rest.
 
-SELLS — ONLY IF REQUIRED
-- Deploy the available cash first; this is primarily a cash-deployment plan. Recommend a Sell only when \
-(a) a priority gap needs more funding than the cash alone can provide, or (b) a current holding sits in a \
-bucket listed in over_target_buckets (it is above its target). Keep sells minimal — trim the most \
-over-target / highest-risk overweight first. Sell proceeds fund additional Buys; set \
-leftover_cash = cash_to_deploy + total Sells − total Buys (≈ 0 when fully deployed).
+SELLS
+- Size each Sell to bring an over-target bucket (see over_target_buckets) toward its target; trim the \
+most over-target / highest-risk overweight first. Sells are "Sell" actions on tickers the account \
+currently holds, and their proceeds fund the buys. Do not sell a holding that isn't over target.
 
 SECURITIES — MUST BE REAL
 - Use real, currently-listed tickers. VERIFY each candidate with web search before recommending it.
@@ -164,8 +169,13 @@ in a search query.
 
 OUTPUT
 - Return only the structured object. Set is_fund=true for ETFs/mutual funds. shares_est may be null. \
-gaps_addressed lists the gaps each trade closes (e.g. "Sector: Healthcare", "Risk: Very High"). \
-Keep the summary tight and professional. End caveats with a one-line "Not financial advice." note."""
+gaps_addressed lists the gaps each trade closes (e.g. "Sector: Healthcare", "Risk: Very High").
+- Write a substantial, professional `summary` (about 4–7 sentences): the overall strategy and why this \
+shape; how you prioritised the dollar gaps; how you balanced the Blended-Risk and Market-Cap tilts; what \
+you sold and why; the single most important trade-off you made; and how the plan shifts the account's \
+risk posture. Keep it at the PLAN level — leave per-security detail to each trade's `rationale`, don't \
+repeat it.
+- End caveats with a one-line "Not financial advice." note."""
 
 
 # ── Payload assembly ─────────────────────────────────────────────────────────────
@@ -387,6 +397,23 @@ def validate_plan(plan, account):
     candidates = list({*wl_tickers, *trade_tickers})
     prices = fetch_prices_batch(candidates) if candidates else {}
     metas = get_holdings_metadata(candidates) if candidates else {}
+
+    # Enrich each trade with live price (CAD), an estimated share count, and yield.
+    from price_service import get_fx_rate
+    fx = get_fx_rate()
+    for t in plan.get('trades', []):
+        pd = prices.get(t['ticker'])
+        if pd and pd.get('price'):
+            native, cur = pd['price'], pd.get('currency', 'CAD')
+            price_cad = native * (fx if cur and cur != 'CAD' else 1.0)
+            t['live_price_cad'] = round(price_cad, 2)
+            t['shares_calc'] = round(t['amount_cad'] / price_cad, 2) if price_cad else None
+            m = metas.get(t['ticker'], {}) or {}
+            dr, dy = m.get('dividend_rate'), m.get('dividend_yield')
+            yld = (dr / native * 100) if (dr and native) else (dy if dy else None)
+            t['yield_pct'] = round(yld, 2) if yld is not None else None
+        else:
+            t['live_price_cad'] = t['shares_calc'] = t['yield_pct'] = None
 
     verified, skipped = [], []
     for w in plan.get('new_watchlist', []):

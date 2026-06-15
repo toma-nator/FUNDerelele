@@ -851,15 +851,112 @@ def dividends():
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 
+def _relative_time(iso):
+    """Friendly 'just now / 12m ago / 3h ago / 2d ago' from a UTC ISO timestamp."""
+    if not iso:
+        return None
+    try:
+        t = datetime.fromisoformat(iso)
+    except Exception:
+        return None
+    secs = (datetime.utcnow() - t).total_seconds()
+    if secs < 90:
+        return 'just now'
+    if secs < 3600:
+        return f'{int(secs // 60)}m ago'
+    if secs < 86400:
+        return f'{int(secs // 3600)}h ago'
+    return f'{int(secs // 86400)}d ago'
+
+
 @app.route('/watchlist')
 def watchlist():
     from calculations import get_watchlist_data, get_rebalancer_gaps_all, get_rebalancer_gap_summary
+    import ai_service
     data = get_watchlist_data()
     gaps = get_rebalancer_gaps_all()
     gap_summary = get_rebalancer_gap_summary(gaps)
+    gap_accts = sorted({g['account'] for g in gaps})
+    ai_account = request.args.get('ai_account', '').strip() or (gap_accts[0] if gap_accts else None)
+
+    def _gs(k, d=''):
+        s = Setting.query.get(k)
+        return s.value if (s and s.value) else d
+
+    ai = {
+        'providers': ai_service.providers_available(),
+        'default_provider': _gs('ai_provider_default', 'claude'),
+        'default_style': _gs('ai_impl_style_default', 'mixed'),
+        'accounts': gap_accts, 'account': ai_account,
+        'record': None, 'stale': False, 'generated_ago': None, 'stats': None,
+    }
+    if ai_account:
+        rec = ai_service.load_cached_plan(ai_account)
+        if rec:
+            ai['record'] = rec
+            ai['generated_ago'] = _relative_time(rec.get('generated_at'))
+            try:
+                ai['stale'] = ai_service.plan_is_stale(rec, ai_account)
+            except Exception:
+                ai['stale'] = False
+            _trades = rec.get('plan', {}).get('trades', [])
+            _buys = sum(t['amount_cad'] for t in _trades if t.get('action') == 'Buy')
+            _sells = sum(t['amount_cad'] for t in _trades if t.get('action') == 'Sell')
+            ai['stats'] = {'buys': round(_buys, 2), 'sells': round(_sells, 2),
+                           'net': round(_buys - _sells, 2),
+                           'n_new': len(rec.get('plan', {}).get('_verified', []))}
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
     return render_template('watchlist.html', data=data, gaps=gaps, gap_summary=gap_summary,
-                           last_updated=last_updated, active='watchlist')
+                           ai=ai, last_updated=last_updated, active='watchlist')
+
+
+@app.route('/watchlist/ai/generate', methods=['POST'])
+def watchlist_ai_generate():
+    """The single billable AI call — only reachable from an explicit, confirmed button."""
+    import ai_service
+    account = request.form.get('account', '').strip()
+    provider = request.form.get('provider', '').strip() or 'claude'
+    style = request.form.get('style', '').strip() or None
+    if not account:
+        flash('Pick an account first.', 'error')
+        return redirect(url_for('watchlist'))
+    try:
+        ai_service.run_and_cache(account, provider, style)
+        flash(f'AI plan generated for {account}.', 'success')
+    except ai_service.AIConfigError as e:
+        flash(str(e), 'error')
+    except Exception as e:
+        flash(f'AI generation failed: {e}', 'error')
+    return redirect(url_for('watchlist', ai_account=account))
+
+
+@app.route('/watchlist/ai/add', methods=['POST'])
+def watchlist_ai_add():
+    """Add the cached plan's verified picks to the watchlist (free — no AI call)."""
+    import ai_service
+    account = request.form.get('account', '').strip()
+    rec = ai_service.load_cached_plan(account) if account else None
+    if not rec:
+        flash('No AI plan to add from — generate one first.', 'error')
+        return redirect(url_for('watchlist', ai_account=account))
+    plan = rec['plan']
+    ai_service.validate_plan(plan, account)  # refresh dedupe against the current watchlist
+    added = ai_service.add_picks_to_watchlist(plan)
+    if added:
+        flash(f'Added {len(added)} pick(s) to watchlist: {", ".join(added)}.', 'success')
+    else:
+        flash('No new picks to add (all already held or tracked).', 'info')
+    return redirect(url_for('watchlist', ai_account=account))
+
+
+@app.route('/watchlist/ai/clear', methods=['POST'])
+def watchlist_ai_clear():
+    import ai_service
+    account = request.form.get('account', '').strip()
+    if account:
+        ai_service.clear_cached_plan(account)
+        flash('AI plan cleared.', 'info')
+    return redirect(url_for('watchlist', ai_account=account))
 
 
 @app.route('/ticker/<ticker>/review')
