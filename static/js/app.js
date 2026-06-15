@@ -33,6 +33,17 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+// Render UTC <time data-localize> stamps in the browser's own timezone (autodetected)
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('time[data-localize][datetime]').forEach(el => {
+    const d = new Date(el.getAttribute('datetime'));
+    if (isNaN(d)) return;
+    el.textContent = el.getAttribute('data-localize') === 'time'
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  });
+});
+
 // ── Sidebar customize: drag-to-reorder + hide tabs, persisted server-side ──
 (function () {
   const nav = document.getElementById('sidebarNav');

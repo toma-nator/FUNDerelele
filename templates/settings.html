@@ -120,23 +120,6 @@
       </div>
     </div>
 
-    {% if managed_exists %}
-    <!-- Managed (advisor/fund-run) accounts in stats -->
-    <div style="border-top:1px solid var(--border-sub);padding:16px 20px">
-      <input type="hidden" name="managed_form" value="1">
-      <label style="display:block;margin-bottom:4px">Managed accounts</label>
-      <p style="font-size:.72rem;color:var(--text-muted);margin-bottom:10px">
-        By default, advisor/fund-managed accounts count toward your <strong>net worth and
-        allocation</strong> (you own them) but stay out of <strong>holdings, performance,
-        dividends, and tax</strong> (the fund runs its own trades, income, and tax).
-      </p>
-      <label class="perf-check" style="justify-content:flex-start;gap:8px">
-        <input type="checkbox" name="managed_separate" {% if managed_separate %}checked{% endif %}>
-        Treat managed accounts as fully separate — exclude from <em>everything</em> (Accounts page only)
-      </label>
-    </div>
-    {% endif %}
-
     {% if fund_tickers %}
     <!-- Mutual-fund display: friendly name (default) vs ticker -->
     <div style="border-top:1px solid var(--border-sub);padding:16px 20px">

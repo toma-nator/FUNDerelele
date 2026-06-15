@@ -8,7 +8,7 @@
   <div class="card-header">
     All Positions
     {% if last_updated and last_updated.last_updated %}
-      <span class="card-sub">prices as of {{ last_updated.last_updated.strftime('%Y-%m-%d %H:%M') }}</span>
+      <span class="card-sub">prices as of {{ last_updated.last_updated | localdt }}</span>
     {% endif %}
   </div>
 

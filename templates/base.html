@@ -52,7 +52,7 @@
       </div>
       <div class="topbar-right">
         {% if last_updated %}
-          <span class="updated-at">prices updated <time>{{ last_updated.last_updated.strftime('%H:%M') if last_updated.last_updated else '—' }}</time></span>
+          <span class="updated-at">prices updated {{ last_updated.last_updated | localdt('time') }}</span>
         {% endif %}
         <button class="btn btn-sm" onclick="refreshPrices(this)">↻ Refresh Prices</button>
         {% block topbar_actions %}{% endblock %}

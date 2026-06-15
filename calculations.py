@@ -211,11 +211,10 @@ def managed_account_names():
 
 
 def managed_fully_separate():
-    """True if managed accounts are excluded from ALL stats (visible only on the
-    Accounts page) — the optional 'fully separate' setting."""
-    from models import Setting
-    s = Setting.query.get('managed_separate')
-    return bool(s and (s.value or '').lower() in ('1', 'true', 'yes', 'on'))
+    """Parked: the 'fully separate' (exclude managed from everything) setting was removed
+    from the UI — managed accounts always count toward net worth + allocation (the
+    default). Kept as a hook if the toggle is ever restored."""
+    return False
 
 
 def managed_included_in(area):
@@ -702,7 +701,7 @@ def get_account_breakdown(account_name):
                 'currency': [], 'invested_vs_cash': _invested_vs_cash(0.0), 'positions': []}
 
     meta = get_holdings_metadata([h['ticker'] for h in holdings])
-    asset_type, sector, market_cap, currency, region = {}, {}, {}, {}, {}
+    asset_type, sector, market_cap, currency, region, beta = {}, {}, {}, {}, {}, {}
     positions = []
 
     for h in holdings:
@@ -715,6 +714,8 @@ def get_account_breakdown(account_name):
         currency[h['currency']] = currency.get(h['currency'], 0) + mv
         for rgn, w in _region_weights(h['ticker'], m).items():
             region[rgn] = region.get(rgn, 0) + mv * w
+        bb = _beta_bucket(m.get('beta'), m.get('asset_type'))
+        beta[bb] = beta.get(bb, 0) + mv
 
         # Sector — ETF look-through when available, else the equity's own sector
         if m.get('fund_sectors'):
@@ -755,6 +756,7 @@ def get_account_breakdown(account_name):
         'market_cap': to_list(market_cap),
         'currency': to_list(currency),
         'region': to_list(region),
+        'beta': to_list(beta),
         'invested_vs_cash': invested_vs_cash,
         'positions': positions,
     }
@@ -1750,7 +1752,6 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
         'market_cap': lambda h, m: _bucket_weights(h, m, 'market_cap'),
         'currency': lambda h, m: _bucket_weights(h, m, 'currency'),
         'country': lambda h, m: _bucket_weights(h, m, 'country'),
-        'beta': lambda h, m: _bucket_weights(h, m, 'beta'),
         'blend': lambda h, m: _bucket_weights(h, m, 'blend'),
     }
     overall_views = {}
@@ -1783,7 +1784,7 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
         'overall_views': overall_views,
         'overall_view_labels': [('sector', 'Sector'), ('asset_class', 'Asset Class'),
                                 ('market_cap', 'Market Cap'), ('currency', 'Currency'),
-                                ('country', 'Country'), ('beta', 'Beta'), ('blend', 'Blended Risk')],
+                                ('country', 'Country'), ('blend', 'Blended Risk')],
         'known_buckets': _known_buckets(dimension),
     }
     if not account:

@@ -54,6 +54,7 @@ CHART_CATALOG = [
     ('alloc_currency',          'By Currency',                'Allocation',           'compact'),
     ('alloc_region',            'By Region',                  'Allocation',           'compact'),
     ('alloc_market_cap',        'By Market Cap',              'Allocation',           'compact'),
+    ('alloc_beta',              'By Beta',                    'Allocation',           'compact'),
     ('time_horizon',            'By Time Horizon',            'Allocation',           'compact'),
 
     ('top_holdings',            'Top Holdings',               'Holdings',             'compact'),
@@ -128,7 +129,7 @@ def _scope(account):
 def _breakdown(account):
     """Allocation lists by asset_type/sector/market_cap/currency for one account,
     a group ('self_directed'/'managed'), or the whole portfolio (merged)."""
-    keys = ('asset_type', 'sector', 'market_cap', 'currency', 'region')
+    keys = ('asset_type', 'sector', 'market_cap', 'currency', 'region', 'beta')
     if account and account not in _GROUP_SCOPES:
         bd = get_account_breakdown(account)
         return {k: bd.get(k, []) for k in keys} if bd.get('ok') else {k: [] for k in keys}
@@ -391,6 +392,10 @@ def _b_alloc_region(account=None):
     return _alloc('region', 'Allocation by Region', 'pie', account)
 
 
+def _b_alloc_beta(account=None):
+    return _alloc('beta', 'Allocation by Beta (volatility tier)', 'hbar', account)
+
+
 def _b_time_horizon(account=None):
     from calculations import get_horizon_breakdown, HORIZON_BUCKETS, HORIZON_COLORS
     buckets = get_horizon_breakdown(account)
@@ -599,6 +604,7 @@ _BUILDERS = {
     'alloc_currency': _b_alloc_currency,
     'alloc_region': _b_alloc_region,
     'alloc_market_cap': _b_alloc_market_cap,
+    'alloc_beta': _b_alloc_beta,
     'time_horizon': _b_time_horizon,
     'top_holdings': _b_top_holdings,
     'unrealized_by_holding': _b_unrealized_by_holding,

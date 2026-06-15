@@ -132,12 +132,13 @@
 
   {% if not ai.record %}
   <div style="padding:14px 16px">
-    <p class="text-dim" style="font-size:.82rem;margin-bottom:10px">No plan yet for <strong>{{ ai.account }}</strong>. Generating runs a live, web-grounded AI call (roughly <strong>$2–5</strong>) and takes 1–3 minutes.</p>
+    <p class="text-dim" style="font-size:.82rem;margin-bottom:10px">No plan yet for <strong>{{ ai.account }}</strong>. Generating runs a live, web-grounded AI call (approximately <strong>$5</strong>) and takes 1–3 minutes.</p>
     <form method="POST" action="{{ url_for('watchlist_ai_generate') }}" class="ai-gen-form"
-          data-confirm="Generate an AI plan for {{ ai.account }}?&#10;&#10;This runs a live AI call (roughly $2–5) and may take 1–3 minutes.">
+          data-confirm="Generate an AI plan for {{ ai.account }}?&#10;&#10;This runs a live AI call (approximately $5) and may take 1–3 minutes.">
       <input type="hidden" name="account" value="{{ ai.account }}">
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:10px">{{ controls }}</div>
       <button type="submit" class="btn btn-primary">Generate AI plan</button>
+      <span class="text-dim" style="font-size:.78rem;margin-left:8px">costs approximately $5 per run</span>
     </form>
   </div>
   {% else %}
@@ -166,10 +167,10 @@
       <a href="{{ url_for('watchlist_ai_report', account=ai.account) }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">View report ↗</a>
       <a href="{{ url_for('watchlist_ai_report_pdf', account=ai.account) }}" class="btn btn-sm" title="Download a PDF of the deep-dive report">Export PDF</a>
       <form method="POST" action="{{ url_for('watchlist_ai_generate') }}" class="ai-gen-form" style="display:flex;gap:.4rem;align-items:center"
-            data-confirm="Regenerate the AI plan for {{ ai.account }}?&#10;&#10;This runs another live AI call (roughly $2–5) and may take 1–3 minutes.">
+            data-confirm="Regenerate the AI plan for {{ ai.account }}?&#10;&#10;This runs another live AI call (approximately $5) and may take 1–3 minutes.">
         <input type="hidden" name="account" value="{{ ai.account }}">
         {{ controls }}
-        <button type="submit" class="btn btn-sm">Regenerate</button>
+        <button type="submit" class="btn btn-sm" title="Approximately $5 per run">Regenerate</button>
       </form>
       <form method="POST" action="{{ url_for('watchlist_ai_clear') }}" onsubmit="return confirm('Clear this cached plan?')">
         <input type="hidden" name="account" value="{{ ai.account }}">
@@ -330,7 +331,7 @@
   <div class="card-header">
     Watchlist
     {% if last_updated and last_updated.last_updated %}
-      <span class="card-sub">prices as of {{ last_updated.last_updated.strftime('%Y-%m-%d %H:%M') }}</span>
+      <span class="card-sub">prices as of {{ last_updated.last_updated | localdt }}</span>
     {% endif %}
   </div>
 

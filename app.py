@@ -331,6 +331,20 @@ def mktcap_filter(v):
     return _fmt_mktcap(v) if v else '—'
 
 
+@app.template_filter('localdt')
+def localdt_filter(dt, mode='datetime'):
+    """A UTC datetime → a <time> element that app.js re-renders in the BROWSER's
+    timezone (autodetected). The server-side text is the UTC fallback if JS is off.
+    mode 'time' → HH:MM, 'datetime' → date + time."""
+    from markupsafe import Markup
+    from datetime import timezone
+    if not dt:
+        return Markup('<time>—</time>')
+    iso = dt.replace(tzinfo=timezone.utc).isoformat()
+    fb = dt.strftime('%H:%M' if mode == 'time' else '%Y-%m-%d %H:%M')
+    return Markup(f'<time data-localize="{mode}" datetime="{iso}">{fb}</time>')
+
+
 @app.template_filter('sparkline')
 def sparkline_filter(series, width=150, height=34):
     """A list of closes → an SVG polyline 'points' string scaled to width×height
@@ -1342,15 +1356,6 @@ def settings():
             else:
                 db.session.add(Setting(key='rdsp_equity_map', value=json.dumps(eq)))
 
-        # Managed accounts: fully separate (exclude from everything) checkbox.
-        if 'managed_form' in request.form:
-            val = '1' if request.form.get('managed_separate') == 'on' else '0'
-            ms = Setting.query.get('managed_separate')
-            if ms:
-                ms.value = val
-            else:
-                db.session.add(Setting(key='managed_separate', value=val))
-
         # Mutual funds to show by ticker instead of their friendly name.
         show_ticker = ','.join(t.strip().upper() for t in request.form.getlist('fund_show_ticker') if t.strip())
         sft = Setting.query.get('fund_show_ticker')
@@ -1394,8 +1399,6 @@ def settings():
     from calculations import managed_account_names, managed_fully_separate
     return render_template('settings.html',
                            fund_tickers=fund_tickers,
-                           managed_exists=bool(managed_account_names()),
-                           managed_separate=managed_fully_separate(),
                            fx_rate=gs('fx_usd_cad', '1.365'),
                            fx_manual=gs('fx_manual', '0'),
                            fx_manual_rate=gs('fx_manual_rate', ''),
