@@ -406,6 +406,23 @@ other buckets), so the "Projected" column lands short of the targets.
 
 **Priority:** Impact: Med · Effort: medium
 
+## Rebalancer — Industry dimension (info-only)
+
+Parked 2026-06-15. A finer-grained **Industry** breakdown (below Sector — e.g.
+Semiconductors, Banks, Pipelines) as a *read-only allocation lens*, NOT a target
+dimension (the user said they won't rebalance by industry). yfinance exposes
+`industry` for single stocks; ETFs have no industry look-through, so funds would
+fall to "Unclassified" or their fund-level sector. Surface it like the Country
+lens — Accounts/Charts "By Industry" breakdown — without adding it to
+`REBAL_DIMENSIONS`.
+
+- Done this session for context: removed **Beta** as a target; added **Country/
+  Region** (with single + **weighted** overrides); enriched the AI payload (full
+  bucket map, sell candidates, per-holding region/yield/income, Preferences,
+  cash-budget check). Industry is the remaining geographic/classification idea.
+
+**Priority:** Impact: Low · Effort: small–medium
+
 ## Rebalancer — Blended-Risk follow-ups
 
 _Shipped:_ the **Blended Risk** dimension is now **volatility-driven** (PRIIPs/UCITS-style
