@@ -1965,7 +1965,9 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
         order = {b: i for i, b in enumerate(_known_buckets(dimension))}
         buckets.sort(key=lambda x: order.get(x['label'], 999))
     else:
-        buckets.sort(key=lambda x: (x['target_pct'], x['current_value']), reverse=True)
+        # Targeted buckets first by largest target %, then (and for the untargeted
+        # leftovers) by drift largest→smallest — the order balancing would prioritize.
+        buckets.sort(key=lambda x: (x['target_pct'], x['drift']), reverse=True)
 
     # Suggest a focused new position wherever a targeted bucket is still well
     # under target after trades: either nothing is held there, or what's held
