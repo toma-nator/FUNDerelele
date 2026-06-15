@@ -28,7 +28,9 @@ def _fetch_one_metadata(ticker):
     market cap, and ETF look-through sector/asset-class weightings)."""
     meta = {'asset_type': None, 'sector': None, 'market_cap': None,
             'fund_sectors': None, 'fund_assets': None, 'beta': None,
-            'volatility': None, 'long_name': None}
+            'volatility': None, 'long_name': None, 'description': None,
+            'expense_ratio': None, 'total_assets': None,
+            'range_low': None, 'range_high': None}
     try:
         tk = yf.Ticker(ticker)
         info = tk.info or {}
@@ -37,6 +39,7 @@ def _fetch_one_metadata(ticker):
                               or ('Equity' if qt in ('EQUITY', '') else qt.title()))
         meta['sector'] = info.get('sector')
         meta['long_name'] = info.get('longName') or info.get('shortName')
+        meta['description'] = (info.get('longBusinessSummary') or info.get('description') or '')[:600] or None
         mc = info.get('marketCap')
         meta['market_cap'] = float(mc) if mc else None
         # Beta (market-relative volatility) for risk targeting; ETFs often only
@@ -59,6 +62,16 @@ def _fetch_one_metadata(ticker):
         meta['dividend_rate'] = float(dr) if dr else None
         dy = info.get('dividendYield')
         meta['dividend_yield'] = float(dy) if dy else None
+        # Report enrichment (free, one-time cached, slow-changing): fund fee, fund
+        # size, and 52-week price range. Point-in-time series (sparkline/return/
+        # correlation) are computed at report-generation time, not cached here.
+        er = info.get('annualReportExpenseRatio') or info.get('netExpenseRatio')
+        meta['expense_ratio'] = float(er) if er else None
+        ta = info.get('totalAssets')
+        meta['total_assets'] = float(ta) if ta else None
+        lo, hi = info.get('fiftyTwoWeekLow'), info.get('fiftyTwoWeekHigh')
+        meta['range_low'] = float(lo) if lo else None
+        meta['range_high'] = float(hi) if hi else None
         if qt in ('ETF', 'MUTUALFUND'):
             # Mutual funds also expose sector/asset-class look-through for many
             # symbols (e.g. CIBC's 0P…TO codes); gracefully skips when unavailable.
@@ -90,7 +103,7 @@ def get_holdings_metadata(tickers, force=False):
         if pc and pc.meta_json and not force:
             try:
                 m = json.loads(pc.meta_json)
-                if 'dividend_rate' in m and 'beta' in m and 'volatility' in m and 'long_name' in m:  # re-fetch caches missing newer fields
+                if all(k in m for k in ('dividend_rate', 'beta', 'volatility', 'long_name', 'expense_ratio')):  # re-fetch caches missing newer fields
                     result[t] = m
                     continue
             except Exception:
