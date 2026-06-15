@@ -1354,16 +1354,17 @@ def get_tax_summary(year=None, inclusion_rate=None, marginal_rate=None):
 # ETFs are decomposed via fractional look-through, so trading one spills across
 # several buckets — the engine works in fractional weights and shows the result.
 
-REBAL_DIMENSIONS = ['sector', 'asset_type', 'market_cap', 'currency', 'beta', 'blend']
+REBAL_DIMENSIONS = ['sector', 'asset_type', 'market_cap', 'currency', 'blend']
 
 REBAL_DIM_LABELS = {
     'sector': 'Sector', 'asset_type': 'Asset Type',
     'market_cap': 'Market Cap', 'currency': 'Currency',
-    'beta': 'Beta', 'blend': 'Blended Risk',
+    'blend': 'Blended Risk',
 }
 
 # Dimensions whose buckets have a natural low→high order (shown in that order
-# rather than by size).
+# rather than by size). Beta is no longer a target dimension (Blended Risk, which
+# is volatility-driven, supersedes it) but remains a read-only allocation lens.
 ORDINAL_DIMENSIONS = {'market_cap', 'beta', 'blend'}
 
 # A targeted bucket is flagged as needing a focused new position when, after the
@@ -2071,6 +2072,7 @@ def get_rebalancer_gap_summary(gaps):
     built from the gaps. Uses the sector gaps as the buy list (dollars don't
     double-count within one dimension) and folds in a size/risk hint from the
     other dimensions' gaps — e.g. '$3,000 large cap Healthcare'."""
+    cash_by = get_cash_by_account()
     by_acct = {}
     for g in gaps:
         by_acct.setdefault(g['account'], []).append(g)
@@ -2092,10 +2094,17 @@ def get_rebalancer_gap_summary(gaps):
 
         prim = sorted([g for g in items if g['dimension'] == primary],
                       key=lambda x: -x['amount_cad'])
+        # Never suggest deploying more cash than the account holds: cap the buy
+        # total at available cash and scale each line proportionally so the
+        # suggested split actually fits the budget.
+        raw_total = sum(g['amount_cad'] for g in prim)
+        avail = max(0.0, cash_by.get(acct, 0.0))
+        deploy = min(raw_total, avail)
+        scale = (deploy / raw_total) if raw_total > 0 else 0.0
         lines = []
         for g in prim:
             label = f'{adj} {g["bucket"]}' if (adj and primary == 'sector') else g['bucket']
-            lines.append({'amount': g['amount_cad'], 'label': label})
+            lines.append({'amount': round(g['amount_cad'] * scale, 2), 'label': label})
 
         # Secondary "favour" hints from the other dimensions' gaps, largest first.
         folded_size = adj and primary == 'sector'
@@ -2114,7 +2123,8 @@ def get_rebalancer_gap_summary(gaps):
         out.append({
             'account': acct,
             'primary_label': REBAL_DIM_LABELS.get(primary, primary),
-            'total': round(sum(g['amount_cad'] for g in prim), 2),
+            'total': round(deploy, 2),
+            'capped': raw_total > avail + 0.5,   # trimmed to fit available cash
             'lines': lines,
             'bias': bias,
         })
