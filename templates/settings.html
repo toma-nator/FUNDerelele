@@ -226,6 +226,14 @@
         <input class="form-input mono" name="ai_model_chatgpt" placeholder="provider default" value="{{ ai_model_chatgpt }}">
       </div>
     </div>
+
+    <div class="form-row" style="padding:0;margin-bottom:6px">
+      <div class="form-group" style="flex:1;min-width:320px">
+        <label>Preferences &amp; constraints <span class="text-dim">(optional — the AI honours these)</span></label>
+        <textarea class="form-input" name="ai_preferences" rows="3"
+                  placeholder="e.g. Keep VTI as the core. Prefer Canadian eligible dividends. Max 5% in any single stock. Keep a $2,000 cash buffer.">{{ ai_preferences }}</textarea>
+      </div>
+    </div>
     <p style="font-size:.72rem;color:var(--text-muted)">
       Leave model overrides blank to use the recommended defaults (Claude: <span class="mono">claude-opus-4-8</span>).
       Implementation style biases the whole plan; you can still swap individual picks. Research uses generic,

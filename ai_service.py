@@ -139,10 +139,24 @@ POSITION CAPS (as a % of cash_to_deploy)
 - When a cap stops you from filling a gap with your preferred name, record it in cap_notes — state the \
 ticker, what you wanted to deploy, the cap, and where you rerouted the rest.
 
+ALLOCATION DATA
+- `allocation_targets` gives, per targeted dimension, EVERY bucket's current % vs target % and its dollar \
+drift (positive = over target, negative = under target). Read the whole map: buy into the under-target \
+buckets and trim the over-target ones. Over-target buckets list their `sell_candidates` — the holdings \
+actually sitting in that bucket, i.e. what you can sell to fund the rebalance.
+- `current_holdings` includes each position's region, sector, market-cap, risk, yield and forward income. \
+Where two holdings are redundant (same region + asset class + market cap), prefer CONSOLIDATING into one \
+rather than stacking more of the same exposure.
+
 SELLS
-- Size each Sell to bring an over-target bucket (see over_target_buckets) toward its target; trim the \
-most over-target / highest-risk overweight first. Sells are "Sell" actions on tickers the account \
-currently holds, and their proceeds fund the buys. Do not sell a holding that isn't over target.
+- Size each Sell to bring an over-target bucket toward its target; trim the most over-target / highest-risk \
+overweight first, choosing from that bucket's `sell_candidates`. Sells are "Sell" actions on tickers the \
+account currently holds, and their proceeds fund the buys. Do not sell a holding that isn't over target.
+
+PREFERENCES
+- If `preferences` is present, treat it as the investor's standing instructions (e.g. names to keep, an \
+income lean, a cash buffer, per-name limits) and HONOUR it — it overrides the default guidance where they \
+conflict. Note in caveats anything you couldn't satisfy.
 
 SECURITIES — MUST BE REAL
 - Use real, currently-listed tickers. VERIFY each candidate with web search before recommending it.
@@ -189,28 +203,49 @@ disclaimers).
 
 # ── Payload assembly ─────────────────────────────────────────────────────────────
 
-def _over_target_buckets(account):
-    """Buckets currently above target across the dimensions that have saved targets, so the
-    model can propose trimming an overweight (sells only if required)."""
+def _allocation_targets(account):
+    """The FULL per-dimension target map for every dimension with saved targets: each
+    bucket's current %, target %, and dollar drift (positive = over, negative = under),
+    plus — for over-target buckets — the holdings sitting there (the model's sell
+    candidates). Gives the model the complete picture, not just the under-target gaps."""
     from calculations import (REBAL_DIMENSIONS, REBAL_DIM_LABELS, get_rebal_targets,
-                              get_rebalancer_data)
-    out = []
+                              get_rebalancer_data, get_holdings, _bucket_weights)
+    from price_service import get_holdings_metadata
+    holds = [h for h in get_holdings()
+             if h['account'] == account and (h['market_value_cad'] or 0) > 0]
+    metas = get_holdings_metadata([h['ticker'] for h in holds]) if holds else {}
+    out = {}
     for dim in REBAL_DIMENSIONS:
         if not get_rebal_targets(account, dim):
             continue
         d = get_rebalancer_data(account=account, dimension=dim, mode='full')
+        in_bucket = {}
+        for h in holds:
+            for b, w in _bucket_weights(h, metas.get(h['ticker'], {}), dim).items():
+                if w > 0.01:
+                    in_bucket.setdefault(b, []).append(h['ticker'])
+        rows = []
         for b in d['buckets']:
-            if b['drift'] > MIN_TRADE_CAD and b['label'] != 'Cash':
-                out.append({'dimension': REBAL_DIM_LABELS.get(dim, dim),
-                            'bucket': b['label'], 'over_by_cad': b['drift']})
+            if b['target_pct'] <= 0 and abs(b['current_pct']) < 0.05:
+                continue   # untargeted and unheld — skip noise
+            drift = b['drift']
+            row = {'bucket': b['label'], 'current_pct': b['current_pct'],
+                   'target_pct': b['target_pct'], 'drift_cad': drift,
+                   'status': ('over' if drift > MIN_TRADE_CAD else
+                              'under' if drift < -MIN_TRADE_CAD else 'on_target')}
+            if drift > MIN_TRADE_CAD and b['label'] != 'Cash':
+                row['sell_candidates'] = in_bucket.get(b['label'], [])
+            rows.append(row)
+        out[REBAL_DIM_LABELS.get(dim, dim)] = rows
     return out
 
 
 def build_payload(account, style='mixed'):
     """Minimized input for the model — no account number is included."""
     from calculations import (get_rebalancer_gaps_all, get_cash_by_account, get_holdings,
-                              _blend_bucket, _cap_bucket)
-    from price_service import get_holdings_metadata
+                              _blend_bucket, _cap_bucket, _region_of, get_rebal_targets,
+                              REBAL_DIMENSIONS, REBAL_DIM_LABELS)
+    from price_service import get_holdings_metadata, get_fx_rate
     from models import Account
 
     gaps = [g for g in get_rebalancer_gaps_all() if g['account'] == account]
@@ -226,36 +261,47 @@ def build_payload(account, style='mixed'):
     holdings = [h for h in get_holdings()
                 if h['account'] == account and (h['market_value_cad'] or 0) > 0]
     metas = get_holdings_metadata([h['ticker'] for h in holdings])
+    fx = get_fx_rate()
     invested = sum(h['market_value_cad'] for h in holdings) or 1
     current = []
     for h in holdings:
         m = metas.get(h['ticker'], {})
+        rate = m.get('dividend_rate')
+        if not rate and m.get('dividend_yield') and h.get('live_price'):
+            rate = m['dividend_yield'] / 100.0 * h['live_price']
+        fwd = (rate * h['qty'] * (fx if h['currency'] == 'USD' else 1.0)) if rate else 0.0
+        yld = (fwd / h['market_value_cad'] * 100) if h['market_value_cad'] else None
         current.append({
             'ticker': h['ticker'],
             'sector': m.get('sector') or '',
             'market_cap_bucket': _cap_bucket(m.get('market_cap')) or '',
             'risk_bucket': _blend_bucket(h['ticker'], m),
+            'region': _region_of(h['ticker'], m),
             'value_cad': round(h['market_value_cad'], 2),
             'weight_pct': round(h['market_value_cad'] / invested * 100, 1),
+            'yield_pct': round(yld, 2) if yld is not None else None,
+            'fwd_income_cad': round(fwd, 2) if fwd else None,
         })
 
-    by_dim, cands = {}, {}
+    cands = {}
     for g in gaps:
-        by_dim.setdefault(g['dimension_label'], []).append({
-            'bucket': g['bucket'], 'amount_cad': g['amount_cad'], 'gap_pct': g['gap_pct']})
         for c in g.get('candidates', []):
             if c.get('source') == 'idea':
                 continue  # drop hard-coded curated ETFs — let the AI research its own names
             cands.setdefault(c['ticker'], c.get('source', ''))
 
+    targets_fp = {REBAL_DIM_LABELS.get(d, d): get_rebal_targets(account, d)
+                  for d in REBAL_DIMENSIONS if get_rebal_targets(account, d)}
+
     return {
         'account': {'type': acct_type, 'registered': registered, 'currency': 'CAD',
                     'tax_note': tax_note},
         'cash_to_deploy': cash,
-        'gaps_by_dimension': by_dim,
-        'over_target_buckets': _over_target_buckets(account),
+        'allocation_targets': _allocation_targets(account),
         'current_holdings': current,
         'watchlist_candidates': [{'ticker': t, 'source': s} for t, s in sorted(cands.items())],
+        'preferences': (_get_setting('ai_preferences', '') or None),
+        '_targets_fp': targets_fp,
         'constraints': {
             'etf_cap_pct': None,
             'single_stock_cap_pct': SINGLE_STOCK_CAP_PCT,
@@ -444,6 +490,16 @@ def validate_plan(plan, account):
     plan['_skipped'] = skipped
     plan['_invalid_trades'] = [t['ticker'] for t in plan.get('trades', [])
                                if t['ticker'] not in prices and t['ticker'].upper() not in held]
+
+    # Cash-budget transparency: net cash used (buys − sells) must not exceed the cash
+    # on hand. over_by > 0 means the model overshot the budget (surface as a warning).
+    from calculations import get_cash_by_account
+    avail = round(max(0.0, get_cash_by_account().get(account, 0.0)), 2)
+    buys = sum(t['amount_cad'] for t in plan.get('trades', []) if t.get('action') == 'Buy')
+    sells = sum(t['amount_cad'] for t in plan.get('trades', []) if t.get('action') == 'Sell')
+    net_used = round(buys - sells, 2)
+    plan['_cash_budget'] = {'available': avail, 'net_used': net_used,
+                            'over_by': round(max(0.0, net_used - avail), 2)}
     return plan
 
 
@@ -489,10 +545,10 @@ def compute_fingerprint(payload):
     import hashlib
     relevant = {
         'cash': payload.get('cash_to_deploy'),
-        'gaps': payload.get('gaps_by_dimension'),
-        'over': payload.get('over_target_buckets'),
+        'targets': payload.get('_targets_fp'),     # saved targets (stable, not price-noisy)
         'holdings': sorted((h['ticker'], h['value_cad']) for h in payload.get('current_holdings', [])),
         'style': payload.get('constraints', {}).get('implementation_style'),
+        'prefs': payload.get('preferences'),
     }
     blob = json.dumps(relevant, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
