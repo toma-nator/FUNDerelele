@@ -213,6 +213,7 @@
           <div class="breakdown-block" data-key="sector"><h4>By Sector <span class="bd-note">ETF look-through</span></h4><div class="bars"></div></div>
           <div class="breakdown-block" data-key="market_cap"><h4>By Market Cap</h4><div class="bars"></div></div>
           <div class="breakdown-block" data-key="currency"><h4>By Currency</h4><div class="bars"></div></div>
+          <div class="breakdown-block" data-key="region"><h4>By Region <span class="bd-note">geographic</span></h4><div class="bars"></div></div>
           <div class="breakdown-block" data-key="invested_vs_cash"><h4>Holdings vs Cash</h4><div class="bars"></div></div>
           <div class="breakdown-block" data-key="positions"><h4>Position Weights</h4><div class="bars"></div></div>
         </div>
@@ -352,7 +353,7 @@
   if (!sel || !grid) return;
   const cards = Array.from(grid.querySelectorAll('.account-card'));
   const breakdownCache = {};
-  const BD_KEYS = ['asset_type', 'sector', 'market_cap', 'currency', 'invested_vs_cash', 'positions'];
+  const BD_KEYS = ['asset_type', 'sector', 'market_cap', 'currency', 'region', 'invested_vs_cash', 'positions'];
 
   function renderBreakdown(card, data) {
     const wrap = card.querySelector('.account-breakdown');

@@ -67,6 +67,7 @@
           <th class="r" data-sort data-type="num">Realized G/L <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">Vol <span class="sort-arrow"></span></th>
           <th data-sort data-type="num">Risk <span class="sort-arrow"></span></th>
+          <th data-sort data-type="text">Region <span class="sort-arrow"></span></th>
         </tr>
       </thead>
       <tbody>
@@ -116,9 +117,20 @@
           {% set rk = risk.get(h.ticker) %}
           <td class="r mono text-dim" data-val="{{ rk.vol_pct if rk and rk.vol_pct is not none else '' }}">{% if rk and rk.vol_pct is not none %}{{ '%.1f' % rk.vol_pct }}%{% else %}—{% endif %}</td>
           <td class="mono" style="font-size:.82rem" data-val="{{ rk.rank if rk and rk.rank is not none else '' }}">{% if rk and rk.bucket %}{{ rk.bucket }}{% else %}—{% endif %}</td>
+          {% set rg = region.get(h.ticker) %}
+          <td data-val="{{ rg.value if rg else '' }}" style="font-size:.8rem">
+            {% if h.closed or h.ticker == 'CASH' %}
+              <span class="text-dim">{{ rg.value if rg else '—' }}</span>
+            {% else %}
+              <select class="region-sel filter-select" data-ticker="{{ h.ticker }}" style="width:auto;padding:2px 6px;font-size:.78rem" title="Geographic region — Auto classifies; pick one to override">
+                <option value="">Auto{% if rg and not rg.overridden %} ({{ rg.value }}){% endif %}</option>
+                {% for reg in regions %}<option value="{{ reg }}" {% if rg and rg.overridden and rg.value == reg %}selected{% endif %}>{{ reg }}</option>{% endfor %}
+              </select>
+            {% endif %}
+          </td>
         </tr>
         {% else %}
-        <tr><td colspan="19" class="empty-row">No holdings yet. Add transactions to see your portfolio here.</td></tr>
+        <tr><td colspan="20" class="empty-row">No holdings yet. Add transactions to see your portfolio here.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -132,6 +144,22 @@
 (function () {
   const table = document.getElementById('holdings-table');
   if (!table) return;
+
+  // ── Inline region override: save on change, then reload to re-classify everywhere ──
+  table.querySelectorAll('.region-sel').forEach(sel => {
+    sel.addEventListener('change', () => {
+      sel.disabled = true;
+      fetch('/holdings/region', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ ticker: sel.dataset.ticker, region: sel.value }),
+      }).then(r => {
+        if (r.ok) { location.reload(); }
+        else { sel.disabled = false; alert('Could not save the region override.'); }
+      }).catch(() => { sel.disabled = false; alert('Could not save the region override.'); });
+    });
+  });
+
   const tbody = table.tBodies[0];
   const rows = Array.from(tbody.rows).filter(r => r.dataset.status);  // skip the empty-state row
   const headers = Array.from(table.tHead.rows[0].cells);

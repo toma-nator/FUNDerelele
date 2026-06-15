@@ -416,9 +416,15 @@ def holdings():
             'bucket': bucket,
             'rank': _BLEND_BUCKETS.index(bucket) if bucket in _BLEND_BUCKETS else None,
         }
+    # Region/country classification + whether it's a manual override (editable inline).
+    from calculations import _region_of, region_overrides, _ALL_REGIONS
+    rov = region_overrides()
+    region = {t: {'value': _region_of(t, meta.get(t, {})), 'overridden': t.upper() in rov}
+              for t in tickers}
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
     return render_template('holdings.html', holdings=data, accounts=accounts,
                            currencies=currencies, names=names, risk=risk,
+                           region=region, regions=_ALL_REGIONS,
                            last_updated=last_updated, active='holdings')
 
 
@@ -1076,6 +1082,37 @@ def watchlist_ai_report_pdf():
     slug = account.lower().replace(' ', '_').replace('-', '_') or 'account'
     return Response(pdf, mimetype='application/pdf',
                     headers={'Content-Disposition': f'attachment; filename=ai_rebalance_{slug}.pdf'})
+
+
+@app.route('/holdings/region', methods=['POST'])
+def set_region_override():
+    """Set or clear a manual region override for a ticker (used by the Holdings
+    Region column and the Rebalancer Country view). Region '' / 'Auto' clears it."""
+    import json
+    from models import db, Setting
+    from calculations import _ALL_REGIONS
+    ticker = request.form.get('ticker', '').strip().upper()
+    region = request.form.get('region', '').strip()
+    if not ticker:
+        return ('missing ticker', 400)
+    s = Setting.query.get('region_overrides')
+    data = {}
+    if s and s.value:
+        try:
+            data = json.loads(s.value)
+        except Exception:
+            data = {}
+    if region in _ALL_REGIONS:
+        data[ticker] = region
+    else:
+        data.pop(ticker, None)   # Auto / unknown → drop the override
+    val = json.dumps(data)
+    if s:
+        s.value = val
+    else:
+        db.session.add(Setting(key='region_overrides', value=val))
+    db.session.commit()
+    return ('', 204)
 
 
 @app.route('/ticker/<ticker>/review')

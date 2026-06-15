@@ -702,7 +702,7 @@ def get_account_breakdown(account_name):
                 'currency': [], 'invested_vs_cash': _invested_vs_cash(0.0), 'positions': []}
 
     meta = get_holdings_metadata([h['ticker'] for h in holdings])
-    asset_type, sector, market_cap, currency = {}, {}, {}, {}
+    asset_type, sector, market_cap, currency, region = {}, {}, {}, {}, {}
     positions = []
 
     for h in holdings:
@@ -713,6 +713,8 @@ def get_account_breakdown(account_name):
         at = m.get('asset_type') or 'Equity'
         asset_type[at] = asset_type.get(at, 0) + mv
         currency[h['currency']] = currency.get(h['currency'], 0) + mv
+        reg = _region_of(h['ticker'], m)
+        region[reg] = region.get(reg, 0) + mv
 
         # Sector — ETF look-through when available, else the equity's own sector
         if m.get('fund_sectors'):
@@ -752,6 +754,7 @@ def get_account_breakdown(account_name):
         'sector': to_list(sector),
         'market_cap': to_list(market_cap),
         'currency': to_list(currency),
+        'region': to_list(region),
         'invested_vs_cash': invested_vs_cash,
         'positions': positions,
     }
@@ -1354,12 +1357,12 @@ def get_tax_summary(year=None, inclusion_rate=None, marginal_rate=None):
 # ETFs are decomposed via fractional look-through, so trading one spills across
 # several buckets — the engine works in fractional weights and shows the result.
 
-REBAL_DIMENSIONS = ['sector', 'asset_type', 'market_cap', 'currency', 'blend']
+REBAL_DIMENSIONS = ['sector', 'asset_type', 'market_cap', 'currency', 'country', 'blend']
 
 REBAL_DIM_LABELS = {
     'sector': 'Sector', 'asset_type': 'Asset Type',
     'market_cap': 'Market Cap', 'currency': 'Currency',
-    'blend': 'Blended Risk',
+    'country': 'Country', 'blend': 'Blended Risk',
 }
 
 # Dimensions whose buckets have a natural low→high order (shown in that order
@@ -1467,13 +1470,103 @@ _ALL_SECTORS = ['Technology', 'Financial Services', 'Healthcare', 'Consumer Cycl
 _ALL_ASSET_TYPES = ['Equity', 'ETF', 'Bond', 'Mutual Fund', 'Cash']
 _ALL_MARKET_CAPS = ['Mega cap', 'Large cap', 'Mid cap', 'Small cap', 'Fund']
 _ALL_CURRENCIES = ['CAD', 'USD']
+_ALL_REGIONS = ['USA', 'Canada', 'International', 'Emerging']
+
+
+# ── Region / Country classification ──────────────────────────────────────────────
+# Geographic exposure bucket per holding: manual override → fund-name keyword → company
+# domicile → Unclassified. No per-ticker list — a generic keyword map on the fund name
+# generalises to funds never held; anything it misses lands in Unclassified for a one-
+# click manual fix (region_overrides). See _region_of.
+_EMERGING_COUNTRIES = {
+    'China', 'India', 'Brazil', 'Taiwan', 'South Korea', 'Mexico', 'South Africa', 'Russia',
+    'Indonesia', 'Thailand', 'Malaysia', 'Turkey', 'Saudi Arabia', 'Philippines', 'Chile',
+    'Colombia', 'Poland', 'Hungary', 'Egypt', 'Qatar', 'United Arab Emirates', 'Greece',
+    'Vietnam', 'Peru', 'Argentina', 'Pakistan', 'Nigeria', 'Kuwait',
+}
+
+
+def region_overrides():
+    """Manual {TICKER: region} assignments (DB-backed, UI-editable) — checked first so
+    the user can correct anything the heuristics miss. Cached per request."""
+    import json
+    try:
+        from flask import g, has_app_context
+    except Exception:
+        return {}
+    if not has_app_context():
+        return {}
+    if not hasattr(g, '_region_ov'):
+        from models import Setting
+        s = Setting.query.get('region_overrides')
+        try:
+            g._region_ov = ({k.upper(): v for k, v in json.loads(s.value).items()}
+                            if (s and s.value) else {})
+        except Exception:
+            g._region_ov = {}
+    return g._region_ov
+
+
+def _region_from_name(name):
+    """Region from a fund name via generic keywords; None when no clear single-region
+    signal (e.g. a global all-world fund) so it falls through to Unclassified."""
+    n = (name or '').lower()
+    if not n:
+        return None
+    if 'emerging' in n or 'frontier' in n:
+        return 'Emerging'
+    # Funds that explicitly EXCLUDE the US / North America are International regardless
+    # of any other words in the name.
+    if any(k in n for k in ('ex north america', 'ex-north america', 'ex na', 'eafe',
+                            'ex us', 'ex-us', 'ex usa', 'ex-usa', 'world ex', 'developed ex')):
+        return 'International'
+    if any(k in n for k in ('canada', 'canadian', 's&p/tsx', 'tsx', 'ftse canada')):
+        return 'Canada'
+    if any(k in n for k in ('s&p 500', 'sp 500', 'nasdaq', 'russell', 'united states', 'u.s.',
+                            'dow jones', 'total stock market')):
+        return 'USA'
+    if any(k in n for k in ('international', 'developed', 'europe', 'japan', 'pacific', 'asia ')):
+        return 'International'
+    return None
+
+
+def _region_from_country(country):
+    if not country:
+        return None
+    if country == 'United States':
+        return 'USA'
+    if country == 'Canada':
+        return 'Canada'
+    if country in _EMERGING_COUNTRIES:
+        return 'Emerging'
+    return 'International'   # any other named domicile = developed International
+
+
+def _region_of(ticker, m):
+    """Region bucket for one holding. CDRs (.NE suffix) are predominantly US large-caps."""
+    tk = (ticker or '').upper()
+    ov = region_overrides().get(tk)
+    if ov:
+        return ov
+    at = m.get('asset_type') or 'Equity'
+    if at in ('ETF', 'Mutual Fund'):
+        r = _region_from_name(m.get('long_name'))
+        if r:
+            return r
+    else:
+        if tk.endswith('.NE'):
+            return 'USA'
+        r = _region_from_country(m.get('country'))
+        if r:
+            return r
+    return 'Unclassified'
 
 
 def _known_buckets(dimension):
     return {
         'sector': _ALL_SECTORS, 'asset_type': _ALL_ASSET_TYPES,
         'market_cap': _ALL_MARKET_CAPS, 'currency': _ALL_CURRENCIES,
-        'beta': _BETA_BUCKETS, 'blend': _BLEND_BUCKETS,
+        'beta': _BETA_BUCKETS, 'blend': _BLEND_BUCKETS, 'country': _ALL_REGIONS,
     }.get(dimension, [])
 
 
@@ -1499,6 +1592,8 @@ def _bucket_weights(h, m, dimension):
         return {_beta_bucket(m.get('beta'), m.get('asset_type')): 1.0}
     if dimension == 'blend':
         return {_blend_bucket(h.get('ticker'), m): 1.0}
+    if dimension == 'country':
+        return {_region_of(h.get('ticker'), m): 1.0}
     return {'Unclassified': 1.0}
 
 
@@ -1630,6 +1725,7 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
         'asset_class': lambda h, m: _asset_class_weights(m),
         'market_cap': lambda h, m: _bucket_weights(h, m, 'market_cap'),
         'currency': lambda h, m: _bucket_weights(h, m, 'currency'),
+        'country': lambda h, m: _bucket_weights(h, m, 'country'),
         'beta': lambda h, m: _bucket_weights(h, m, 'beta'),
         'blend': lambda h, m: _bucket_weights(h, m, 'blend'),
     }
@@ -1663,7 +1759,7 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
         'overall_views': overall_views,
         'overall_view_labels': [('sector', 'Sector'), ('asset_class', 'Asset Class'),
                                 ('market_cap', 'Market Cap'), ('currency', 'Currency'),
-                                ('beta', 'Beta'), ('blend', 'Blended Risk')],
+                                ('country', 'Country'), ('beta', 'Beta'), ('blend', 'Blended Risk')],
         'known_buckets': _known_buckets(dimension),
     }
     if not account:

@@ -30,7 +30,7 @@ def _fetch_one_metadata(ticker):
             'fund_sectors': None, 'fund_assets': None, 'beta': None,
             'volatility': None, 'long_name': None, 'description': None,
             'expense_ratio': None, 'total_assets': None,
-            'range_low': None, 'range_high': None}
+            'range_low': None, 'range_high': None, 'country': None}
     try:
         tk = yf.Ticker(ticker)
         info = tk.info or {}
@@ -72,6 +72,7 @@ def _fetch_one_metadata(ticker):
         lo, hi = info.get('fiftyTwoWeekLow'), info.get('fiftyTwoWeekHigh')
         meta['range_low'] = float(lo) if lo else None
         meta['range_high'] = float(hi) if hi else None
+        meta['country'] = info.get('country') or None   # company domicile (stocks); region classify
         if qt in ('ETF', 'MUTUALFUND'):
             # Mutual funds also expose sector/asset-class look-through for many
             # symbols (e.g. CIBC's 0P…TO codes); gracefully skips when unavailable.
@@ -103,7 +104,7 @@ def get_holdings_metadata(tickers, force=False):
         if pc and pc.meta_json and not force:
             try:
                 m = json.loads(pc.meta_json)
-                if all(k in m for k in ('dividend_rate', 'beta', 'volatility', 'long_name', 'expense_ratio')):  # re-fetch caches missing newer fields
+                if all(k in m for k in ('dividend_rate', 'beta', 'volatility', 'long_name', 'expense_ratio', 'country')):  # re-fetch caches missing newer fields
                     result[t] = m
                     continue
             except Exception:
