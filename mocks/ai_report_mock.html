@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI Rebalance Deep-Dive — TD Direct Investing · 59WBM0N (RDSP)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ── Midnight Terminal palette (matches static/css/style.css) ── */
+  :root{
+    --bg-base:#07111e; --bg-surface:#0c1929; --bg-card:#101f33; --border:#1a3050; --border-sub:#122540;
+    --text:#c8d8e8; --text-dim:#5a7a96; --text-muted:#2e4a62;
+    --accent:#00c8f0; --accent-dim:#0088bb;
+    --green:#00e676; --red:#ff4d4d; --yellow:#ffd740; --purple:#9b72f5; --orange:#ff8c42;
+    --sans:'Inter',system-ui,sans-serif;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{font-size:13px}
+  body{font-family:var(--sans);background:var(--bg-base);color:var(--text);line-height:1.5;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact}
+  /* every number aligns even in a proportional font */
+  .num,td,.val,.chip-val,.ba,th{font-variant-numeric:tabular-nums}
+  .dim{color:var(--text-dim)} .muted{color:var(--text-muted)}
+  .green{color:var(--green)} .red{color:var(--red)} .amber{color:var(--yellow)} .accent{color:var(--accent)}
+  .r{text-align:right} .c{text-align:center}
+  /* each .sheet is a page group with its own padding, so every printed page
+     gets clean top/bottom spacing while staying full-bleed dark */
+  .sheet{max-width:8.5in;margin:0 auto;padding:44px 40px}
+  .sheet + .sheet{break-before:page;page-break-before:always}
+
+  /* sections / cards */
+  .card{background:var(--bg-surface);border:1px solid var(--border-sub);border-radius:10px;
+    margin-bottom:18px;overflow:hidden;page-break-inside:avoid}
+  .card-h{padding:11px 16px;border-bottom:1px solid var(--border-sub);font-weight:600;font-size:.92rem;
+    display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+  .card-h .sub{font-weight:400;font-size:.74rem;color:var(--text-dim)}
+  .card-b{padding:14px 16px}
+  .sec-label{font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text-dim);
+    margin-bottom:7px;font-weight:600}
+
+  /* cover */
+  .cover{border:1px solid var(--border);border-radius:12px;background:
+    linear-gradient(135deg,rgba(0,200,240,.10),rgba(155,114,245,.06) 60%,transparent);
+    padding:26px 30px;margin-bottom:20px}
+  .cover .kicker{font-size:.7rem;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:600}
+  .cover h1{font-size:1.6rem;font-weight:700;margin:8px 0 4px;letter-spacing:-.01em}
+  .cover .acct{font-size:.95rem;color:var(--text)}
+  .cover .acct .tkr{color:var(--accent)}
+  .cover .meta{font-size:.74rem;color:var(--text-dim);margin-top:10px;display:flex;gap:14px;flex-wrap:wrap}
+  .cover .meta b{color:var(--text);font-weight:500}
+  .thesis{margin-top:14px;padding-top:13px;border-top:1px solid var(--border-sub);font-size:.9rem;line-height:1.6}
+
+  /* stat chips */
+  .chips{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:14px}
+  .chip{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:8px 11px;text-align:left}
+  .chip .lbl{font-size:.58rem;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim)}
+  .chip-val{font-size:1.06rem;font-weight:600;margin-top:2px;letter-spacing:-.01em}
+
+  /* tables */
+  table{width:100%;border-collapse:collapse;font-size:.8rem}
+  th{text-align:left;font-size:.64rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);
+    font-weight:600;padding:7px 10px;border-bottom:1px solid var(--border)}
+  td{padding:7px 10px;border-bottom:1px solid var(--border-sub)}
+  tr:last-child td{border-bottom:none}
+  .tkr{font-weight:600}
+  .badge{display:inline-block;padding:1px 8px;border-radius:5px;font-size:.7rem;font-weight:600}
+  .b-buy{background:rgba(0,230,118,.12);color:var(--green)}
+  .b-sell{background:rgba(255,77,77,.12);color:var(--red)}
+
+  /* allocation bars */
+  .alloc-row{margin-bottom:12px}
+  .alloc-row:last-child{margin-bottom:0}
+  .alloc-name{font-size:.74rem;color:var(--text-dim);margin-bottom:5px;display:flex;justify-content:space-between}
+  .seg-pair{display:flex;flex-direction:column;gap:5px}
+  .seg-line{display:flex;align-items:center;gap:8px}
+  .seg-tag{font-size:.6rem;color:var(--text-muted);width:42px;flex:none;text-transform:uppercase;letter-spacing:.04em}
+  .bar{flex:1;height:18px;border-radius:4px;overflow:hidden;display:flex;background:var(--bg-base);
+    border:1px solid var(--border-sub)}
+  .bar span{height:100%;display:flex;align-items:center;justify-content:center;font-size:.6rem;
+    color:#06121f;font-weight:600;overflow:hidden;white-space:nowrap}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.68rem;color:var(--text-dim);margin-top:4px}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+
+  /* portfolio risk & cost before -> after */
+  .prisk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
+  .prisk{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+  .prisk .lbl{font-size:.58rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)}
+  .prisk .ba{font-size:1rem;font-weight:600;margin:3px 0 2px;letter-spacing:-.01em}
+  .prisk .ba .now{color:var(--text-dim);font-weight:500}
+  .prisk .delta{font-size:.66rem}
+
+  /* per-holding deep dive */
+  .holding{border:1px solid var(--border);border-radius:9px;padding:13px 15px;margin-bottom:13px;
+    background:var(--bg-card)}
+  .holding-h{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:9px}
+  .holding-tkr{font-size:1.04rem;font-weight:700;color:var(--accent)}
+  .holding-name{font-size:.78rem;color:var(--text-dim)}
+  .stat-grid{display:grid;gap:7px;margin:9px 0}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g5{grid-template-columns:repeat(5,1fr)}
+  .stat{background:var(--bg-surface);border:1px solid var(--border-sub);border-radius:6px;padding:6px 9px}
+  .stat .lbl{font-size:.56rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted)}
+  .stat .val{font-size:.86rem;font-weight:600;margin-top:1px}
+  .stat.fit{border-color:rgba(0,200,240,.35)}
+  .rationale{font-size:.82rem;line-height:1.55;margin:6px 0}
+  .sub-note{font-size:.74rem;color:var(--text-dim);line-height:1.5;margin-top:5px}
+  .sources a{color:var(--text-dim);text-decoration:underline}
+  .spark-wrap{display:flex;align-items:center;gap:10px;margin:8px 0}
+  .spark-meta{font-size:.7rem;color:var(--text-dim)}
+
+  /* alternatives comparison */
+  .alt-tbl{font-size:.76rem;margin-top:4px;border:1px solid var(--border-sub);border-radius:6px;overflow:hidden}
+  .alt-tbl th{padding:5px 9px;border-bottom:1px solid var(--border-sub)}
+  .alt-tbl td{padding:5px 9px}
+  .alt-tbl tr.sel{background:rgba(0,200,240,.08)}
+  .alt-tbl tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+  .alt-tbl .pick{color:var(--accent);font-weight:600}
+
+  ul.notes{margin:6px 0 0 18px;font-size:.8rem;line-height:1.55}
+  ul.notes li{margin-bottom:3px}
+
+  .foot{font-size:.68rem;color:var(--text-muted);line-height:1.55;border-top:1px solid var(--border-sub);
+    padding-top:12px;margin-top:6px}
+
+  /* pagination: content is grouped into .sheet blocks (one+ per page), holdings
+     chunked two per sheet — gives predictable pages for any report length.
+     Atomic blocks never split internally as a backstop against clipping. */
+  .chips,.prisk-grid,.stat-grid,.alt-tbl,.seg-pair,.spark-wrap,table,.holding{break-inside:avoid;page-break-inside:avoid}
+  .sec-label,.card-h,.holding-h,.alloc-name{break-after:avoid;page-break-after:avoid}
+  @page{size:Letter;margin:0}
+  @media print{ html,body{background:var(--bg-base)} .sheet{max-width:none} }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ─────────── COVER ─────────── -->
+  <div class="cover">
+    <div class="kicker">AI Rebalance · Deep-Dive Report</div>
+    <h1>Full-Rebalance Plan &amp; Research Brief</h1>
+    <div class="acct">TD Direct Investing — <span class="tkr">59WBM0N</span> <span class="dim">· RDSP</span></div>
+    <div class="meta">
+      <span>Generated <b>Jun 14, 2026</b></span>
+      <span>Provider <b>Claude</b> · claude-opus-4-8</span>
+      <span>Style <b>ETF-heavy</b></span>
+      <span>Web-grounded <b>17 sources</b></span>
+    </div>
+    <div class="thesis">
+      <b>Thesis.</b> This account is concentrated in US large-cap technology and carries an unusually thin
+      fixed-income and international sleeve for an RDSP that begins its de-risking glide in a few years.
+      The plan deploys the idle $9,400 of cash and trims a single overweight name (NVDA) to fund four
+      diversifying ETFs — adding an aggregate-bond anchor, broad EAFE exposure, and two dividend-growth
+      sleeves. Net effect: blended risk steps down from a High tilt toward Balanced, estimated portfolio
+      volatility falls from 17.2% to 13.5%, forward income rises <span class="green">+83%</span>, and no
+      single position exceeds its cap. All trades verified against live quotes.
+    </div>
+  </div>
+
+  <!-- ─────────── EXECUTIVE SUMMARY ─────────── -->
+  <div class="card">
+    <div class="card-h"><span>Executive Summary</span><span class="sub">at a glance</span></div>
+    <div class="card-b">
+      <div class="chips">
+        <div class="chip"><div class="lbl">Buys</div><div class="chip-val green">$12,020</div></div>
+        <div class="chip"><div class="lbl">Sells</div><div class="chip-val red">$3,100</div></div>
+        <div class="chip"><div class="lbl">Net deployed</div><div class="chip-val">$8,920</div></div>
+        <div class="chip"><div class="lbl">Leftover cash</div><div class="chip-val">$480</div></div>
+        <div class="chip"><div class="lbl">New names</div><div class="chip-val">4</div></div>
+      </div>
+      <p style="font-size:.88rem;line-height:1.65">
+        The portfolio sits at roughly 86% equity, 2% fixed income and 12% cash, with technology alone near
+        34% of holdings and a blended-risk profile tilted High. For an RDSP whose glide toward safer assets
+        is scheduled to begin around 2030, that is more single-sector and single-stock risk than the targets
+        call for. This plan keeps a growth core but broadens it: a third of the deployable cash goes to an
+        aggregate-bond ETF (the account's first real fixed-income anchor), a quarter to developed-markets
+        ex-North-America, and the rest to two dividend-growth funds — one Canadian, one US — that lift forward
+        income while smoothing volatility. The only sell is a partial trim of NVDA, which had drifted to about
+        14% of the account; the proceeds plus idle cash fund the buys with $480 left as a cash buffer. After
+        execution, fixed income rises to about 16%, technology concentration falls below 25%, and forward
+        dividend income climbs from roughly $612 to $1,118 per year.
+      </p>
+    </div>
+  </div>
+
+  <!-- ─────────── PORTFOLIO RISK & COST, BEFORE → AFTER ─────────── -->
+  <div class="card">
+    <div class="card-h"><span>Portfolio Risk &amp; Cost — Before → After</span><span class="sub">whole-account effect · lower is greener here</span></div>
+    <div class="card-b">
+      <div class="prisk-grid">
+        <div class="prisk"><div class="lbl">Book beta</div>
+          <div class="ba"><span class="now">1.18</span> → 0.94</div>
+          <div class="delta green">↓ 0.24 — less market-sensitive</div></div>
+        <div class="prisk"><div class="lbl">Est. volatility (1-yr)</div>
+          <div class="ba"><span class="now">17.2%</span> → 13.5%</div>
+          <div class="delta green">↓ 3.7 pts — steadier ride</div></div>
+        <div class="prisk"><div class="lbl">Blended fee (MER)</div>
+          <div class="ba"><span class="now">0.31%</span> → 0.19%</div>
+          <div class="delta green">↓ 0.12 pts — cheaper book</div></div>
+        <div class="prisk"><div class="lbl">Top-holding weight</div>
+          <div class="ba"><span class="now">14%</span> → 11%</div>
+          <div class="delta green">↓ 3 pts — less concentrated</div></div>
+      </div>
+      <p class="rationale" style="margin-top:10px"><b>Takeaway.</b> The plan lowers market sensitivity
+        (beta 1.18 → 0.94) and estimated volatility (17.2% → 13.5%) while trimming both fees and single-name
+        concentration — a clear, across-the-board de-risking, paid for with only a modest step down in growth tilt.</p>
+      <p class="sub-note">Portfolio figures are weighted from each holding's live data (single stocks carry no
+        MER, so the blended fee covers the fund sleeve). Diversification is why volatility falls further than
+        beta alone would suggest — the new sleeves don't all move together.</p>
+    </div>
+  </div>
+
+  </div>
+
+  <div class="sheet">
+  <!-- ─────────── BEFORE → AFTER ALLOCATION ─────────── -->
+  <div class="card">
+    <div class="card-h"><span>Before → After Allocation</span><span class="sub">how the plan moves you toward target · free look-through</span></div>
+    <div class="card-b">
+
+      <div class="alloc-row">
+        <div class="alloc-name"><span>Asset type</span><span class="dim">target: more fixed income, less idle cash</span></div>
+        <div class="seg-pair">
+          <div class="seg-line"><span class="seg-tag">Now</span>
+            <div class="bar">
+              <span style="width:86%;background:var(--accent)">Equity 86%</span>
+              <span style="width:2%;background:var(--purple)"></span>
+              <span style="width:12%;background:var(--text-dim)">Cash 12%</span>
+            </div></div>
+          <div class="seg-line"><span class="seg-tag">After</span>
+            <div class="bar">
+              <span style="width:80%;background:var(--accent)">Equity 80%</span>
+              <span style="width:16%;background:var(--purple)">FI 16%</span>
+              <span style="width:4%;background:var(--text-dim)">4%</span>
+            </div></div>
+        </div>
+        <div class="legend"><span><i style="background:var(--accent)"></i>Equity</span><span><i style="background:var(--purple)"></i>Fixed income</span><span><i style="background:var(--text-dim)"></i>Cash</span></div>
+      </div>
+
+      <div class="alloc-row" style="margin-top:14px">
+        <div class="alloc-name"><span>Blended risk</span><span class="dim">target: step down from High toward Balanced</span></div>
+        <div class="seg-pair">
+          <div class="seg-line"><span class="seg-tag">Now</span>
+            <div class="bar">
+              <span style="width:4%;background:var(--green)"></span>
+              <span style="width:28%;background:#5fd6a8">Low 28%</span>
+              <span style="width:30%;background:var(--yellow)">Med 30%</span>
+              <span style="width:38%;background:var(--orange)">High 38%</span>
+            </div></div>
+          <div class="seg-line"><span class="seg-tag">After</span>
+            <div class="bar">
+              <span style="width:18%;background:var(--green)">VL 18%</span>
+              <span style="width:33%;background:#5fd6a8">Low 33%</span>
+              <span style="width:30%;background:var(--yellow)">Med 30%</span>
+              <span style="width:19%;background:var(--orange)">High 19%</span>
+            </div></div>
+        </div>
+        <div class="legend"><span><i style="background:var(--green)"></i>Very low</span><span><i style="background:#5fd6a8"></i>Low</span><span><i style="background:var(--yellow)"></i>Medium</span><span><i style="background:var(--orange)"></i>High</span></div>
+      </div>
+
+      <div class="alloc-row" style="margin-top:14px">
+        <div class="alloc-name"><span>Sector (equity sleeve)</span><span class="dim">target: dilute technology concentration</span></div>
+        <div class="seg-pair">
+          <div class="seg-line"><span class="seg-tag">Now</span>
+            <div class="bar">
+              <span style="width:34%;background:var(--accent)">Tech 34%</span>
+              <span style="width:14%;background:#5fd6a8">Fin 14%</span>
+              <span style="width:13%;background:var(--yellow)">Hlth 13%</span>
+              <span style="width:39%;background:var(--text-dim)">Other 39%</span>
+            </div></div>
+          <div class="seg-line"><span class="seg-tag">After</span>
+            <div class="bar">
+              <span style="width:24%;background:var(--accent)">Tech 24%</span>
+              <span style="width:19%;background:#5fd6a8">Fin 19%</span>
+              <span style="width:12%;background:var(--yellow)">Hlth 12%</span>
+              <span style="width:45%;background:var(--text-dim)">Other 45%</span>
+            </div></div>
+        </div>
+        <div class="legend"><span><i style="background:var(--accent)"></i>Technology</span><span><i style="background:#5fd6a8"></i>Financials</span><span><i style="background:var(--yellow)"></i>Health care</span><span><i style="background:var(--text-dim)"></i>Other</span></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ─────────── RECOMMENDED TRADES ─────────── -->
+  <div class="card">
+    <div class="card-h"><span>Recommended Trades</span><span class="sub">verified against live quotes · CAD</span></div>
+    <table>
+      <thead><tr>
+        <th>Action</th><th>Ticker</th><th>Held</th><th class="r">$ CAD</th><th class="r">~Shares</th>
+        <th class="r">Price</th><th class="r">% of side</th><th>Sector</th><th>Risk</th><th>Cap</th>
+      </tr></thead>
+      <tbody>
+        <tr><td><span class="badge b-buy">Buy</span></td><td class="tkr">ZAG.TO</td><td class="dim">No</td>
+          <td class="r green">$4,000</td><td class="r dim">298</td><td class="r dim">$13.42</td>
+          <td class="r dim">33%</td><td>Fixed income</td><td>Very low</td><td>ETF · fund</td></tr>
+        <tr><td><span class="badge b-buy">Buy</span></td><td class="tkr">XEF.TO</td><td class="dim">No</td>
+          <td class="r green">$3,200</td><td class="r dim">89</td><td class="r dim">$35.80</td>
+          <td class="r dim">27%</td><td>Diversified</td><td>Medium</td><td>ETF · fund</td></tr>
+        <tr><td><span class="badge b-buy">Buy</span></td><td class="tkr">VDY.TO</td><td class="dim">No</td>
+          <td class="r green">$2,600</td><td class="r dim">50</td><td class="r dim">$52.10</td>
+          <td class="r dim">22%</td><td>Financials</td><td>Medium</td><td>ETF · fund</td></tr>
+        <tr><td><span class="badge b-buy">Buy</span></td><td class="tkr">SCHD</td><td class="dim">No</td>
+          <td class="r green">$2,220</td><td class="r dim">59</td><td class="r dim">$37.52</td>
+          <td class="r dim">18%</td><td>Diversified</td><td>Low</td><td>ETF · fund</td></tr>
+        <tr><td><span class="badge b-sell">Sell</span></td><td class="tkr">NVDA</td><td class="green">Yes</td>
+          <td class="r red">$3,100</td><td class="r dim">21</td><td class="r dim">$147.60</td>
+          <td class="r dim">100%</td><td>Technology</td><td>High</td><td>Stock</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ─────────── DIVIDEND IMPACT ─────────── -->
+  <div class="card">
+    <div class="card-h"><span>Dividend Impact</span><span class="sub">forward 12-month income · net of est. withholding</span></div>
+    <div class="card-b">
+      <div style="display:flex;gap:28px;align-items:center;flex-wrap:wrap">
+        <div style="flex:1;min-width:230px">
+          <div class="seg-line" style="margin-bottom:9px"><span class="seg-tag">Now</span>
+            <div class="bar" style="height:22px"><span style="width:55%;background:var(--accent-dim)">$612 / yr</span></div></div>
+          <div class="seg-line"><span class="seg-tag">After</span>
+            <div class="bar" style="height:22px"><span style="width:100%;background:var(--green)">$1,118 / yr</span></div></div>
+          <div class="legend" style="margin-top:8px"><span>Bar width scaled to the higher figure</span></div>
+        </div>
+        <div style="display:flex;gap:9px">
+          <div class="chip"><div class="lbl">Income Δ</div><div class="chip-val green">+$506 / yr</div></div>
+          <div class="chip"><div class="lbl">Yield on book</div><div class="chip-val">1.4% → 2.3%</div></div>
+          <div class="chip"><div class="lbl">US withhold.</div><div class="chip-val dim">~$11 / yr</div></div>
+        </div>
+      </div>
+      <p class="sub-note" style="margin-top:11px">RDSP is tax-sheltered, so Canadian dividend income is fully retained;
+        the US 15% treaty withholding on SCHD (~$11/yr) is not recoverable in a registered account and is reflected above.</p>
+    </div>
+  </div>
+
+  <!-- ─────────── PER-HOLDING DEEP DIVE ─────────── -->
+  </div>
+
+  <div class="sheet">
+  <div class="sec-label" style="margin-top:6px">Per-Holding Deep Dive</div>
+
+  <!-- ZAG -->
+  <div class="holding">
+    <div class="holding-h">
+      <div><span class="holding-tkr">ZAG.TO</span> <span class="holding-name">BMO Aggregate Bond Index ETF</span></div>
+      <span class="badge b-buy">Buy $4,000 · 33% of buys</span>
+    </div>
+    <div class="spark-wrap">
+      <svg width="150" height="34" viewBox="0 0 150 34"><polyline fill="none" stroke="#5fd6a8" stroke-width="1.6"
+        points="0,14 15,12 30,16 45,13 60,18 75,15 90,20 105,17 120,21 135,19 150,22"/></svg>
+      <span class="spark-meta">12-mo price · low duration drift — the point is the coupon, not capital gain</span>
+    </div>
+    <div class="stat-grid g4">
+      <div class="stat"><div class="lbl">Price</div><div class="val">$13.42</div></div>
+      <div class="stat"><div class="lbl">Yield</div><div class="val green">3.8%</div></div>
+      <div class="stat"><div class="lbl">MER</div><div class="val">0.09%</div></div>
+      <div class="stat"><div class="lbl">Avg duration</div><div class="val">7.2 yr</div></div>
+    </div>
+    <div class="stat-grid g5">
+      <div class="stat"><div class="lbl">Beta</div><div class="val">0.05</div></div>
+      <div class="stat"><div class="lbl">Volatility (1-yr)</div><div class="val">5.2%</div></div>
+      <div class="stat"><div class="lbl">Max drawdown</div><div class="val">−6.1%</div></div>
+      <div class="stat"><div class="lbl">52-wk range</div><div class="val">$12.90–14.10</div></div>
+      <div class="stat fit"><div class="lbl">Corr. to book</div><div class="val accent">0.05 · strong diversifier</div></div>
+    </div>
+    <p class="rationale">The account's single biggest gap is fixed income — currently about 2% against a target
+      sleeve that should grow as the RDSP glide approaches. ZAG is the cheapest, broadest Canadian aggregate-bond
+      fund (federal, provincial and investment-grade corporates), making it the natural anchor for a Very-Low-risk
+      bucket. Its near-zero correlation to the existing equity book is exactly what cuts portfolio volatility.</p>
+    <div class="sec-label" style="margin:10px 0 3px">Alternatives compared</div>
+    <table class="alt-tbl">
+      <thead><tr><th>ETF</th><th class="r">Yield</th><th class="r">MER</th><th class="r">AUM</th><th class="r">1-yr return</th><th class="r">Volatility</th></tr></thead>
+      <tbody>
+        <tr class="sel"><td class="pick">ZAG.TO — selected</td><td class="r">3.8%</td><td class="r">0.09%</td><td class="r">$7.8B</td><td class="r">+4.1%</td><td class="r">5.2%</td></tr>
+        <tr><td>VAB.TO</td><td class="r">3.7%</td><td class="r">0.09%</td><td class="r">$4.9B</td><td class="r">+4.0%</td><td class="r">5.3%</td></tr>
+        <tr><td>XBB.TO</td><td class="r">3.6%</td><td class="r">0.10%</td><td class="r">$4.1B</td><td class="r">+3.9%</td><td class="r">5.4%</td></tr>
+      </tbody>
+    </table>
+    <div class="sub-note">Chose ZAG on marginally tighter tracking and liquidity; all three are effectively interchangeable.</div>
+    <div class="sub-note sources"><b>Sources:</b>
+      <a href="#">BMO ETF fund page</a> · <a href="#">Yahoo Finance ZAG.TO</a> · <a href="#">Morningstar fixed-income category</a></div>
+  </div>
+
+  <!-- XEF -->
+  <div class="holding">
+    <div class="holding-h">
+      <div><span class="holding-tkr">XEF.TO</span> <span class="holding-name">iShares Core MSCI EAFE IMI Index ETF</span></div>
+      <span class="badge b-buy">Buy $3,200 · 27% of buys</span>
+    </div>
+    <div class="spark-wrap">
+      <svg width="150" height="34" viewBox="0 0 150 34"><polyline fill="none" stroke="var(--accent)" stroke-width="1.6"
+        points="0,26 15,24 30,25 45,20 60,22 75,17 90,18 105,13 120,15 135,10 150,8"/></svg>
+      <span class="spark-meta">12-mo price · +14% — developed ex-NA has led on a weaker USD</span>
+    </div>
+    <div class="stat-grid g4">
+      <div class="stat"><div class="lbl">Price</div><div class="val">$35.80</div></div>
+      <div class="stat"><div class="lbl">Yield</div><div class="val green">2.9%</div></div>
+      <div class="stat"><div class="lbl">MER</div><div class="val">0.22%</div></div>
+      <div class="stat"><div class="lbl">Holdings</div><div class="val">2,500+</div></div>
+    </div>
+    <div class="stat-grid g5">
+      <div class="stat"><div class="lbl">Beta</div><div class="val">0.86</div></div>
+      <div class="stat"><div class="lbl">Volatility (1-yr)</div><div class="val">13.8%</div></div>
+      <div class="stat"><div class="lbl">Max drawdown</div><div class="val">−11.4%</div></div>
+      <div class="stat"><div class="lbl">52-wk range</div><div class="val">$30.10–36.40</div></div>
+      <div class="stat fit"><div class="lbl">Corr. to book</div><div class="val accent">0.78 · moderate</div></div>
+    </div>
+    <p class="rationale">The equity sleeve is about 88% North America. XEF adds Europe, Japan and developed Asia in
+      one low-cost, all-cap fund, directly addressing the geographic-concentration gap and pulling the technology
+      weighting down as a side effect (EAFE is financials- and industrials-heavy, not tech). It still correlates
+      with the book — it's equity — but the regional mix is what diversifies.</p>
+    <div class="sec-label" style="margin:10px 0 3px">Alternatives compared</div>
+    <table class="alt-tbl">
+      <thead><tr><th>ETF</th><th class="r">Yield</th><th class="r">MER</th><th class="r">AUM</th><th class="r">1-yr return</th><th class="r">Volatility</th></tr></thead>
+      <tbody>
+        <tr class="sel"><td class="pick">XEF.TO — selected</td><td class="r">2.9%</td><td class="r">0.22%</td><td class="r">$9.2B</td><td class="r">+14.2%</td><td class="r">13.8%</td></tr>
+        <tr><td>VIU.TO</td><td class="r">2.9%</td><td class="r">0.23%</td><td class="r">$3.1B</td><td class="r">+13.9%</td><td class="r">13.9%</td></tr>
+        <tr><td>XEC.TO <span class="dim">(emerging mkts)</span></td><td class="r">2.6%</td><td class="r">0.27%</td><td class="r">$1.6B</td><td class="r">+9.8%</td><td class="r">17.9%</td></tr>
+      </tbody>
+    </table>
+    <div class="sub-note">VIU is a near-twin; XEC (emerging markets) was set aside as higher-risk for now.</div>
+    <div class="sub-note sources"><b>Sources:</b>
+      <a href="#">iShares Canada fund page</a> · <a href="#">MSCI EAFE IMI factsheet</a> · <a href="#">Yahoo Finance XEF.TO</a></div>
+  </div>
+
+  </div>
+
+  <div class="sheet">
+  <!-- VDY -->
+  <div class="holding">
+    <div class="holding-h">
+      <div><span class="holding-tkr">VDY.TO</span> <span class="holding-name">Vanguard FTSE Canadian High Dividend Yield Index ETF</span></div>
+      <span class="badge b-buy">Buy $2,600 · 22% of buys</span>
+    </div>
+    <div class="spark-wrap">
+      <svg width="150" height="34" viewBox="0 0 150 34"><polyline fill="none" stroke="#5fd6a8" stroke-width="1.6"
+        points="0,22 15,20 30,21 45,18 60,19 75,16 90,17 105,14 120,16 135,12 150,11"/></svg>
+      <span class="spark-meta">12-mo price · steady; the thesis is the 4.9% eligible-dividend stream</span>
+    </div>
+    <div class="stat-grid g4">
+      <div class="stat"><div class="lbl">Price</div><div class="val">$52.10</div></div>
+      <div class="stat"><div class="lbl">Yield</div><div class="val green">4.9%</div></div>
+      <div class="stat"><div class="lbl">MER</div><div class="val">0.22%</div></div>
+      <div class="stat"><div class="lbl">P/E</div><div class="val">12.1</div></div>
+    </div>
+    <div class="stat-grid g5">
+      <div class="stat"><div class="lbl">Beta</div><div class="val">0.78</div></div>
+      <div class="stat"><div class="lbl">Volatility (1-yr)</div><div class="val">12.1%</div></div>
+      <div class="stat"><div class="lbl">Max drawdown</div><div class="val">−9.8%</div></div>
+      <div class="stat"><div class="lbl">52-wk range</div><div class="val">$46.20–53.00</div></div>
+      <div class="stat fit"><div class="lbl">Corr. to book</div><div class="val accent">0.62 · moderate</div></div>
+    </div>
+    <p class="rationale">The largest single contributor to the forward-income target. VDY is concentrated in Canadian
+      banks, pipelines and telecoms — sectors under-represented in the current US-tech-heavy book — so it
+      diversifies and pays at the same time. Held in the RDSP, the eligible Canadian dividends are fully sheltered
+      with no withholding drag.</p>
+    <div class="sec-label" style="margin:10px 0 3px">Alternatives compared</div>
+    <table class="alt-tbl">
+      <thead><tr><th>ETF</th><th class="r">Yield</th><th class="r">MER</th><th class="r">AUM</th><th class="r">1-yr return</th><th class="r">Volatility</th></tr></thead>
+      <tbody>
+        <tr class="sel"><td class="pick">VDY.TO — selected</td><td class="r">4.9%</td><td class="r">0.22%</td><td class="r">$2.6B</td><td class="r">+11.0%</td><td class="r">12.1%</td></tr>
+        <tr><td>XEI.TO</td><td class="r">4.6%</td><td class="r">0.22%</td><td class="r">$1.9B</td><td class="r">+10.2%</td><td class="r">12.4%</td></tr>
+        <tr><td>CDZ.TO <span class="dim">(div-growth screen)</span></td><td class="r">3.4%</td><td class="r">0.66%</td><td class="r">$0.9B</td><td class="r">+9.1%</td><td class="r">12.8%</td></tr>
+      </tbody>
+    </table>
+    <div class="sub-note">VDY edges XEI on yield; CDZ's 0.66% MER made it too costly for the same job.</div>
+    <div class="sub-note sources"><b>Sources:</b>
+      <a href="#">Vanguard Canada fund page</a> · <a href="#">Yahoo Finance VDY.TO</a> · <a href="#">FTSE Canada High Div index</a></div>
+  </div>
+
+  <!-- SCHD -->
+  <div class="holding">
+    <div class="holding-h">
+      <div><span class="holding-tkr">SCHD</span> <span class="holding-name">Schwab US Dividend Equity ETF <span class="dim">· USD</span></span></div>
+      <span class="badge b-buy">Buy $2,220 · 18% of buys</span>
+    </div>
+    <div class="spark-wrap">
+      <svg width="150" height="34" viewBox="0 0 150 34"><polyline fill="none" stroke="var(--accent)" stroke-width="1.6"
+        points="0,24 15,22 30,23 45,19 60,21 75,18 90,16 105,17 120,13 135,14 150,10"/></svg>
+      <span class="spark-meta">12-mo price (USD) · quality-dividend screen; +11%</span>
+    </div>
+    <div class="stat-grid g4">
+      <div class="stat"><div class="lbl">Price</div><div class="val">US$27.40</div></div>
+      <div class="stat"><div class="lbl">Yield</div><div class="val green">3.6%</div></div>
+      <div class="stat"><div class="lbl">MER</div><div class="val">0.06%</div></div>
+      <div class="stat"><div class="lbl">CAD price</div><div class="val">$37.52</div></div>
+    </div>
+    <div class="stat-grid g5">
+      <div class="stat"><div class="lbl">Beta</div><div class="val">0.79</div></div>
+      <div class="stat"><div class="lbl">Volatility (1-yr)</div><div class="val">12.6%</div></div>
+      <div class="stat"><div class="lbl">Max drawdown</div><div class="val">−10.2%</div></div>
+      <div class="stat"><div class="lbl">52-wk range</div><div class="val">$24.10–28.10</div></div>
+      <div class="stat fit"><div class="lbl">Corr. to book</div><div class="val accent">0.81 · higher overlap</div></div>
+    </div>
+    <p class="rationale">Rounds out the dividend sleeve with US quality — SCHD screens for 10-year dividend
+      consistency, return on equity and cash-flow coverage, so it leans defensive (consumer staples, health care,
+      industrials) rather than mega-cap tech. At 0.06% it is the cheapest fund in the plan. Its correlation to the
+      book is the highest of the four — it is US equity — so it is sized smallest. The 15% US treaty withholding
+      (~$11/yr in this RDSP) is the one efficiency cost, disclosed in the dividend section.</p>
+    <div class="sec-label" style="margin:10px 0 3px">Alternatives compared</div>
+    <table class="alt-tbl">
+      <thead><tr><th>ETF</th><th class="r">Yield</th><th class="r">MER</th><th class="r">AUM</th><th class="r">1-yr return</th><th class="r">Volatility</th></tr></thead>
+      <tbody>
+        <tr class="sel"><td class="pick">SCHD — selected</td><td class="r">3.6%</td><td class="r">0.06%</td><td class="r">US$68B</td><td class="r">+11.3%</td><td class="r">12.6%</td></tr>
+        <tr><td>DGRO <span class="dim">(div-growth tilt)</span></td><td class="r">2.3%</td><td class="r">0.08%</td><td class="r">US$31B</td><td class="r">+12.4%</td><td class="r">12.9%</td></tr>
+        <tr><td>VYM</td><td class="r">2.8%</td><td class="r">0.06%</td><td class="r">US$58B</td><td class="r">+10.1%</td><td class="r">12.0%</td></tr>
+      </tbody>
+    </table>
+    <div class="sub-note">SCHD chosen on the stronger quality screen and highest yield of the three at the same fee.</div>
+    <div class="sub-note sources"><b>Sources:</b>
+      <a href="#">Schwab Asset Management fund page</a> · <a href="#">Yahoo Finance SCHD</a> · <a href="#">US-CA tax treaty (registered)</a></div>
+  </div>
+
+  </div>
+
+  <div class="sheet">
+  <!-- ─────────── RISK, CAPS & CAVEATS ─────────── -->
+  <div class="card">
+    <div class="card-h"><span>Risk, Position Caps &amp; Caveats</span></div>
+    <div class="card-b">
+      <div class="sec-label">Position caps applied</div>
+      <ul class="notes">
+        <li>ETFs left uncapped; single stocks capped at 20% of the account, very-high-risk single names at 10%.</li>
+        <li>NVDA had drifted to about 14% of the account — above a prudent single-name weight for a registered
+          glide account — so it is trimmed back rather than sold in full.</li>
+        <li>No single post-trade position exceeds its cap; the largest holding after execution is about 11%.</li>
+      </ul>
+      <div class="sec-label" style="margin-top:12px">Risks that remain</div>
+      <ul class="notes">
+        <li>The book is still about 80% equity — a broad market drawdown would still hit it hard. This plan cuts
+          concentration, not equity exposure.</li>
+        <li>The new bond sleeve (ZAG) adds interest-rate sensitivity: its ~7-year duration means a sharp rate rise
+          would pressure its price even as the coupon keeps paying.</li>
+        <li>SCHD adds USD currency risk and non-recoverable US withholding inside this registered account.</li>
+        <li>NVDA is still the largest single position after the trim (~11%); a further de-risking step may be
+          warranted as the glide nears.</li>
+      </ul>
+      <div class="sec-label" style="margin-top:12px">Caveats</div>
+      <ul class="notes">
+        <li>Share counts are indicative, computed from live quotes at generation time; actual fills will vary.</li>
+        <li>Prices, yields and volatility are point-in-time and exclude commissions and FX spread on the USD purchase.</li>
+        <li>This is an information aid, not financial advice. Review each position against your own plan before trading.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ─────────── FOOTER ─────────── -->
+  <div class="foot">
+    Generated by the Portfolio Tracker AI Rebalancer · Claude claude-opus-4-8, web-grounded · Jun 14, 2026.
+    Figures are estimates derived from live yfinance quotes and public fund data; dividend, fee and withholding
+    figures assume current rates. Not investment advice. Past performance does not guarantee future results.
+    &nbsp;·&nbsp; Portfolio Tracker · Midnight Terminal
+  </div>
+
+</div>
+</body>
+</html>
