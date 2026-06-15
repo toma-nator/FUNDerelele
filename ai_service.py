@@ -84,14 +84,17 @@ _WL = {
 PLAN_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
     'properties': {
+        'thesis': {'type': 'string'},               # one-liner headline for the report cover
         'summary': {'type': 'string'},
         'trades': {'type': 'array', 'items': _TRADE},
         'new_watchlist': {'type': 'array', 'items': _WL},
         'cap_notes': {'type': 'array', 'items': {'type': 'string'}},
         'leftover_cash': {'type': 'number'},
         'caveats': {'type': 'array', 'items': {'type': 'string'}},
+        'risks_remaining': {'type': 'array', 'items': {'type': 'string'}},  # what the plan does NOT fix
     },
-    'required': ['summary', 'trades', 'new_watchlist', 'cap_notes', 'leftover_cash', 'caveats'],
+    'required': ['thesis', 'summary', 'trades', 'new_watchlist', 'cap_notes',
+                 'leftover_cash', 'caveats', 'risks_remaining'],
 }
 
 
@@ -175,6 +178,12 @@ shape; how you prioritised the dollar gaps; how you balanced the Blended-Risk an
 you sold and why; the single most important trade-off you made; and how the plan shifts the account's \
 risk posture. Keep it at the PLAN level — leave per-security detail to each trade's `rationale`, don't \
 repeat it.
+- Write a `thesis`: one or two sentences naming the single biggest problem with the account as it stands \
+and what this plan does about it — the headline a reader sees first, above the summary.
+- Populate `risks_remaining` with 2–4 honest, plain-language risks this plan does NOT remove (e.g. still \
+heavily weighted to equities; interest-rate sensitivity of any new bonds; USD/FX exposure; a single name \
+that's still the largest position after trimming). These are distinct from caveats (which are data/method \
+disclaimers).
 - End caveats with a one-line "Not financial advice." note."""
 
 
@@ -489,7 +498,7 @@ def compute_fingerprint(payload):
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
-def save_cached_plan(account, plan, payload, style):
+def save_cached_plan(account, plan, payload, style, report_data=None):
     from models import db, Setting
     rec = {
         'plan': plan,
@@ -498,6 +507,7 @@ def save_cached_plan(account, plan, payload, style):
         'model': plan.get('_model'),
         'style': style,
         'fingerprint': compute_fingerprint(payload),
+        'report_data': report_data,   # free yfinance enrichment, computed once at generation
     }
     key = _plan_key(account)
     s = Setting.query.get(key)
@@ -544,5 +554,14 @@ def run_and_cache(account, provider, style=None, model=None):
     payload = build_payload(account, style)
     plan = generate_rebalance_plan(payload, provider, model)
     validate_plan(plan, account)
-    save_cached_plan(account, plan, payload, style)
+    # Free yfinance enrichment for the deep-dive report + the card — computed once
+    # here so page views just read the cache. Best-effort: a data hiccup must never
+    # discard the paid plan.
+    report_data = None
+    try:
+        import report_service
+        report_data = report_service.build_report_data(account, plan)
+    except Exception:
+        report_data = None
+    save_cached_plan(account, plan, payload, style, report_data)
     return plan
