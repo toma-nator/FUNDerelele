@@ -912,7 +912,7 @@ def watchlist():
         'default_provider': _gs('ai_provider_default', 'claude'),
         'default_style': _gs('ai_impl_style_default', 'mixed'),
         'accounts': gap_accts, 'account': ai_account,
-        'record': None, 'stale': False, 'generated_ago': None, 'stats': None,
+        'record': None, 'stale': False, 'generated_ago': None, 'stats': None, 'report': None,
     }
     if ai_account:
         rec = ai_service.load_cached_plan(ai_account)
@@ -929,6 +929,7 @@ def watchlist():
             ai['stats'] = {'buys': round(_buys, 2), 'sells': round(_sells, 2),
                            'net': round(_buys - _sells, 2),
                            'n_new': len(rec.get('plan', {}).get('_verified', []))}
+            ai['report'] = rec.get('report_data')   # cached enrichment (None for pre-phase-2 plans)
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
     return render_template('watchlist.html', data=data, gaps=gaps, gap_summary=gap_summary,
                            ai=ai, last_updated=last_updated, active='watchlist')

@@ -148,11 +148,14 @@
       <span class="mono {{ cls }}" style="font-size:.9rem">{{ val }}</span>
     </span>
   {%- endmacro %}
+  {% macro ba(b, a, dp, unit='') %}{% if b is not none and a is not none %}{{ ('%.'~dp~'f')|format(b) }}{{ unit }} → {{ ('%.'~dp~'f')|format(a) }}{{ unit }}{% else %}—{% endif %}{%- endmacro %}
 
   {# meta + controls #}
   <div style="padding:8px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;border-bottom:1px solid var(--border-sub)">
     <span class="ai-meta">Generated {{ ai.generated_ago }} · {{ ai.record.provider }} · <span class="mono">{{ ai.record.model }}</span> · {{ ai.record.style }}{% if ai.stale %} · <span class="text-amber" title="targets / cash / holdings changed since this plan">inputs changed</span>{% endif %}</span>
     <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+      <a href="{{ url_for('watchlist_ai_report', account=ai.account) }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">View report ↗</a>
+      <a href="{{ url_for('watchlist_ai_report_pdf', account=ai.account) }}" class="btn btn-sm" title="Download a PDF of the deep-dive report">Export PDF</a>
       <form method="POST" action="{{ url_for('watchlist_ai_generate') }}" class="ai-gen-form" style="display:flex;gap:.4rem;align-items:center"
             data-confirm="Regenerate the AI plan for {{ ai.account }}?&#10;&#10;This runs another live AI call (roughly $2–5) and may take 1–3 minutes.">
         <input type="hidden" name="account" value="{{ ai.account }}">
@@ -175,7 +178,20 @@
       {{ chip('Leftover', plan.leftover_cash | cad) }}
       {{ chip('New names', ai.stats.n_new) }}
     </div>
+    {% if ai.report and ai.report.thesis %}
+    <div style="font-size:.92rem;line-height:1.55;margin-bottom:10px"><strong style="color:var(--accent)">Thesis.</strong> {{ ai.report.thesis }}</div>
+    {% endif %}
     <div style="font-size:.9rem;line-height:1.6">{{ plan.summary }}</div>
+    {% if ai.report and ai.report.risk and ai.report.risk.before.beta is not none %}
+    {% set rb = ai.report.risk.before %}{% set ra = ai.report.risk.after %}
+    <div class="card-sub" style="margin:12px 0 6px">Portfolio risk &amp; cost · before → after</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      {{ chip('Book beta', ba(rb.beta, ra.beta, 2)) }}
+      {{ chip('Volatility', ba(rb.volatility, ra.volatility, 1, '%')) }}
+      {{ chip('Blended MER', ba(rb.mer, ra.mer, 2, '%')) }}
+      {{ chip('Top holding', ba(rb.top_weight, ra.top_weight, 1, '%')) }}
+    </div>
+    {% endif %}
   </div>
 
   {# trades — clean table #}
