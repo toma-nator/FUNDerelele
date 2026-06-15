@@ -22,7 +22,7 @@ Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈117 ideas)
+## Backlog at a glance (≈119 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
@@ -33,7 +33,7 @@ Low-impact + high-effort = skip / much later.
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
 | UI/UX polish | 6 | Restore-alerts, sidebar hide/reorder tabs, sparkline, chart descriptions/hide/star, daily-swing widget, trend indicator |
 | Infrastructure / hardening | 7 | Test suite, yfinance resilience, income tax, README screenshots, budget-app integration (+ read-only API endpoint), robust sample data |
-| Account / data model | 2 | Savings account (recurring-interest), curate available account types |
+| Account / data model | 3 | Savings account (recurring-interest), curate available account types, view/sort by bank (institution) |
 | Canadian rules | 1 | RRSP room |
 | Internationalization | 1 | German → Spanish → French |
 | Branding | 1 | Remaining: favicon, title prefix, accent flow-through, per-holding logos (core logo shipped) |
@@ -53,6 +53,19 @@ Available types: Non-Reg, TFSA, RRSP, FHSA, RDSP, RESP, LIRA, RRIF (keeping all;
 | Non-Reg / RRSP / RESP / LIRA / RRIF | none yet — only the generic tax-sheltered flag | — |
 
 Keep in sync as rules are added (e.g. RRSP room, RESP/CESG grants, RRIF minimum withdrawals, LIF payout).
+
+## View / sort / filter by bank (institution) — everywhere
+
+Parked 2026-06-15. Make the **brokerage / institution** (TD, CIBC, …) a first-class
+grouping/sort/filter dimension across the whole app — Holdings (filter + sort by
+bank), Accounts (group accounts under their bank, with per-bank subtotals),
+Dashboard/Charts (a "By Bank" allocation), and anywhere accounts are listed. The
+institution is currently only embedded in the account name ("TD Direct Investing -
+59WBM0N"); either parse a bank prefix from the name or add an explicit, editable
+`institution` field on `Account` (defaulted from the importer, set on the Accounts
+page). Lets you total/inspect holdings per brokerage at a glance.
+
+**Priority:** Impact: Med · Effort: medium
 
 ## Watchlist alerts — multiple tiers per ticker
 
