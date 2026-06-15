@@ -713,8 +713,8 @@ def get_account_breakdown(account_name):
         at = m.get('asset_type') or 'Equity'
         asset_type[at] = asset_type.get(at, 0) + mv
         currency[h['currency']] = currency.get(h['currency'], 0) + mv
-        reg = _region_of(h['ticker'], m)
-        region[reg] = region.get(reg, 0) + mv
+        for rgn, w in _region_weights(h['ticker'], m).items():
+            region[rgn] = region.get(rgn, 0) + mv * w
 
         # Sector — ETF look-through when available, else the equity's own sector
         if m.get('fund_sectors'):
@@ -1542,12 +1542,10 @@ def _region_from_country(country):
     return 'International'   # any other named domicile = developed International
 
 
-def _region_of(ticker, m):
-    """Region bucket for one holding. CDRs (.NE suffix) are predominantly US large-caps."""
+def _heuristic_region(ticker, m):
+    """Auto region for a holding (ignoring overrides): fund-name keyword → company
+    domicile → Unclassified. CDRs (.NE suffix) are predominantly US large-caps."""
     tk = (ticker or '').upper()
-    ov = region_overrides().get(tk)
-    if ov:
-        return ov
     at = m.get('asset_type') or 'Equity'
     if at in ('ETF', 'Mutual Fund'):
         r = _region_from_name(m.get('long_name'))
@@ -1560,6 +1558,32 @@ def _region_of(ticker, m):
         if r:
             return r
     return 'Unclassified'
+
+
+def _normalize_region_weights(d):
+    """{region: number} → normalized {region: fraction} over the valid regions."""
+    clean = {k: float(v) for k, v in (d or {}).items() if k in _ALL_REGIONS and float(v) > 0}
+    tot = sum(clean.values())
+    return {k: v / tot for k, v in clean.items()} if tot > 0 else {}
+
+
+def _region_weights(ticker, m):
+    """{region: fraction} for a holding — a weighted manual override (multi-region
+    funds), a single-region override, or a single heuristic region."""
+    ov = region_overrides().get((ticker or '').upper())
+    if isinstance(ov, dict):
+        w = _normalize_region_weights(ov)
+        if w:
+            return w
+    elif isinstance(ov, str) and ov in _ALL_REGIONS:
+        return {ov: 1.0}
+    return {_heuristic_region(ticker, m): 1.0}
+
+
+def _region_of(ticker, m):
+    """Single dominant region label (Holdings column + per-holding tag)."""
+    w = _region_weights(ticker, m)
+    return max(w, key=w.get) if w else 'Unclassified'
 
 
 def _known_buckets(dimension):
@@ -1593,7 +1617,7 @@ def _bucket_weights(h, m, dimension):
     if dimension == 'blend':
         return {_blend_bucket(h.get('ticker'), m): 1.0}
     if dimension == 'country':
-        return {_region_of(h.get('ticker'), m): 1.0}
+        return _region_weights(h.get('ticker'), m)
     return {'Unclassified': 1.0}
 
 

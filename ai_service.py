@@ -243,7 +243,7 @@ def _allocation_targets(account):
 def build_payload(account, style='mixed'):
     """Minimized input for the model — no account number is included."""
     from calculations import (get_rebalancer_gaps_all, get_cash_by_account, get_holdings,
-                              _blend_bucket, _cap_bucket, _region_of, get_rebal_targets,
+                              _blend_bucket, _cap_bucket, _region_weights, get_rebal_targets,
                               REBAL_DIMENSIONS, REBAL_DIM_LABELS)
     from price_service import get_holdings_metadata, get_fx_rate
     from models import Account
@@ -271,12 +271,15 @@ def build_payload(account, style='mixed'):
             rate = m['dividend_yield'] / 100.0 * h['live_price']
         fwd = (rate * h['qty'] * (fx if h['currency'] == 'USD' else 1.0)) if rate else 0.0
         yld = (fwd / h['market_value_cad'] * 100) if h['market_value_cad'] else None
+        rw = _region_weights(h['ticker'], m)
+        reg = max(rw, key=rw.get) if rw else 'Unclassified'
         current.append({
             'ticker': h['ticker'],
             'sector': m.get('sector') or '',
             'market_cap_bucket': _cap_bucket(m.get('market_cap')) or '',
             'risk_bucket': _blend_bucket(h['ticker'], m),
-            'region': _region_of(h['ticker'], m),
+            'region': reg,
+            'region_split': ({k: round(v * 100) for k, v in rw.items()} if len(rw) > 1 else None),
             'value_cad': round(h['market_value_cad'], 2),
             'weight_pct': round(h['market_value_cad'] / invested * 100, 1),
             'yield_pct': round(yld, 2) if yld is not None else None,

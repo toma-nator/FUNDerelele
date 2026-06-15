@@ -419,8 +419,11 @@ def holdings():
     # Region/country classification + whether it's a manual override (editable inline).
     from calculations import _region_of, region_overrides, _ALL_REGIONS
     rov = region_overrides()
-    region = {t: {'value': _region_of(t, meta.get(t, {})), 'overridden': t.upper() in rov}
-              for t in tickers}
+    region = {}
+    for t in tickers:
+        o = rov.get(t.upper())
+        region[t] = {'value': _region_of(t, meta.get(t, {})), 'overridden': t.upper() in rov,
+                     'weighted': isinstance(o, dict), 'split': o if isinstance(o, dict) else None}
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
     return render_template('holdings.html', holdings=data, accounts=accounts,
                            currencies=currencies, names=names, risk=risk,
@@ -1102,7 +1105,25 @@ def set_region_override():
             data = json.loads(s.value)
         except Exception:
             data = {}
-    if region in _ALL_REGIONS:
+    if ':' in region:
+        # Weighted split, e.g. "USA:55, International:33, Emerging:12" (for multi-region funds).
+        wd = {}
+        for part in region.split(','):
+            k, _, v = part.partition(':')
+            k = k.strip()
+            try:
+                v = float(v.strip())
+            except Exception:
+                continue
+            if k in _ALL_REGIONS and v > 0:
+                wd[k] = v
+        if len(wd) >= 2:
+            data[ticker] = wd
+        elif len(wd) == 1:
+            data[ticker] = next(iter(wd))   # one region → store as plain single
+        else:
+            data.pop(ticker, None)
+    elif region in _ALL_REGIONS:
         data[ticker] = region
     else:
         data.pop(ticker, None)   # Auto / unknown → drop the override

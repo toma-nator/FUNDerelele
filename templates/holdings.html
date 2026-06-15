@@ -122,9 +122,13 @@
             {% if h.closed or h.ticker == 'CASH' %}
               <span class="text-dim">{{ rg.value if rg else '—' }}</span>
             {% else %}
-              <select class="region-sel filter-select" data-ticker="{{ h.ticker }}" style="width:auto;padding:2px 6px;font-size:.78rem" title="Geographic region — Auto classifies; pick one to override">
+              <select class="region-sel filter-select" data-ticker="{{ h.ticker }}"
+                      data-split="{% if rg and rg.split %}{% for k, v in rg.split.items() %}{{ k }}:{{ v }}{% if not loop.last %},{% endif %}{% endfor %}{% endif %}"
+                      style="width:auto;padding:2px 6px;font-size:.78rem"
+                      title="Geographic region — Auto classifies; pick one to override, or a custom split for multi-region funds">
                 <option value="">Auto{% if rg and not rg.overridden %} ({{ rg.value }}){% endif %}</option>
-                {% for reg in regions %}<option value="{{ reg }}" {% if rg and rg.overridden and rg.value == reg %}selected{% endif %}>{{ reg }}</option>{% endfor %}
+                {% for reg in regions %}<option value="{{ reg }}" {% if rg and rg.overridden and not rg.weighted and rg.value == reg %}selected{% endif %}>{{ reg }}</option>{% endfor %}
+                <option value="__custom__" {% if rg and rg.weighted %}selected{% endif %}>{% if rg and rg.weighted %}{% for k, v in rg.split.items() %}{{ {'USA':'US','Canada':'Cda','International':'Intl','Emerging':'EM'}[k] }} {{ v|int }}{% if not loop.last %} / {% endif %}{% endfor %}{% else %}Custom split…{% endif %}</option>
               </select>
             {% endif %}
           </td>
@@ -148,11 +152,20 @@
   // ── Inline region override: save on change, then reload to re-classify everywhere ──
   table.querySelectorAll('.region-sel').forEach(sel => {
     sel.addEventListener('change', () => {
+      let region = sel.value;
+      if (region === '__custom__') {
+        const cur = sel.dataset.split || 'USA:60, International:30, Emerging:10';
+        region = window.prompt(
+          'Region weights for ' + sel.dataset.ticker +
+          ' — for multi-region funds (e.g. all-in-one ETFs).\nFormat: USA:55, International:33, Emerging:12',
+          cur);
+        if (region === null) { location.reload(); return; }   // cancelled → restore display
+      }
       sel.disabled = true;
       fetch('/holdings/region', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ ticker: sel.dataset.ticker, region: sel.value }),
+        body: new URLSearchParams({ ticker: sel.dataset.ticker, region }),
       }).then(r => {
         if (r.ok) { location.reload(); }
         else { sel.disabled = false; alert('Could not save the region override.'); }
