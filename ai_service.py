@@ -51,6 +51,11 @@ _SRC = {
     'properties': {'title': {'type': 'string'}, 'url': {'type': 'string'}},
     'required': ['title', 'url'],
 }
+_REGION_SPLIT = {  # one slice of a multi-region fund's geographic allocation
+    'type': 'object', 'additionalProperties': False,
+    'properties': {'region': {'type': 'string'}, 'pct': {'type': 'number'}},
+    'required': ['region', 'pct'],
+}
 _TRADE = {
     'type': 'object', 'additionalProperties': False,
     'properties': {
@@ -59,6 +64,8 @@ _TRADE = {
         'sector': {'type': 'string'},
         'risk_bucket': {'type': 'string'},
         'market_cap': {'type': 'string'},
+        'region': {'type': 'string'},               # USA / Canada / International / Emerging
+        'region_split': {'type': 'array', 'items': _REGION_SPLIT},  # [] unless multi-region fund
         'amount_cad': {'type': 'number'},
         'shares_est': {'type': ['number', 'null']},
         'currently_held': {'type': 'boolean'},
@@ -68,9 +75,9 @@ _TRADE = {
         'alternates': {'type': 'array', 'items': _ALT},
         'sources': {'type': 'array', 'items': _SRC},
     },
-    'required': ['ticker', 'action', 'sector', 'risk_bucket', 'market_cap', 'amount_cad',
-                 'shares_est', 'currently_held', 'is_fund', 'rationale', 'gaps_addressed',
-                 'alternates', 'sources'],
+    'required': ['ticker', 'action', 'sector', 'risk_bucket', 'market_cap', 'region',
+                 'region_split', 'amount_cad', 'shares_est', 'currently_held', 'is_fund',
+                 'rationale', 'gaps_addressed', 'alternates', 'sources'],
 }
 _WL = {
     'type': 'object', 'additionalProperties': False,
@@ -187,6 +194,11 @@ in a search query.
 OUTPUT
 - Return only the structured object. Set is_fund=true for ETFs/mutual funds. shares_est may be null. \
 gaps_addressed lists the gaps each trade closes (e.g. "Sector: Healthcare", "Risk: Very High").
+- For every trade set `region` to its dominant geographic region — exactly one of "USA", "Canada", \
+"International" (developed ex-North-America), or "Emerging". For a multi-region fund (an all-in-one or \
+global ETF), ALSO fill `region_split` with the approximate percentage per region (research the fund's \
+regional allocation via web search when it isn't obvious from the name); the percentages should sum to \
+~100. Leave `region_split` as an empty array for single-region funds and individual stocks.
 - Write a substantial, professional `summary` (about 4–7 sentences): the overall strategy and why this \
 shape; how you prioritised the dollar gaps; how you balanced the Blended-Risk and Market-Cap tilts; what \
 you sold and why; the single most important trade-off you made; and how the plan shifts the account's \
@@ -506,6 +518,56 @@ def validate_plan(plan, account):
     return plan
 
 
+def _apply_ai_regions(plan):
+    """Seed region overrides from the AI's researched region for picks our heuristics
+    leave Unclassified — so a fund yfinance can't classify (no region keyword, no
+    country) still lands in the right bucket in the report, rebalancer, and charts.
+    Never overwrites a user override or a confident heuristic; honours a weighted
+    region_split. Clears the per-request cache so the report enrichment sees it."""
+    from calculations import _region_of, region_overrides, _ALL_REGIONS
+    from price_service import get_holdings_metadata
+    from models import db, Setting
+    trades = plan.get('trades', [])
+    if not trades:
+        return
+    metas = get_holdings_metadata([t['ticker'] for t in trades])
+    existing = region_overrides()
+    s = Setting.query.get('region_overrides')
+    data = {}
+    if s and s.value:
+        try:
+            data = json.loads(s.value)
+        except Exception:
+            data = {}
+    changed = False
+    for t in trades:
+        tk = t['ticker'].upper()
+        if tk in existing:
+            continue   # a user (or earlier) override already wins
+        if _region_of(t['ticker'], metas.get(t['ticker'], {})) != 'Unclassified':
+            continue   # our heuristic already classifies it — trust that
+        split = {p['region']: p['pct'] for p in (t.get('region_split') or [])
+                 if p.get('region') in _ALL_REGIONS and (p.get('pct') or 0) > 0}
+        if len(split) >= 2:
+            data[tk] = split
+            changed = True
+        elif t.get('region') in _ALL_REGIONS:
+            data[tk] = t['region']
+            changed = True
+    if changed:
+        if s:
+            s.value = json.dumps(data)
+        else:
+            db.session.add(Setting(key='region_overrides', value=json.dumps(data)))
+        db.session.commit()
+        try:
+            from flask import g
+            if hasattr(g, '_region_ov'):
+                del g._region_ov
+        except Exception:
+            pass
+
+
 def add_picks_to_watchlist(plan):
     """Add the validated `_verified` new-watchlist names (run validate_plan first) with an
     AI-provenance note. Returns the list of tickers added."""
@@ -613,6 +675,7 @@ def run_and_cache(account, provider, style=None, model=None):
     payload = build_payload(account, style)
     plan = generate_rebalance_plan(payload, provider, model)
     validate_plan(plan, account)
+    _apply_ai_regions(plan)   # capture the AI's region for picks we'd otherwise leave Unclassified
     # Free yfinance enrichment for the deep-dive report + the card — computed once
     # here so page views just read the cache. Best-effort: a data hiccup must never
     # discard the paid plan.
