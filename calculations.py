@@ -2047,24 +2047,6 @@ def get_rebalancer_data(account=None, dimension='sector', mode='cash', deploy_ca
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 
-# Curated, well-known ETFs per bucket — research ideas when filling a rebalancer
-# gap (no market screener is available, so individual stocks can't be sourced).
-_SECTOR_ETFS = {
-    'Technology': ['XLK', 'VGT'], 'Financial Services': ['XLF'], 'Healthcare': ['XLV'],
-    'Consumer Cyclical': ['XLY'], 'Consumer Defensive': ['XLP'], 'Industrials': ['XLI'],
-    'Energy': ['XLE'], 'Utilities': ['XLU'], 'Real Estate': ['XLRE', 'VNQ'],
-    'Basic Materials': ['XLB'], 'Communication Services': ['XLC'],
-}
-
-
-def _curated_for_bucket(dimension, bucket):
-    if dimension == 'sector':
-        return _SECTOR_ETFS.get(bucket, [])
-    if dimension == 'asset_type':
-        return {'ETF': ['VTI', 'XEQT'], 'Bond': ['BND', 'AGG']}.get(bucket, [])
-    return []
-
-
 def _fmt_mktcap(mc):
     if not mc:
         return None
@@ -2139,8 +2121,9 @@ def get_watchlist_data():
 
 def get_rebalancer_gaps_all():
     """Every under-target rebalancer bucket across accounts that have targets,
-    each with a few candidate tickers to fill it: watchlist names in the bucket,
-    your own focused holdings there, and curated ETF ideas."""
+    each filled with self-appointed watchlist names plus your own individual
+    holdings in that bucket — no curated/stored ETF ideas, and broad ETFs you
+    happen to hold are skipped (only focused names are offered)."""
     from models import WatchlistItem
     from price_service import get_holdings_metadata
 
@@ -2164,21 +2147,19 @@ def get_rebalancer_gaps_all():
                     cands.append({'ticker': s['ticker'], 'source': 'watchlist',
                                   'focused': s['focused'], 'in_wl': True})
                     seen.add(s['ticker'])
-                for h in all_holdings:  # your own focused holdings in this bucket
+                for h in all_holdings:  # your own holdings that land in this bucket
                     if h['account'] != acc or h['ticker'] in seen:
                         continue
                     m = meta_all.get(h['ticker'], {})
-                    if (m.get('asset_type') or 'Equity') == 'ETF':
+                    is_etf = (m.get('asset_type') or 'Equity') == 'ETF'
+                    # A broad ETF dilutes a sector/cap/country gap, but fully counts
+                    # toward an asset-type bucket — only offer your own ETFs there.
+                    if is_etf and dim != 'asset_type':
                         continue
                     if _bucket_weights(h, m, dim).get(bucket, 0) > 0.5:
                         cands.append({'ticker': h['ticker'], 'source': 'holding',
-                                      'focused': True, 'in_wl': h['ticker'] in wl_tickers})
+                                      'focused': not is_etf, 'in_wl': h['ticker'] in wl_tickers})
                         seen.add(h['ticker'])
-                for tk in _curated_for_bucket(dim, bucket):  # curated ETF ideas
-                    if tk not in seen:
-                        cands.append({'ticker': tk, 'source': 'idea',
-                                      'focused': True, 'in_wl': tk in wl_tickers})
-                        seen.add(tk)
                 out.append({
                     'account': acc, 'dimension': dim, 'dimension_label': REBAL_DIM_LABELS[dim],
                     'bucket': bucket, 'gap_pct': np['gap_pct'], 'amount_cad': np['amount_cad'],
