@@ -148,7 +148,16 @@
       <span class="mono {{ cls }}" style="font-size:.9rem">{{ val }}</span>
     </span>
   {%- endmacro %}
-  {% macro ba(b, a, dp, unit='') %}{% if b is not none and a is not none %}{{ ('%.'~dp~'f')|format(b) }}{{ unit }} → {{ ('%.'~dp~'f')|format(a) }}{{ unit }}{% else %}—{% endif %}{%- endmacro %}
+  {# before→after KPI chip, value coloured by direction (lower = better here): green improve, red worse, dim no change #}
+  {% macro bachip(label, b, a, dp, unit='') %}
+    {%- if b is not none and a is not none -%}
+      {%- set d = a - b -%}
+      {%- set dz = (('%.'~dp~'f')|format(d|abs) == ('%.'~dp~'f')|format(0)) -%}
+      {{ chip(label, (('%.'~dp~'f')|format(b)) ~ unit ~ ' → ' ~ (('%.'~dp~'f')|format(a)) ~ unit, 'text-dim' if dz else ('text-green' if d < 0 else 'text-red')) }}
+    {%- else -%}
+      {{ chip(label, '—') }}
+    {%- endif -%}
+  {%- endmacro %}
 
   {# meta + controls #}
   <div style="padding:8px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;border-bottom:1px solid var(--border-sub)">
@@ -177,21 +186,18 @@
       {{ chip('Net deployed', ai.stats.net | cad) }}
       {{ chip('Leftover', plan.leftover_cash | cad) }}
       {{ chip('New names', ai.stats.n_new) }}
+      {% if ai.report and ai.report.risk and ai.report.risk.before.beta is not none %}
+      {% set rb = ai.report.risk.before %}{% set ra = ai.report.risk.after %}
+      {{ bachip('Book beta', rb.beta, ra.beta, 2) }}
+      {{ bachip('Volatility', rb.volatility, ra.volatility, 1, '%') }}
+      {{ bachip('Blended MER', rb.mer, ra.mer, 2, '%') }}
+      {{ bachip('Top holding', rb.top_weight, ra.top_weight, 1, '%') }}
+      {% endif %}
     </div>
     {% if ai.report and ai.report.thesis %}
     <div style="font-size:.92rem;line-height:1.55;margin-bottom:10px"><strong style="color:var(--accent)">Thesis.</strong> {{ ai.report.thesis }}</div>
     {% endif %}
     <div style="font-size:.9rem;line-height:1.6">{{ plan.summary }}</div>
-    {% if ai.report and ai.report.risk and ai.report.risk.before.beta is not none %}
-    {% set rb = ai.report.risk.before %}{% set ra = ai.report.risk.after %}
-    <div class="card-sub" style="margin:12px 0 6px">Portfolio risk &amp; cost · before → after</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap">
-      {{ chip('Book beta', ba(rb.beta, ra.beta, 2)) }}
-      {{ chip('Volatility', ba(rb.volatility, ra.volatility, 1, '%')) }}
-      {{ chip('Blended MER', ba(rb.mer, ra.mer, 2, '%')) }}
-      {{ chip('Top holding', ba(rb.top_weight, ra.top_weight, 1, '%')) }}
-    </div>
-    {% endif %}
   </div>
 
   {# trades — clean table #}
