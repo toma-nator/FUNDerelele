@@ -1384,9 +1384,13 @@ option { background: var(--bg-card); color: var(--text); }
   cursor: pointer;
 }
 .filter-select:focus { outline: none; border-color: var(--accent); }
-/* Uniform filter-control width in the holdings/watchlist toolbar so the selects
-   and the search box line up (search keeps its own class for the placeholder). */
+/* Uniform filter-control width + height in the holdings/watchlist toolbar so the
+   Show segmented control, the selects, and the search box all line up (a <select>
+   renders a touch taller than a <button>, so pin both to one height). */
 .holdings-toolbar .filter-select { min-width: 150px; }
+.holdings-toolbar .filter-select,
+.holdings-toolbar .seg { height: 30px; box-sizing: border-box; }
+.holdings-toolbar .seg-btn { display: inline-flex; align-items: center; padding-top: 0; padding-bottom: 0; }
 .filter-search { min-width: 170px; }
 .filter-search::placeholder { color: var(--text-muted); }
 
