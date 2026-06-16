@@ -22,12 +22,12 @@ Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈119 ideas)
+## Backlog at a glance (≈120 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
 | Charts | ~45 | ~27 finance-useful (incl. correlation/diversification heatmap) + ~15 fun/easter-egg (composition-over-time, RDSP widget, top movers) |
-| Per-tab feature enhancements | ~35 | Performance (MWR-vs-TWR, what-if replay), Dividends (payout-safety), Rebalancer, Watchlist, Cash Flows, Projections, Tax (asset-location, ✨ tax-loss harvester), Import, GICs, Holdings (manual NAV), FX, RDSP (incl. ⭐ nest-egg floor) |
+| Per-tab feature enhancements | ~36 | Performance (MWR-vs-TWR, what-if replay), Dividends (payout-safety), Rebalancer, Watchlist (AI report breakdowns), Cash Flows, Projections, Tax (asset-location, ✨ tax-loss harvester), Import, GICs, Holdings (manual NAV), FX, RDSP (incl. ⭐ nest-egg floor) |
 | AI / smart features | 1 | Portfolio commentary + "Ask your portfolio" (LLM grounded on your data) |
 | New tabs (big features) | 11 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt, Retirement (RRSP), Market research |
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
@@ -53,6 +53,15 @@ Available types: Non-Reg, TFSA, RRSP, FHSA, RDSP, RESP, LIRA, RRIF (keeping all;
 | Non-Reg / RRSP / RESP / LIRA / RRIF | none yet — only the generic tax-sheltered flag | — |
 
 Keep in sync as rules are added (e.g. RRSP room, RESP/CESG grants, RRIF minimum withdrawals, LIF payout).
+
+## AI report — more before / target allocation breakdowns
+
+Parked 2026-06-15. The deep-dive AI report's "Before → After Allocation" card shows
+three lenses (asset class, blended risk, sector). Add more of the account's
+*before*-state allocation breakdowns — e.g. **market-cap tiers, region / country, and
+currency** — and optionally surface the saved **target** alongside Before/After so the
+reader sees how far each lens started from target, not just where it landed. Reuse the
+rebalancer bucket weights already computed for these dimensions. **Priority:** Low · small.
 
 ## View / sort / filter by bank (institution) — everywhere
 
