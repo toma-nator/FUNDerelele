@@ -162,7 +162,7 @@
 
   {# meta + controls #}
   <div style="padding:8px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;border-bottom:1px solid var(--border-sub)">
-    <span class="ai-meta">Generated {{ ai.generated_ago }} · {{ ai.record.provider }} · <span class="mono">{{ ai.record.model }}</span> · {{ ai.record.style }}{% if ai.stale %} · <span class="text-amber" title="targets / cash / holdings changed since this plan">inputs changed</span>{% endif %}</span>
+    <span class="ai-meta">Generated {{ ai.generated_ago }} · {{ ai.record.provider }} · <span class="mono">{{ ai.record.model }}</span> · {{ ai.record.style | stylelabel }}{% if ai.stale %} · <span class="text-amber" title="targets / cash / holdings changed since this plan">inputs changed</span>{% endif %}</span>
     <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
       <a href="{{ url_for('watchlist_ai_report', account=ai.account) }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">View report ↗</a>
       <a href="{{ url_for('watchlist_ai_report_pdf', account=ai.account) }}" class="btn btn-sm" title="Download a PDF of the deep-dive report">Export PDF</a>

@@ -331,6 +331,17 @@ def mktcap_filter(v):
     return _fmt_mktcap(v) if v else '—'
 
 
+_STYLE_LABELS = {'etf_heavy': 'ETF-heavy', 'mixed': 'Mixed', 'stock_heavy': 'Stock-heavy'}
+
+
+@app.template_filter('stylelabel')
+def stylelabel_filter(s):
+    """Implementation-style key → human label (etf_heavy → ETF-heavy)."""
+    if not s:
+        return '—'
+    return _STYLE_LABELS.get(s, s.replace('_', ' ').title())
+
+
 @app.template_filter('localdt')
 def localdt_filter(dt, mode='datetime'):
     """A UTC datetime → a <time> element that app.js re-renders in the BROWSER's
@@ -1026,9 +1037,17 @@ def _load_report_ctx(account):
             return None, None
     gen = rec.get('generated_at')
     try:
-        gd = datetime.fromisoformat(gen).strftime('%b %d, %Y') if gen else ''
+        from datetime import timezone
+        dt = datetime.fromisoformat(gen)
+        if dt.tzinfo is None:                       # stored as naive UTC (utcnow)
+            dt = dt.replace(tzinfo=timezone.utc)
+        gd = dt.astimezone().strftime('%b %d, %Y') if gen else ''   # → local date
     except Exception:
         gd = ''
+    try:
+        report_service.annotate_trade_sectors(r.get('trades') or [])
+    except Exception:
+        pass
     ctx = {'gen_date': gd, 'provider': rec.get('provider') or r.get('provider'),
            'model': rec.get('model') or r.get('model'), 'style': rec.get('style')}
     return r, ctx

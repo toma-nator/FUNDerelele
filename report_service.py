@@ -190,6 +190,33 @@ def _alt_stats(alt, metas, hist):
     }
 
 
+# ── Trades-table sector display ──────────────────────────────────────────────────
+
+def _trade_sector_label(t, metas):
+    """Single dominant sector for the trades table — but call a broad fund
+    'Diversified' rather than pinning it to one sector, so geographic / total-market
+    ETFs don't read as a sector bet. A sector ETF (one sector ≥ 50% of the look-through)
+    keeps its sector; individual stocks always keep theirs."""
+    sec = t.get('sector') or '—'
+    if not t.get('is_fund'):
+        return sec
+    fs = (metas.get(t.get('ticker'), {}) or {}).get('fund_sectors') or {}
+    tot = sum(fs.values())
+    if fs and tot and max(fs.values()) / tot < 0.5:
+        return 'Diversified'
+    return sec
+
+
+def annotate_trade_sectors(trades):
+    """Set t['sector_display'] on each trade for the report's trades table. One cheap
+    (cached) metadata read; safe to call on cached report_data at render time."""
+    from price_service import get_holdings_metadata
+    tickers = [t.get('ticker') for t in trades if t.get('ticker')]
+    metas = get_holdings_metadata(tickers) if tickers else {}
+    for t in trades:
+        t['sector_display'] = _trade_sector_label(t, metas)
+
+
 # ── Orchestrator ─────────────────────────────────────────────────────────────────
 
 def build_report_data(account, plan):

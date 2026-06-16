@@ -167,7 +167,7 @@
           <td class="r dim">{% if t.shares_calc %}{{ '%g'|format(t.shares_calc) }}{% else %}—{% endif %}</td>
           <td class="r dim">{% if t.live_price_cad %}{{ t.live_price_cad | cad }}{% else %}—{% endif %}</td>
           <td class="r dim">{% if t.action == 'Buy' and stats.buys %}{{ (t.amount_cad / stats.buys * 100)|round|int }}%{% elif t.action == 'Sell' and stats.sells %}{{ (t.amount_cad / stats.sells * 100)|round|int }}%{% else %}—{% endif %}</td>
-          <td>{{ t.sector }}</td>
+          <td>{{ t.sector_display or t.sector }}</td>
           <td>{{ t.risk_bucket }}</td>
           <td>{{ t.market_cap }}{% if t.is_fund %} <span class="dim">·fund</span>{% endif %}</td>
         </tr>
@@ -200,7 +200,10 @@
 
 {% macro pct1(v) %}{% if v is not none %}{{ '%.1f'|format(v) }}%{% else %}—{% endif %}{% endmacro %}
 
-{% macro prisk_cell(label, before, after, dp, unit) %}
+{# neutral=true → directional only (no good/bad colour): for beta & volatility, where
+   "up" just reflects deploying idle cash, not a worse plan. Fees / concentration keep
+   the lower-is-greener semantics. #}
+{% macro prisk_cell(label, before, after, dp, unit, neutral=false) %}
   {% if before is not none and after is not none %}
   {% set d = after - before %}
   {% set dfmt = '%.*f'|format(dp, d|abs) %}
@@ -209,7 +212,7 @@
     {% if dfmt == '%.*f'|format(dp, 0) %}
     <div class="delta dim">no change</div>
     {% else %}
-    <div class="delta {{ 'green' if d < 0 else 'red' }}">{{ '↓' if d < 0 else '↑' }} {{ dfmt }}{{ unit }}</div>
+    <div class="delta {{ 'dim' if neutral else ('green' if d < 0 else 'red') }}">{{ '↓' if d < 0 else '↑' }} {{ dfmt }}{{ unit }}</div>
     {% endif %}</div>
   {% else %}
   <div class="prisk"><div class="lbl">{{ label }}</div><div class="ba dim">—</div></div>
@@ -279,7 +282,7 @@
     <div class="meta">
       {% if gen_date %}<span>Generated <b>{{ gen_date }}</b></span>{% endif %}
       {% if provider %}<span>Provider <b>{{ provider }}</b>{% if model %} · {{ model }}{% endif %}</span>{% endif %}
-      {% if style %}<span>Style <b>{{ style }}</b></span>{% endif %}
+      {% if style %}<span>Style <b>{{ style | stylelabel }}</b></span>{% endif %}
     </div>
     {% if r.thesis %}<div class="thesis"><b>Thesis.</b> {{ r.thesis }}</div>
     {% else %}<div class="thesis"><b>Thesis.</b> Deploys {{ r.stats.net | cad }} across {{ r.holdings_detail|length }} new position(s) to move the account toward its rebalancer targets.</div>{% endif %}
@@ -301,11 +304,11 @@
 
   {% set rb, ra = r.risk.before, r.risk.after %}
   <div class="card">
-    <div class="card-h"><span>Portfolio Risk &amp; Cost — Before → After</span><span class="sub">whole-account effect · lower is greener here</span></div>
+    <div class="card-h"><span>Portfolio Risk &amp; Cost — Before → After</span><span class="sub">whole-account effect · fees &amp; concentration: lower is better; risk shown neutrally</span></div>
     <div class="card-b">
       <div class="prisk-grid">
-        {{ prisk_cell('Book beta', rb.beta, ra.beta, 2, '') }}
-        {{ prisk_cell('Est. volatility (1-yr)', rb.volatility, ra.volatility, 1, '%') }}
+        {{ prisk_cell('Book beta', rb.beta, ra.beta, 2, '', true) }}
+        {{ prisk_cell('Est. volatility (1-yr)', rb.volatility, ra.volatility, 1, '%', true) }}
         {{ prisk_cell('Blended fee (MER)', rb.mer, ra.mer, 2, '%') }}
         {{ prisk_cell('Top-holding weight', rb.top_weight, ra.top_weight, 1, '%') }}
       </div>
