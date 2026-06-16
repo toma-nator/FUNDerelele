@@ -1,2 +1,17 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Normalize line endings: store LF in the repo AND check out LF in the working
+# tree, so Windows clients stop warning "LF will be replaced by CRLF" (this
+# overrides core.autocrlf).
+* text=auto eol=lf
+
+# Windows scripts are happiest with CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary types Git must never line-ending-normalize.
+*.db  binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.pdf binary
+*.gif binary
