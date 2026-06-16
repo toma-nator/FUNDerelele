@@ -241,6 +241,14 @@
       </div>
       {% endif %}
       {% endfor %}
+      {% if ai.watch_ideas %}
+      <div class="card-sub" style="margin:12px 0 8px;border-top:1px dashed var(--border-sub);padding-top:10px">Future Adds / Watch Ideas</div>
+      <div style="font-size:.8rem;line-height:1.5">
+        {% for w in ai.watch_ideas %}
+        <div style="margin-bottom:4px"><span class="mono" style="color:var(--accent)">{{ w.ticker }}</span> — {{ w.note }}{% if w.skipped %} <span class="text-dim">({{ w.skipped }})</span>{% endif %}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
       {% if plan.cap_notes or plan.caveats %}
       <div class="card-sub" style="margin:12px 0 8px;border-top:1px dashed var(--border-sub);padding-top:10px">Notes</div>
       {% if plan.cap_notes %}
@@ -261,7 +269,7 @@
     <form method="POST" action="{{ url_for('watchlist_ai_add_buys') }}" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:8px">
       <input type="hidden" name="account" value="{{ ai.account }}">
       <span style="font-size:.82rem">Watch the plan's buys: {% for tk in ai.addable_buys %}<span class="mono">{{ tk }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</span>
-      <button type="submit" class="btn btn-sm">Add {{ ai.addable_buys | length }} buy(s)</button>
+      <button type="submit" class="btn btn-sm btn-primary">Add {{ ai.addable_buys | length }} buy(s)</button>
     </form>
     {% endif %}
     {% if plan['_verified'] %}

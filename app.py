@@ -947,7 +947,7 @@ def watchlist():
         'default_style': _gs('ai_impl_style_default', 'mixed'),
         'accounts': gap_accts, 'account': ai_account,
         'record': None, 'stale': False, 'generated_ago': None, 'stats': None, 'report': None,
-        'addable_buys': [],
+        'addable_buys': [], 'watch_ideas': [],
     }
     if ai_account:
         rec = ai_service.load_cached_plan(ai_account)
@@ -968,6 +968,13 @@ def watchlist():
             ai['addable_buys'] = sorted({t['ticker'].upper() for t in _trades
                                          if t.get('action') == 'Buy' and not t.get('currently_held')
                                          and t['ticker'].upper() not in _wl})
+            _plan = rec.get('plan', {})
+            _skip = {s.get('ticker', '').upper(): s.get('reason') for s in _plan.get('_skipped', [])}
+            ai['watch_ideas'] = [
+                {'ticker': w.get('ticker', ''), 'note': w.get('note', ''),
+                 'skipped': ('already on watchlist' if (w.get('ticker') or '').upper() in _wl
+                             else _skip.get((w.get('ticker') or '').upper()))}
+                for w in _plan.get('new_watchlist', [])]
             ai['report'] = rec.get('report_data')   # cached enrichment (None for pre-phase-2 plans)
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
     return render_template('watchlist.html', data=data, gaps=gaps, gap_summary=gap_summary,

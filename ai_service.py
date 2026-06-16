@@ -587,16 +587,13 @@ def add_picks_to_watchlist(plan):
         up = w['ticker'].upper()
         if up in existing:
             continue
-        note = f"AI rebalancer pick · {provider} · {today.isoformat()}"
-        if w.get('note'):
-            note += f" — {w['note']}"
         db.session.add(WatchlistItem(
             ticker=up,
             company=w.get('company', '') or '',
             currency=(w.get('currency') or 'CAD'),
             added_price=w.get('live_price'),
             added_date=today,
-            notes=note,
+            notes=f"{provider} AI Watch Idea",   # full reasoning lives in the plan's notes
         ))
         existing.add(up)
         added.append(up)
@@ -640,7 +637,7 @@ def add_buy_tickers_to_watchlist(plan):
             currency='CAD' if up.endswith(('.TO', '.NE', '.V')) else 'USD',
             added_price=cached.price if cached else None,
             added_date=today,
-            notes=f"AI rebalancer buy · {provider} · {today.isoformat()}",
+            notes=f"{provider} AI Plan Buy",
         ))
         added.append(up)
     if added:
