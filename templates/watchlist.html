@@ -236,7 +236,7 @@
       <div style="margin-bottom:10px;font-size:.8rem;line-height:1.5">
         <span class="mono" style="color:var(--accent)">{{ t.ticker }}</span> <span>— {{ t.rationale }}</span>
         {% if t.gaps_addressed %}<div class="text-dim" style="padding-left:1rem">closes: {{ t.gaps_addressed | join(', ') }}</div>{% endif %}
-        {% for a in t.alternates %}<div class="text-dim" style="padding-left:1rem">alt: <span class="mono" style="color:var(--accent)">{{ a.ticker }}</span> ({{ a.profile }}){% if a.drift_note %} — {{ a.drift_note }}{% endif %}</div>{% endfor %}
+        {% for a in t.alternates %}<div class="text-dim" style="padding-left:1rem">alt: <span class="mono" style="color:var(--accent)">{{ a.ticker }}</span> ({{ a.profile }}){% if a.drift_note %} — {{ a.drift_note }}{% endif %}<form method="POST" action="{{ url_for('watchlist_add') }}" style="display:inline;margin-left:.4rem"><input type="hidden" name="ticker" value="{{ a.ticker }}"><input type="hidden" name="currency" value="{{ 'CAD' if (a.ticker.endswith('.TO') or a.ticker.endswith('.NE') or a.ticker.endswith('.V')) else 'USD' }}"><input type="hidden" name="ai_account" value="{{ ai.account }}"><button type="submit" class="btn btn-sm" title="Add {{ a.ticker }} to watchlist" style="padding:0 6px;font-size:.7rem;line-height:1.5">+ watch</button></form></div>{% endfor %}
         {% if t.sources %}<div class="text-dim" style="padding-left:1rem">sources: {% for s in t.sources %}<a href="{{ s.url }}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">{{ s.title }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
       </div>
       {% endif %}
@@ -255,16 +255,24 @@
     </div>
   </details>
 
-  {# add verified picks #}
+  {# add verified picks + plan buys #}
   <div style="padding:10px 16px;border-top:1px solid var(--border-sub)">
+    {% if ai.addable_buys %}
+    <form method="POST" action="{{ url_for('watchlist_ai_add_buys') }}" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:8px">
+      <input type="hidden" name="account" value="{{ ai.account }}">
+      <span style="font-size:.82rem">Watch the plan's buys: {% for tk in ai.addable_buys %}<span class="mono">{{ tk }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</span>
+      <button type="submit" class="btn btn-sm">Add {{ ai.addable_buys | length }} buy(s)</button>
+    </form>
+    {% endif %}
     {% if plan['_verified'] %}
     <form method="POST" action="{{ url_for('watchlist_ai_add') }}" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
       <input type="hidden" name="account" value="{{ ai.account }}">
-      <span style="font-size:.82rem">Add to watchlist: {% for v in plan['_verified'] %}<span class="mono">{{ v.ticker }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</span>
+      <span style="font-size:.82rem">Watch-ideas for later: {% for v in plan['_verified'] %}<span class="mono">{{ v.ticker }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</span>
       <button type="submit" class="btn btn-sm btn-primary">Add {{ plan['_verified'] | length }} pick(s)</button>
     </form>
-    {% else %}
-    <span class="text-dim" style="font-size:.8rem">No new names to add (picks are funds you'd trade directly, or already tracked).</span>
+    {% endif %}
+    {% if not ai.addable_buys and not plan['_verified'] %}
+    <span class="text-dim" style="font-size:.8rem">No new names to add (all buys and ideas are already held or tracked).</span>
     {% endif %}
     {% if plan['_skipped'] %}
     <div class="text-dim" style="font-size:.74rem;margin-top:6px">Skipped: {% for s in plan['_skipped'] %}<span class="mono">{{ s.ticker }}</span> ({{ s.reason }}){% if not loop.last %}, {% endif %}{% endfor %}</div>

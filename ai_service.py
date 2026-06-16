@@ -605,6 +605,49 @@ def add_picks_to_watchlist(plan):
     return added
 
 
+def add_buy_tickers_to_watchlist(plan):
+    """Add the plan's new BUY tickers (skipping ones currently held) to the watchlist —
+    deduped against what's already tracked, auto-classified from metadata. Returns the
+    tickers added. Mirrors add_picks_to_watchlist but sources the trade buys, so you can
+    watch the recommended names before executing them."""
+    from models import db, WatchlistItem
+    from price_service import get_holdings_metadata, get_cached_price, refresh_prices
+    provider = plan.get('_provider', 'AI')
+    today = date.today()
+    existing = {w.ticker.upper() for w in WatchlistItem.query.all()}
+    tickers, seen = [], set()
+    for t in plan.get('trades', []):
+        if t.get('action') != 'Buy' or t.get('currently_held'):
+            continue
+        up = (t.get('ticker') or '').upper()
+        if up and up not in existing and up not in seen:
+            seen.add(up)
+            tickers.append(up)
+    if not tickers:
+        return []
+    metas = get_holdings_metadata(tickers)
+    added = []
+    for up in tickers:
+        m = metas.get(up, {}) or {}
+        cached = get_cached_price(up)
+        if not cached:
+            refresh_prices([up])
+            cached = get_cached_price(up)
+        db.session.add(WatchlistItem(
+            ticker=up,
+            company=m.get('long_name') or '',
+            sector=m.get('sector') or '',
+            currency='CAD' if up.endswith(('.TO', '.NE', '.V')) else 'USD',
+            added_price=cached.price if cached else None,
+            added_date=today,
+            notes=f"AI rebalancer buy · {provider} · {today.isoformat()}",
+        ))
+        added.append(up)
+    if added:
+        db.session.commit()
+    return added
+
+
 # ── Per-account caching (settings table) ─────────────────────────────────────────
 
 def _plan_key(account):

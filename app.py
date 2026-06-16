@@ -947,6 +947,7 @@ def watchlist():
         'default_style': _gs('ai_impl_style_default', 'mixed'),
         'accounts': gap_accts, 'account': ai_account,
         'record': None, 'stale': False, 'generated_ago': None, 'stats': None, 'report': None,
+        'addable_buys': [],
     }
     if ai_account:
         rec = ai_service.load_cached_plan(ai_account)
@@ -963,6 +964,10 @@ def watchlist():
             ai['stats'] = {'buys': round(_buys, 2), 'sells': round(_sells, 2),
                            'net': round(_buys - _sells, 2),
                            'n_new': len(rec.get('plan', {}).get('_verified', []))}
+            _wl = {r['ticker'].upper() for r in data['rows']}
+            ai['addable_buys'] = sorted({t['ticker'].upper() for t in _trades
+                                         if t.get('action') == 'Buy' and not t.get('currently_held')
+                                         and t['ticker'].upper() not in _wl})
             ai['report'] = rec.get('report_data')   # cached enrichment (None for pre-phase-2 plans)
     last_updated = PriceCache.query.order_by(PriceCache.last_updated.desc()).first()
     return render_template('watchlist.html', data=data, gaps=gaps, gap_summary=gap_summary,
@@ -1005,6 +1010,23 @@ def watchlist_ai_add():
         flash(f'Added {len(added)} pick(s) to watchlist: {", ".join(added)}.', 'success')
     else:
         flash('No new picks to add (all already held or tracked).', 'info')
+    return redirect(url_for('watchlist', ai_account=account))
+
+
+@app.route('/watchlist/ai/add-buys', methods=['POST'])
+def watchlist_ai_add_buys():
+    """Add the cached plan's new BUY tickers to the watchlist (free — no AI call)."""
+    import ai_service
+    account = request.form.get('account', '').strip()
+    rec = ai_service.load_cached_plan(account) if account else None
+    if not rec:
+        flash('No AI plan to add from — generate one first.', 'error')
+        return redirect(url_for('watchlist', ai_account=account))
+    added = ai_service.add_buy_tickers_to_watchlist(rec['plan'])
+    if added:
+        flash(f'Added {len(added)} buy(s) to watchlist: {", ".join(added)}.', 'success')
+    else:
+        flash('No new buys to add (all already held or tracked).', 'info')
     return redirect(url_for('watchlist', ai_account=account))
 
 
@@ -1209,13 +1231,15 @@ def ticker_review(ticker):
 def watchlist_add():
     from price_service import get_cached_price, refresh_prices, get_holdings_metadata
     from datetime import date
+    _aia = request.form.get('ai_account', '').strip()
+    dest = url_for('watchlist', ai_account=_aia) if _aia else url_for('watchlist')
     try:
         ticker = request.form['ticker'].strip().upper()
         if not ticker:
             raise ValueError('Ticker is required.')
         if WatchlistItem.query.filter_by(ticker=ticker).first():
             flash(f'{ticker} is already on the watchlist.', 'info')
-            return redirect(url_for('watchlist'))
+            return redirect(dest)
         cached = get_cached_price(ticker)
         if not cached:
             refresh_prices([ticker])
@@ -1238,7 +1262,7 @@ def watchlist_add():
         flash(f'Added {ticker} to watchlist.', 'success')
     except Exception as e:
         flash(f'Error: {e}', 'error')
-    return redirect(url_for('watchlist'))
+    return redirect(dest)
 
 
 @app.route('/watchlist/edit/<int:id>', methods=['POST'])
