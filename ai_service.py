@@ -439,13 +439,20 @@ def _claude_plan(payload, model=None):
             return _finish(_extract_json(text), 'Claude', model)
         except anthropic.AuthenticationError:
             raise AIConfigError('Claude API key is invalid or revoked.')
-        except (anthropic.InternalServerError, anthropic.APIConnectionError) as e:
-            if attempt == 0:
-                continue   # one retry on a transient server/connection error
-            raise AIError(f'Claude API error after retry: {getattr(e, "message", None) or e}')
         except anthropic.APIError as e:
-            if getattr(e, 'status_code', None) == 529 and attempt == 0:
-                continue   # overloaded — retry once
+            # Retry once on a transient server/connection error. An overloaded error
+            # mid-stream is delivered as an SSE event, so it does NOT carry
+            # status_code=529 (the HTTP response was already 200) — match on the error
+            # TYPE / class instead of the status code.
+            etype = getattr(e, 'type', None)
+            status = getattr(e, 'status_code', None)
+            transient = (isinstance(e, anthropic.APIConnectionError)
+                         or etype in ('overloaded_error', 'api_error')
+                         or (isinstance(status, int) and status >= 500))
+            if transient and attempt == 0:
+                import time
+                time.sleep(8)   # brief backoff before the single retry
+                continue
             raise AIError(f'Claude API error: {getattr(e, "message", None) or e}')
 
 
