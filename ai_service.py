@@ -111,8 +111,14 @@ _STYLE_GUIDANCE = {
     'etf_heavy': ("IMPLEMENTATION STYLE: ETF-HEAVY (passive). Fill each gap with sector- or "
                   "asset-class-specific ETFs/funds. Introduce an individual stock only where no "
                   "suitable fund exists for that exposure."),
-    'mixed': ("IMPLEMENTATION STYLE: MIXED. Use a diversified ETF as the core of each large gap, "
-              "plus a few individual securities as satellites to capture the risk and market-cap tilts."),
+    'mixed': ("IMPLEMENTATION STYLE: MIXED — your most thorough style; use its full depth. Deliberately "
+              "blend BOTH instrument types in one plan: broad ETFs for core and hard-to-pick exposures, "
+              "AND a genuine set of individual stocks (aim for several — roughly 3–6 single names, not "
+              "just one) as satellites that capture the sector, market-cap, region and risk tilts and add "
+              "high-conviction upside. A plan that is all-ETF with a single token stock is NOT a mixed "
+              "plan — redo it. Research and justify each individual name with web search. This should be "
+              "your most detailed, research-heavy plan, with noticeably more single-name work than the "
+              "ETF-heavy style."),
     'stock_heavy': ("IMPLEMENTATION STYLE: STOCK-HEAVY (active). Prefer individual securities chosen "
                     "via research; use ETFs only for exposure that can't reasonably be obtained with "
                     "single names."),
@@ -159,6 +165,10 @@ SELLS
 - Size each Sell to bring an over-target bucket toward its target; trim the most over-target / highest-risk \
 overweight first, choosing from that bucket's `sell_candidates`. Sells are "Sell" actions on tickers the \
 account currently holds, and their proceeds fund the buys. Do not sell a holding that isn't over target.
+- A FULL rebalance trims over-target buckets via sells AND deploys the cash — deploying idle cash is NOT a \
+substitute for trimming an overweight (e.g. an over-target mega-cap or sector). Protecting specific names \
+per `preferences` does not waive this: still trim the OTHER over-target positions so that every targeted \
+dimension is brought toward target, not just the ones cash alone can fix.
 
 PREFERENCES
 - If `preferences` is present, treat it as the investor's standing instructions (e.g. names to keep, an \
