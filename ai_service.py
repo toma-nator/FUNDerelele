@@ -383,14 +383,18 @@ def _claude_plan(payload, model=None):
     try:
         resp = None
         for _ in range(6):  # web-search server loop may return pause_turn; resend to continue
-            resp = client.messages.create(
-                model=model, max_tokens=8000,
+            # Stream (required at this max_tokens to avoid HTTP timeouts). The budget
+            # is shared by adaptive thinking AND the full structured plan, so it must be
+            # generous or the JSON gets truncated mid-object → "not valid JSON".
+            with client.messages.stream(
+                model=model, max_tokens=32000,
                 system=system,
                 thinking={'type': 'adaptive'},
                 tools=[{'type': 'web_search_20260209', 'name': 'web_search'}],
                 output_config={'format': {'type': 'json_schema', 'schema': PLAN_SCHEMA}},
                 messages=messages,
-            )
+            ) as stream:
+                resp = stream.get_final_message()
             if resp.stop_reason == 'refusal':
                 raise AIError('Claude declined this request.')
             if resp.stop_reason == 'pause_turn':
@@ -398,6 +402,9 @@ def _claude_plan(payload, model=None):
                             {'role': 'assistant', 'content': resp.content}]
                 continue
             break
+        if resp is not None and resp.stop_reason == 'max_tokens':
+            raise AIError('The AI response was cut off before finishing (hit the output '
+                          'limit). Try regenerating, or simplify the targets.')
         text = next((b.text for b in resp.content if b.type == 'text'), None)
         return _finish(_extract_json(text), 'Claude', model)
     except anthropic.AuthenticationError:

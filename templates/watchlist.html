@@ -76,7 +76,7 @@
   details.ai-row[open] > summary .caret { transform:rotate(90deg); }
   .ai-meta { font-size:.74rem; color:var(--text-muted); }
 
-  /* AI generation progress overlay (the Generate POST hangs 1–3 min) */
+  /* AI generation progress overlay (the Generate POST hangs ~10–14 min) */
   .ai-gen-overlay { position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center;
     background:rgba(7,17,30,.8); backdrop-filter:blur(2px); }
   .ai-gen-box { width:min(420px,90vw); background:var(--bg-surface); border:1px solid var(--border-sub);
@@ -132,9 +132,9 @@
 
   {% if not ai.record %}
   <div style="padding:14px 16px">
-    <p class="text-dim" style="font-size:.82rem;margin-bottom:10px">No plan yet for <strong>{{ ai.account }}</strong>. Generating runs a live, web-grounded AI call (approximately <strong>$5</strong>) and takes 1–3 minutes.</p>
+    <p class="text-dim" style="font-size:.82rem;margin-bottom:10px">No plan yet for <strong>{{ ai.account }}</strong>. Generating runs a live, web-grounded AI call (approximately <strong>$5</strong>) and takes several minutes (often 8–15).</p>
     <form method="POST" action="{{ url_for('watchlist_ai_generate') }}" class="ai-gen-form"
-          data-confirm="Generate an AI plan for {{ ai.account }}?&#10;&#10;This runs a live AI call (approximately $5) and may take 1–3 minutes.">
+          data-confirm="Generate an AI plan for {{ ai.account }}?&#10;&#10;This runs a live AI call (approximately $5) and may take several minutes (often 8–15).">
       <input type="hidden" name="account" value="{{ ai.account }}">
       <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;margin-bottom:10px">{{ controls }}</div>
       <button type="submit" class="btn btn-primary">Generate AI plan</button>
@@ -167,7 +167,7 @@
       <a href="{{ url_for('watchlist_ai_report', account=ai.account) }}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">View report ↗</a>
       <a href="{{ url_for('watchlist_ai_report_pdf', account=ai.account) }}" class="btn btn-sm" title="Download a PDF of the deep-dive report">Export PDF</a>
       <form method="POST" action="{{ url_for('watchlist_ai_generate') }}" class="ai-gen-form" style="display:flex;gap:.4rem;align-items:center"
-            data-confirm="Regenerate the AI plan for {{ ai.account }}?&#10;&#10;This runs another live AI call (approximately $5) and may take 1–3 minutes.">
+            data-confirm="Regenerate the AI plan for {{ ai.account }}?&#10;&#10;This runs another live AI call (approximately $5) and may take several minutes (often 8–15).">
         <input type="hidden" name="account" value="{{ ai.account }}">
         {{ controls }}
         <button type="submit" class="btn btn-sm" title="Approximately $5 per run">Regenerate</button>
@@ -482,7 +482,7 @@ function toggleEdit(id) {
 }
 
 // ── AI plan generation: progress overlay during the slow, synchronous POST ──
-// The page navigates on submit and the response only returns after 1–3 min, so
+// The page navigates on submit and the response only returns after ~10–14 min, so
 // we show an estimated bar that eases toward (but never reaches) 100% — it
 // disappears on its own when the result page finishes loading.
 (function () {
@@ -499,8 +499,10 @@ function toggleEdit(id) {
     const t0 = Date.now();
     setInterval(function () {
       const elapsed = (Date.now() - t0) / 1000;
-      // asymptotic estimate (~75s time-constant): never hits 100% on its own
-      const pct = Math.min(96, 100 * (1 - Math.exp(-elapsed / 75)));
+      // asymptotic estimate (~240s time-constant, tuned to the ~10–14 min runtime
+      // of a streamed, web-grounded plan): ~86% at 8 min, ~95% at 12 min; never
+      // hits 100% on its own — the overlay clears when the result page loads.
+      const pct = Math.min(96, 100 * (1 - Math.exp(-elapsed / 240)));
       bar.style.width = pct.toFixed(1) + '%';
       pctEl.textContent = Math.round(pct) + '%';
       elapsedEl.textContent = 'Elapsed ' + fmt(Math.floor(elapsed));
