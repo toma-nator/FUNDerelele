@@ -361,10 +361,17 @@
       </div>
     </div>
     <div class="filter-group">
-      <label>Sector</label>
-      <select id="filter-sector" class="filter-select">
+      <label>Type</label>
+      <select id="filter-type" class="filter-select">
         <option value="">All</option>
-        {% for s in data.sectors %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+        {% for t in data.types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Region</label>
+      <select id="filter-region" class="filter-select">
+        <option value="">All</option>
+        {% for rg in data.regions %}<option value="{{ rg }}">{{ rg }}</option>{% endfor %}
       </select>
     </div>
     <div class="filter-group">
@@ -395,8 +402,11 @@
           <th class="r" data-sort data-type="num">Beta <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">Yield <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">Mkt Cap <span class="sort-arrow"></span></th>
+          <th class="r" data-sort data-type="num">MER <span class="sort-arrow"></span></th>
           <th data-sort data-type="text">Type <span class="sort-arrow"></span></th>
           <th data-sort data-type="text">Sector <span class="sort-arrow"></span></th>
+          <th data-sort data-type="text">Region <span class="sort-arrow"></span></th>
+          <th data-sort data-type="text">Risk <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">Target <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">% → Target <span class="sort-arrow"></span></th>
           <th class="r" data-sort data-type="num">Since Added <span class="sort-arrow"></span></th>
@@ -407,6 +417,7 @@
       <tbody>
         {% for it in data.rows %}
         <tr data-owned="{{ 'owned' if it.owned else 'not' }}" data-sector="{{ it.sector }}" data-ccy="{{ it.currency }}"
+            data-type="{{ it.asset_type }}" data-region="{{ it.region }}"
             data-search="{{ (it.ticker ~ ' ' ~ it.company) | lower }}"
             {% if it.target_hit %}class="wl-hit wl-hit-{{ 'buy' if it.target_type == 'below' else 'sell' }}"{% endif %}>
           <td class="text-dim mono col-rownum">{{ loop.index }}</td>
@@ -425,8 +436,11 @@
           <td class="r mono" data-val="{{ it.beta if it.beta is not none else '' }}">{% if it.beta is not none %}{{ '%.2f' % it.beta }}{% else %}<span class="text-dim">—</span>{% endif %}</td>
           <td class="r mono" data-val="{{ it.yield_pct if it.yield_pct is not none else '' }}">{% if it.yield_pct is not none %}{{ '%.2f' % it.yield_pct }}%{% else %}<span class="text-dim">—</span>{% endif %}</td>
           <td class="r mono text-dim" data-val="{{ it.market_cap_raw }}">{{ it.market_cap or '—' }}</td>
+          <td class="r mono text-dim" data-val="{{ it.mer if it.mer is not none else '' }}">{% if it.mer is not none %}{{ '%.2f' % it.mer }}%{% else %}—{% endif %}</td>
           <td class="text-dim" style="font-size:.78rem" data-val="{{ it.asset_type }}">{{ it.asset_type or '—' }}</td>
           <td class="text-dim" style="font-size:.78rem" data-val="{{ it.sector }}">{{ it.sector or '—' }}</td>
+          <td class="text-dim" style="font-size:.78rem" data-val="{{ it.region }}">{{ it.region or '—' }}</td>
+          <td class="text-dim" style="font-size:.78rem" data-val="{{ it.risk }}">{{ it.risk or '—' }}</td>
           <td class="r mono {% if it.target_hit %}text-green{% else %}text-dim{% endif %}" data-val="{{ it.target_price if it.target_price is not none else '' }}">
             {% if it.target_price is not none %}
               <span title="{{ 'Buy at or below' if it.target_type == 'below' else 'Sell at or above' }}">{{ '≤' if it.target_type == 'below' else '≥' }}${{ '%.2f' % it.target_price }}</span>
@@ -445,7 +459,7 @@
         </tr>
         <tr class="wl-edit-row" id="edit-{{ it.id }}" style="display:none">
           <td></td>
-          <td colspan="15">
+          <td colspan="18">
             <form method="POST" action="{{ url_for('watchlist_edit', id=it.id) }}" style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;padding:6px 0">
               <span class="text-dim" style="font-size:.78rem">Target</span>
               <select class="form-input" name="target_type" style="width:auto">
@@ -611,18 +625,20 @@ function reviewTicker(t) {
   });
 
   let ownedFilter = 'all';
-  const sectorSel = document.getElementById('filter-sector');
+  const typeSel = document.getElementById('filter-type');
+  const regionSel = document.getElementById('filter-region');
   const ccySel = document.getElementById('filter-ccy');
   const searchInp = document.getElementById('filter-search');
   const countEl = document.getElementById('wl-count');
   const noMatch = document.getElementById('wl-no-match');
 
   function applyFilters() {
-    const sec = sectorSel.value, ccy = ccySel.value, q = searchInp.value.trim().toLowerCase();
+    const ty = typeSel.value, rg = regionSel.value, ccy = ccySel.value, q = searchInp.value.trim().toLowerCase();
     let visible = 0;
     rows.forEach(r => {
       const ok = (ownedFilter === 'all' || r.dataset.owned === ownedFilter)
-              && (!sec || r.dataset.sector === sec)
+              && (!ty || r.dataset.type === ty)
+              && (!rg || r.dataset.region === rg)
               && (!ccy || r.dataset.ccy === ccy)
               && (!q || (r.dataset.search || '').indexOf(q) !== -1);
       r.style.display = ok ? '' : 'none';
@@ -646,7 +662,8 @@ function reviewTicker(t) {
       applyFilters();
     });
   });
-  sectorSel.addEventListener('change', applyFilters);
+  typeSel.addEventListener('change', applyFilters);
+  regionSel.addEventListener('change', applyFilters);
   ccySel.addEventListener('change', applyFilters);
   searchInp.addEventListener('input', applyFilters);
   applyFilters();

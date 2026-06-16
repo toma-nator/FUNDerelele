@@ -2104,6 +2104,9 @@ def get_watchlist_data():
             'currency': it.currency,
             'sector': m.get('sector') or it.sector or '',
             'asset_type': m.get('asset_type') or '',
+            'region': _region_of(it.ticker, m),
+            'risk': _blend_bucket(it.ticker, m),
+            'mer': round(m['expense_ratio'], 3) if m.get('expense_ratio') is not None else None,
             'market_cap': _fmt_mktcap(m.get('market_cap')),
             'market_cap_raw': m.get('market_cap') or 0,
             'beta': round(m['beta'], 2) if m.get('beta') is not None else None,
@@ -2118,7 +2121,10 @@ def get_watchlist_data():
 
     sectors = sorted({r['sector'] for r in rows if r['sector']})
     currencies = sorted({r['currency'] for r in rows if r['currency']})
-    return {'rows': rows, 'sectors': sectors, 'currencies': currencies}
+    regions = sorted({r['region'] for r in rows if r['region'] and r['region'] != 'Unclassified'})
+    types = sorted({r['asset_type'] for r in rows if r['asset_type']})
+    return {'rows': rows, 'sectors': sectors, 'currencies': currencies,
+            'regions': regions, 'types': types}
 
 
 def get_rebalancer_gaps_all():

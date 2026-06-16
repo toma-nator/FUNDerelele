@@ -1384,6 +1384,9 @@ option { background: var(--bg-card); color: var(--text); }
   cursor: pointer;
 }
 .filter-select:focus { outline: none; border-color: var(--accent); }
+/* Uniform filter-control width in the holdings/watchlist toolbar so the selects
+   and the search box line up (search keeps its own class for the placeholder). */
+.holdings-toolbar .filter-select { min-width: 150px; }
 .filter-search { min-width: 170px; }
 .filter-search::placeholder { color: var(--text-muted); }
 
