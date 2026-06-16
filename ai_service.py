@@ -385,9 +385,10 @@ def _claude_plan(payload, model=None):
         for _ in range(6):  # web-search server loop may return pause_turn; resend to continue
             # Stream (required at this max_tokens to avoid HTTP timeouts). The budget
             # is shared by adaptive thinking AND the full structured plan, so it must be
-            # generous or the JSON gets truncated mid-object → "not valid JSON".
+            # generous or the JSON truncates mid-object. ETF-heavy fit in 32k, but Mixed
+            # / stock-heavy plans (more individual names → bigger JSON) need more room.
             with client.messages.stream(
-                model=model, max_tokens=32000,
+                model=model, max_tokens=64000,
                 system=system,
                 thinking={'type': 'adaptive'},
                 tools=[{'type': 'web_search_20260209', 'name': 'web_search'}],
