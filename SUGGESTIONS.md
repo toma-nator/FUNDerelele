@@ -22,12 +22,12 @@ Every suggestion below ends with a **Priority** tag — `Impact · Effort`.
 high-effort = plan & schedule; Low-impact + low-effort = rainy-day fill-ins;
 Low-impact + high-effort = skip / much later.
 
-## Backlog at a glance (≈120 ideas)
+## Backlog at a glance (≈121 ideas)
 
 | Category | Count | Notes |
 |---|---|---|
 | Charts | ~45 | ~27 finance-useful (incl. correlation/diversification heatmap) + ~15 fun/easter-egg (composition-over-time, RDSP widget, top movers) |
-| Per-tab feature enhancements | ~36 | Performance (MWR-vs-TWR, what-if replay), Dividends (payout-safety), Rebalancer, Watchlist (AI report breakdowns), Cash Flows, Projections, Tax (asset-location, ✨ tax-loss harvester), Import, GICs, Holdings (manual NAV), FX, RDSP (incl. ⭐ nest-egg floor) |
+| Per-tab feature enhancements | ~37 | Performance (MWR-vs-TWR, what-if replay), Dividends (payout-safety), Rebalancer, Watchlist (AI report breakdowns, AI plan archive), Cash Flows, Projections, Tax (asset-location, ✨ tax-loss harvester), Import, GICs, Holdings (manual NAV), FX, RDSP (incl. ⭐ nest-egg floor) |
 | AI / smart features | 1 | Portfolio commentary + "Ask your portfolio" (LLM grounded on your data) |
 | New tabs (big features) | 11 | Time Horizon, Optimizer, RDSP planner, Net Worth, Calendar, Year-End Tax, Needs-Attention, Wrapped, The Melt, Retirement (RRSP), Market research |
 | Fun & delight (non-chart) | 8 | Theme picker, milestones, flavour line, command palette, ticker-tape, scoop-of-day, empty states, achievements |
@@ -62,6 +62,15 @@ three lenses (asset class, blended risk, sector). Add more of the account's
 currency** — and optionally surface the saved **target** alongside Before/After so the
 reader sees how far each lens started from target, not just where it landed. Reuse the
 rebalancer bucket weights already computed for these dimensions. **Priority:** Low · small.
+
+## AI plan archive — keep & compare past plans
+
+Parked 2026-06-16. Keep the last few AI plan **records** per account (plan JSON +
+cached report data), not just the latest, so an earlier plan can be re-viewed and
+re-exported to PDF and compared side-by-side (e.g. ETF-heavy vs Mixed) without the
+DB-backup / manual-PDF dance. A "Past plans" list with view/export links per entry;
+cap to ~3–5 per account so storage stays small. Reuses the existing report renderer.
+**Priority:** Med · medium.
 
 ## View / sort / filter by bank (institution) — everywhere
 

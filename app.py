@@ -981,6 +981,35 @@ def watchlist():
                            ai=ai, last_updated=last_updated, active='watchlist')
 
 
+def _ai_log_path():
+    import os
+    return os.path.join(app.instance_path, 'ai_gen.log')
+
+
+def _log_ai_generation(account, style, provider, outcome):
+    """Append one line to the AI-generation log (best-effort; never raises)."""
+    import os
+    from datetime import datetime
+    try:
+        os.makedirs(app.instance_path, exist_ok=True)
+        line = (f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | {provider} | {style} | "
+                f"{account} | {outcome}\n")
+        with open(_ai_log_path(), 'a', encoding='utf-8') as f:
+            f.write(line)
+    except Exception:
+        pass
+
+
+def _read_ai_generation_log(n=25):
+    """Most-recent-first list of the last n AI-generation log lines (best-effort)."""
+    try:
+        with open(_ai_log_path(), encoding='utf-8') as f:
+            lines = [ln.rstrip('\n') for ln in f if ln.strip()]
+        return lines[-n:][::-1]
+    except Exception:
+        return []
+
+
 @app.route('/watchlist/ai/generate', methods=['POST'])
 def watchlist_ai_generate():
     """The single billable AI call — only reachable from an explicit, confirmed button."""
@@ -991,12 +1020,16 @@ def watchlist_ai_generate():
     if not account:
         flash('Pick an account first.', 'error')
         return redirect(url_for('watchlist'))
+    slabel = style or 'mixed'
     try:
-        ai_service.run_and_cache(account, provider, style)
+        plan = ai_service.run_and_cache(account, provider, style)
+        _log_ai_generation(account, slabel, provider, f"OK — {len(plan.get('trades', []))} trades")
         flash(f'AI plan generated for {account}.', 'success')
     except ai_service.AIConfigError as e:
+        _log_ai_generation(account, slabel, provider, f'CONFIG ERROR — {e}')
         flash(str(e), 'error')
     except Exception as e:
+        _log_ai_generation(account, slabel, provider, f'FAILED — {type(e).__name__}: {e}')
         flash(f'AI generation failed: {e}', 'error')
     return redirect(url_for('watchlist', ai_account=account))
 
@@ -1502,6 +1535,7 @@ def settings():
                            ai_preferences=gs('ai_preferences', ''),
                            ai_claude_key_set=bool(gs('anthropic_api_key', '')),
                            ai_chatgpt_key_set=bool(gs('openai_api_key', '')),
+                           ai_gen_log=_read_ai_generation_log(),
                            active='settings')
 
 

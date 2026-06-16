@@ -169,6 +169,10 @@ account currently holds, and their proceeds fund the buys. Do not sell a holding
 substitute for trimming an overweight (e.g. an over-target mega-cap or sector). Protecting specific names \
 per `preferences` does not waive this: still trim the OTHER over-target positions so that every targeted \
 dimension is brought toward target, not just the ones cash alone can fix.
+- Sell when it materially improves the rebalance, not for its own sake — prefer the fewest trades that get \
+each dimension to target. You may trim an over-target holding, including a preference-protected name up to \
+its stated limit (e.g. VTI up to 15%), when that is what brings a dimension to target; an unprotected \
+overweight (e.g. a redundant mega-cap fund) should be trimmed without hesitation.
 
 PREFERENCES
 - If `preferences` is present, treat it as the investor's standing instructions (e.g. names to keep, an \
@@ -200,6 +204,16 @@ exchange. NEVER include the investor's balances, dollar amounts, account identif
 in a search query.
 
 {_STYLE_GUIDANCE.get(style, _STYLE_GUIDANCE['mixed'])}
+
+SELF-CHECK — before returning the plan, verify each of these and fix anything that fails:
+- Net cash used (total Buys − total Sells) does not exceed cash_to_deploy, and leftover_cash matches any \
+cash buffer the investor asked for.
+- No individual stock exceeds its cap; no Very-High single name exceeds its cap.
+- EVERY targeted dimension was actually moved toward target — not only the ones cash alone can fix; trim \
+over-target buckets where needed.
+- No holding was sold that isn't over target.
+- The resulting BLENDED-RISK mix lands on its target (the investor's top priority); if not, adjust the \
+trades until it does.
 
 OUTPUT
 - Return only the structured object. Set is_fund=true for ETFs/mutual funds. shares_est may be null. \
@@ -388,40 +402,51 @@ def _claude_plan(payload, model=None):
                    .replace('{tax_note}', payload['account']['tax_note'])
     user = ("Here is the account's rebalancing context as JSON. Produce the plan.\n\n"
             + json.dumps(payload, indent=2))
-    messages = [{'role': 'user', 'content': user}]
-
-    try:
-        resp = None
-        for _ in range(6):  # web-search server loop may return pause_turn; resend to continue
-            # Stream (required at this max_tokens to avoid HTTP timeouts). The budget
-            # is shared by adaptive thinking AND the full structured plan, so it must be
-            # generous or the JSON truncates mid-object. ETF-heavy fit in 32k, but Mixed
-            # / stock-heavy plans (more individual names → bigger JSON) need more room.
-            with client.messages.stream(
-                model=model, max_tokens=64000,
-                system=system,
-                thinking={'type': 'adaptive'},
-                tools=[{'type': 'web_search_20260209', 'name': 'web_search'}],
-                output_config={'format': {'type': 'json_schema', 'schema': PLAN_SCHEMA}},
-                messages=messages,
-            ) as stream:
-                resp = stream.get_final_message()
-            if resp.stop_reason == 'refusal':
-                raise AIError('Claude declined this request.')
-            if resp.stop_reason == 'pause_turn':
-                messages = [{'role': 'user', 'content': user},
-                            {'role': 'assistant', 'content': resp.content}]
-                continue
-            break
-        if resp is not None and resp.stop_reason == 'max_tokens':
-            raise AIError('The AI response was cut off before finishing (hit the output '
-                          'limit). Try regenerating, or simplify the targets.')
-        text = next((b.text for b in resp.content if b.type == 'text'), None)
-        return _finish(_extract_json(text), 'Claude', model)
-    except anthropic.AuthenticationError:
-        raise AIConfigError('Claude API key is invalid or revoked.')
-    except anthropic.APIError as e:
-        raise AIError(f'Claude API error: {getattr(e, "message", None) or e}')
+    # Up to two attempts: a transient server-side error (5xx / overloaded / dropped
+    # connection) on a multi-minute run is retried once rather than wasting the run.
+    for attempt in range(2):
+        messages = [{'role': 'user', 'content': user}]
+        try:
+            resp = None
+            for _ in range(8):  # web-search server loop may return pause_turn; resend to continue
+                # Stream (required at this max_tokens to avoid HTTP timeouts). The budget
+                # is shared by adaptive thinking AND the full structured plan, so it must be
+                # generous or the JSON truncates mid-object. ETF-heavy fit in 32k, but Mixed
+                # / stock-heavy plans (more individual names → bigger JSON) need more room.
+                with client.messages.stream(
+                    model=model, max_tokens=64000,
+                    system=system,
+                    thinking={'type': 'adaptive'},
+                    tools=[{'type': 'web_search_20260209', 'name': 'web_search'}],
+                    output_config={'format': {'type': 'json_schema', 'schema': PLAN_SCHEMA}},
+                    messages=messages,
+                ) as stream:
+                    resp = stream.get_final_message()
+                if resp.stop_reason == 'refusal':
+                    raise AIError('Claude declined this request.')
+                if resp.stop_reason == 'pause_turn':
+                    messages = [{'role': 'user', 'content': user},
+                                {'role': 'assistant', 'content': resp.content}]
+                    continue
+                break
+            if resp is not None and resp.stop_reason == 'pause_turn':
+                raise AIError('Claude was still researching after several rounds. Try '
+                              'regenerating, or simplify the targets.')
+            if resp is not None and resp.stop_reason == 'max_tokens':
+                raise AIError('The AI response was cut off before finishing (hit the output '
+                              'limit). Try regenerating, or simplify the targets.')
+            text = next((b.text for b in resp.content if b.type == 'text'), None)
+            return _finish(_extract_json(text), 'Claude', model)
+        except anthropic.AuthenticationError:
+            raise AIConfigError('Claude API key is invalid or revoked.')
+        except (anthropic.InternalServerError, anthropic.APIConnectionError) as e:
+            if attempt == 0:
+                continue   # one retry on a transient server/connection error
+            raise AIError(f'Claude API error after retry: {getattr(e, "message", None) or e}')
+        except anthropic.APIError as e:
+            if getattr(e, 'status_code', None) == 529 and attempt == 0:
+                continue   # overloaded — retry once
+            raise AIError(f'Claude API error: {getattr(e, "message", None) or e}')
 
 
 # ── ChatGPT backend (OpenAI Responses API) ───────────────────────────────────────

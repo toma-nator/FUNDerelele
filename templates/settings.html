@@ -230,6 +230,22 @@
 </div>
 </form>
 
+<!-- AI Rebalancer — generation log (collapsible) -->
+<div class="card" style="margin-bottom:20px">
+  <div class="settings-section">
+    <details>
+      <summary style="cursor:pointer;font-weight:600;font-size:.92rem">AI Rebalancer log <span class="text-dim" style="font-weight:400;font-size:.76rem">— last {{ ai_gen_log|length }} run(s)</span></summary>
+      {% if ai_gen_log %}
+      <div style="margin-top:10px;max-height:260px;overflow:auto">
+        {% for line in ai_gen_log %}<div class="mono" style="font-size:.74rem;line-height:1.7;color:{% if 'FAILED' in line or 'ERROR' in line %}var(--red){% else %}var(--text-dim){% endif %}">{{ line }}</div>{% endfor %}
+      </div>
+      {% else %}
+      <p class="text-dim" style="font-size:.8rem;margin-top:8px">No generations logged yet.</p>
+      {% endif %}
+    </details>
+  </div>
+</div>
+
 <!-- Data & Backup lives outside the settings form (restore is its own upload form) -->
 <div class="card" style="margin-bottom:20px">
   <div class="settings-section">
