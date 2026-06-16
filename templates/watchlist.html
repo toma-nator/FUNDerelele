@@ -104,7 +104,7 @@
 </div>
 <div class="card">
   <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
-    <span>AI Rebalance Plan <span class="card-sub">web-grounded buy plan for one account</span></span>
+    <span>{{ ai.record.provider if ai.record else 'AI' }} Rebalance Plan <span class="card-sub">web-grounded buy plan for one account</span></span>
     <select class="filter-select" style="width:auto"
             onchange="if(this.value) location.href='{{ url_for('watchlist') }}?ai_account='+encodeURIComponent(this.value)">
       {% for a in ai.accounts %}<option value="{{ a }}" {% if a == ai.account %}selected{% endif %}>{{ a }}</option>{% endfor %}
