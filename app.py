@@ -1272,6 +1272,34 @@ def watchlist_add():
     return redirect(dest)
 
 
+def _apply_region_override(ticker, region):
+    """Set a single-region manual override for a ticker (clears on '' / 'auto')."""
+    import json
+    from models import db, Setting
+    from calculations import _ALL_REGIONS
+    ticker = (ticker or '').strip().upper()
+    if not ticker:
+        return
+    s = Setting.query.get('region_overrides')
+    data = {}
+    if s and s.value:
+        try:
+            data = json.loads(s.value)
+        except Exception:
+            data = {}
+    if region in _ALL_REGIONS:
+        data[ticker] = region
+    elif region in ('', 'auto', 'Auto'):
+        data.pop(ticker, None)
+    else:
+        return
+    val = json.dumps(data)
+    if s:
+        s.value = val
+    else:
+        db.session.add(Setting(key='region_overrides', value=val))
+
+
 @app.route('/watchlist/edit/<int:id>', methods=['POST'])
 def watchlist_edit(id):
     item = WatchlistItem.query.get_or_404(id)
@@ -1280,6 +1308,9 @@ def watchlist_edit(id):
         item.target_price = float(target_raw) if target_raw else None
         item.target_type = request.form.get('target_type', item.target_type or 'below')
         item.notes = request.form.get('notes', '').strip()
+        region = request.form.get('region', '').strip()
+        if region:                       # only when the classify dropdown was used
+            _apply_region_override(item.ticker, region)
         db.session.commit()
         flash(f'Updated {item.ticker}.', 'success')
     except Exception as e:
