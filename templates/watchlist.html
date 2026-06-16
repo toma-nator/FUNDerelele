@@ -236,7 +236,7 @@
       <div style="margin-bottom:10px;font-size:.8rem;line-height:1.5">
         <span class="mono" style="color:var(--accent)">{{ t.ticker }}</span> <span>— {{ t.rationale }}</span>
         {% if t.gaps_addressed %}<div class="text-dim" style="padding-left:1rem">closes: {{ t.gaps_addressed | join(', ') }}</div>{% endif %}
-        {% for a in t.alternates %}<div class="text-dim" style="padding-left:1rem">alt: <span class="mono" style="color:var(--accent)">{{ a.ticker }}</span> ({{ a.profile }}){% if a.drift_note %} — {{ a.drift_note }}{% endif %}<form method="POST" action="{{ url_for('watchlist_add') }}" style="display:inline;margin-left:.4rem"><input type="hidden" name="ticker" value="{{ a.ticker }}"><input type="hidden" name="currency" value="{{ 'CAD' if (a.ticker.endswith('.TO') or a.ticker.endswith('.NE') or a.ticker.endswith('.V')) else 'USD' }}"><input type="hidden" name="ai_account" value="{{ ai.account }}"><button type="submit" class="btn btn-sm" title="Add {{ a.ticker }} to watchlist" style="padding:0 6px;font-size:.7rem;line-height:1.5">+ watch</button></form></div>{% endfor %}
+        {% for a in t.alternates %}<div class="text-dim" style="padding-left:1rem">alt: <span class="mono" style="color:var(--accent)">{{ a.ticker }}</span> ({{ a.profile }}){% if a.drift_note %} — {{ a.drift_note }}{% endif %}<form method="POST" action="{{ url_for('watchlist_add') }}" style="display:inline;margin-left:.4rem"><input type="hidden" name="ticker" value="{{ a.ticker }}"><input type="hidden" name="currency" value="{{ 'CAD' if (a.ticker.endswith('.TO') or a.ticker.endswith('.NE') or a.ticker.endswith('.V')) else 'USD' }}"><input type="hidden" name="ai_account" value="{{ ai.account }}"><input type="hidden" name="notes" value="{{ ai.record.provider }} AI Plan Alternative"><button type="submit" class="btn btn-sm" title="Add {{ a.ticker }} to watchlist" style="padding:0 6px;font-size:.7rem;line-height:1.5">+ watch</button></form></div>{% endfor %}
         {% if t.sources %}<div class="text-dim" style="padding-left:1rem">sources: {% for s in t.sources %}<a href="{{ s.url }}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">{{ s.title }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
       </div>
       {% endif %}
@@ -435,7 +435,7 @@
           </td>
           <td class="r mono {{ it.pct_to_target | gl_class }}" data-val="{{ it.pct_to_target if it.pct_to_target is not none else '' }}">{% if it.pct_to_target is not none %}{{ it.pct_to_target | pct }}{% else %}—{% endif %}</td>
           <td class="r mono {{ it.pct_since_added | gl_class }}" data-val="{{ it.pct_since_added if it.pct_since_added is not none else '' }}">{% if it.pct_since_added is not none %}{{ it.pct_since_added | pct }}{% else %}—{% endif %}</td>
-          <td class="text-dim" style="font-size:.78rem;max-width:160px;white-space:normal">{{ it.notes or '' }}</td>
+          <td class="text-dim" style="font-size:.78rem;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ it.notes }}">{{ it.notes or '' }}</td>
           <td style="white-space:nowrap">
             <button type="button" class="btn-delete" title="Edit" onclick="toggleEdit({{ it.id }})" style="color:var(--accent)">✎</button>
             <form method="POST" action="{{ url_for('watchlist_delete', id=it.id) }}" style="display:inline" onsubmit="return confirm('Remove {{ it.ticker }} from watchlist?')">
